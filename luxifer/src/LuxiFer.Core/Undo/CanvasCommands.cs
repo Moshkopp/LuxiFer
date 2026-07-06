@@ -73,3 +73,14 @@ public sealed class ResizeObjectCommand(
 
     public void Undo() => obj.SetBounds(before.X, before.Y, before.W, before.H);
 }
+
+/// <summary>Dreht ein Objekt (Rotation in Grad); Vorher-/Nachher-Winkel.</summary>
+public sealed class RotateObjectCommand(
+    CanvasObject obj, double before, double after) : IUndoableCommand
+{
+    public string Label => "Drehen";
+
+    public void Do() => obj.Rotation = after;
+
+    public void Undo() => obj.Rotation = before;
+}

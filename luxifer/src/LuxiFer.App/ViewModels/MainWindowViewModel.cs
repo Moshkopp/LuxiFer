@@ -195,6 +195,11 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private double _selY;
     [ObservableProperty] private double _selWidth;
     [ObservableProperty] private double _selHeight;
+    [ObservableProperty] private double _selRotation;
+    [ObservableProperty] private double _selScalePct = 100;
+
+    /// <summary>Seitenverhältnis von Breite/Höhe sperren.</summary>
+    [ObservableProperty] private bool _lockAspect;
 
     private bool _updatingSelectionFields;
 
@@ -209,17 +214,71 @@ public partial class MainWindowViewModel : ViewModelBase
         SelY = Math.Round(y, 2);
         SelWidth = Math.Round(w, 2);
         SelHeight = Math.Round(h, 2);
+        SelRotation = Math.Round(SelectedObject.Rotation, 1);
+        SelScalePct = 100;
         _updatingSelectionFields = false;
     }
 
-    // Bounds vor Beginn einer Panel-Bearbeitung, für ein einziges Undo-Command
+    // Bounds/Rotation vor Beginn einer Panel-Bearbeitung, für je ein Undo-Command
     // über die gesamte Feld-Editiersequenz (bis CommitSelectionEdit).
     private (double X, double Y, double W, double H)? _editStartBounds;
+    private double? _editStartRotation;
 
     partial void OnSelXChanged(double value) => ApplySelectionBounds();
     partial void OnSelYChanged(double value) => ApplySelectionBounds();
-    partial void OnSelWidthChanged(double value) => ApplySelectionBounds();
-    partial void OnSelHeightChanged(double value) => ApplySelectionBounds();
+
+    partial void OnSelWidthChanged(double value)
+    {
+        if (_updatingSelectionFields || !LockAspect) { ApplySelectionBounds(); return; }
+        // Seitenverhältnis halten: Höhe proportional zur alten Breite nachziehen.
+        var start = _editStartBounds ?? SelectedObject?.Bounds;
+        if (start is { W: > 0 } s)
+        {
+            _updatingSelectionFields = true;
+            SelHeight = Math.Round(Math.Max(0.1, value) * s.H / s.W, 2);
+            _updatingSelectionFields = false;
+        }
+        ApplySelectionBounds();
+    }
+
+    partial void OnSelHeightChanged(double value)
+    {
+        if (_updatingSelectionFields || !LockAspect) { ApplySelectionBounds(); return; }
+        var start = _editStartBounds ?? SelectedObject?.Bounds;
+        if (start is { H: > 0 } s)
+        {
+            _updatingSelectionFields = true;
+            SelWidth = Math.Round(Math.Max(0.1, value) * s.W / s.H, 2);
+            _updatingSelectionFields = false;
+        }
+        ApplySelectionBounds();
+    }
+
+    partial void OnSelRotationChanged(double value)
+    {
+        if (_updatingSelectionFields || SelectedObject is null) return;
+        _editStartRotation ??= SelectedObject.Rotation;
+        SelectedObject.Rotation = value;
+        Project.ModifiedAt = DateTimeOffset.UtcNow;
+        CanvasInvalidateRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    partial void OnSelScalePctChanged(double value)
+    {
+        if (_updatingSelectionFields || SelectedObject is null || value <= 0) return;
+        // Skaliert relativ zu den Bounds bei Editierbeginn, um den Mittelpunkt.
+        _editStartBounds ??= SelectedObject.Bounds;
+        var s = _editStartBounds.Value;
+        var f = value / 100.0;
+        var nw = Math.Max(0.1, s.W * f);
+        var nh = Math.Max(0.1, s.H * f);
+        var nx = s.X + (s.W - nw) / 2;
+        var ny = s.Y + (s.H - nh) / 2;
+        SelectedObject.SetBounds(nx, ny, nw, nh);
+        RefreshBoundsFields();
+        Project.ModifiedAt = DateTimeOffset.UtcNow;
+        CanvasInvalidateRequested?.Invoke(this, EventArgs.Empty);
+    }
 
     private void ApplySelectionBounds()
     {
@@ -230,20 +289,45 @@ public partial class MainWindowViewModel : ViewModelBase
         CanvasInvalidateRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    // Aktualisiert nur die X/Y/B/H-Felder aus dem Objekt (z. B. nach Skalierung).
+    private void RefreshBoundsFields()
+    {
+        if (SelectedObject is null) return;
+        _updatingSelectionFields = true;
+        var (x, y, w, h) = SelectedObject.Bounds;
+        SelX = Math.Round(x, 2);
+        SelY = Math.Round(y, 2);
+        SelWidth = Math.Round(w, 2);
+        SelHeight = Math.Round(h, 2);
+        _updatingSelectionFields = false;
+    }
+
     /// <summary>
     /// Schließt eine Feld-Bearbeitung ab (Enter/Fokusverlust) und legt die
-    /// gesamte Änderung als ein Undo-Command ab. Von der View aufgerufen.
+    /// Änderung(en) als Undo-Command(s) ab. Von der View aufgerufen.
     /// </summary>
     public void CommitSelectionEdit()
     {
-        if (_editStartBounds is not { } before || SelectedObject is null)
+        if (SelectedObject is null)
         {
             _editStartBounds = null;
+            _editStartRotation = null;
             return;
         }
-        var after = SelectedObject.Bounds;
+
+        if (_editStartBounds is { } before)
+        {
+            var after = SelectedObject.Bounds;
+            if (after != before)
+                Undo.Push(new ResizeObjectCommand(SelectedObject, before, after));
+        }
+        if (_editStartRotation is { } beforeRot && beforeRot != SelectedObject.Rotation)
+            Undo.Push(new RotateObjectCommand(SelectedObject, beforeRot, SelectedObject.Rotation));
+
         _editStartBounds = null;
-        if (after != before)
-            Undo.Push(new ResizeObjectCommand(SelectedObject, before, after));
+        _editStartRotation = null;
+        _updatingSelectionFields = true;
+        SelScalePct = 100;
+        _updatingSelectionFields = false;
     }
 }

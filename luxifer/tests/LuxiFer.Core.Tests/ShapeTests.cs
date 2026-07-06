@@ -79,4 +79,27 @@ public class ShapeTests
         Assert.True(LayerMode.Fill.IsFilled());
         Assert.True(LayerMode.Raster.IsFilled());
     }
+
+    [Fact]
+    public void RotatePoint_dreht_um_90_Grad_um_das_Zentrum()
+    {
+        // Punkt (10,0) um Zentrum (0,0) um 90° -> (0,10)
+        var (x, y) = Geometry.RotatePoint(10, 0, 0, 0, 90);
+        Assert.Equal(0, x, 6);
+        Assert.Equal(10, y, 6);
+    }
+
+    [Fact]
+    public void HitTest_beruecksichtigt_Rotation()
+    {
+        // Längliches Rechteck: 100 breit, 20 hoch, Zentrum bei (50,10).
+        var rect = new RectangleObject { X = 0, Y = 0, Width = 100, Height = 20 };
+        // Punkt oberhalb der Mitte, ungedreht außerhalb (y=45 > 20).
+        Assert.False(rect.HitTest(50, 45));
+        // Nach 90°-Drehung ragt das Rechteck vertikal (Halbhöhe 50) -> Treffer.
+        rect.Rotation = 90;
+        Assert.True(rect.HitTest(50, 45));
+        // Punkt, der ungedreht getroffen hätte, liegt nun außerhalb.
+        Assert.False(rect.HitTest(95, 10));
+    }
 }

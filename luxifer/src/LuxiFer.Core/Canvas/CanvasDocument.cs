@@ -107,6 +107,14 @@ public abstract class CanvasObject
     public virtual bool HitTest(double x, double y, double tolerance = 0)
     {
         var (bx, by, bw, bh) = Bounds;
+        // Bei gedrehtem Objekt den Testpunkt in den ungedrehten Objektraum
+        // zurückrotieren (um den Mittelpunkt) und gegen die Box prüfen.
+        if (Rotation != 0)
+        {
+            var cx = bx + bw / 2;
+            var cy = by + bh / 2;
+            (x, y) = Geometry.RotatePoint(x, y, cx, cy, -Rotation);
+        }
         return x >= bx - tolerance && x <= bx + bw + tolerance
             && y >= by - tolerance && y <= by + bh + tolerance;
     }

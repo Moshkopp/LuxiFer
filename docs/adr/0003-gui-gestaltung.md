@@ -74,11 +74,21 @@ im Panel bearbeitet, sondern per **Doppelklick** auf einen Layer im
 ### 3. Werkzeuge und Paletten
 
 - Zeichenwerkzeuge als kompakte Icon-Palette (Select, Rechteck, Ellipse, Linie,
-  Polyline, Polygon, später Text/Bild).
+  Polyline, Polygon, später Text/Bild).  ✓ umgesetzt
 - Häufige Aktionen als gruppierte Paletten statt eines überladenen Balkens:
   - **Transform-Palette**: X / Y / Breite / Höhe / Skalierung % / Rotation,
-    mit Seitenverhältnis-Sperre.
-  - **Anordnen-Palette**: Ausrichten und Verteilen der Auswahl.
+    mit Seitenverhältnis-Sperre.  ✓ umgesetzt
+  - **Anordnen-Palette**: Ausrichten und Verteilen der Auswahl.  (offen)
+
+Zur Transform-Palette: Rotation ist echt umgesetzt (Rendering per Transform,
+Hit-Test im gedrehten Objektraum über `Geometry.RotatePoint` im Core,
+mitrotierender Auswahlrahmen). Bei gedrehten Objekten entfallen die
+Größen-Handles; die Größe wird dann über die Palette geändert. Undo erfasst
+Skalierung (`ResizeObjectCommand`) und Drehung (`RotateObjectCommand`) getrennt.
+
+Die **Anordnen-Palette** setzt Mehrfachauswahl voraus (Ausrichten/Verteilen
+mehrerer Objekte), die es derzeit noch nicht gibt. Sie wird nach Einführung der
+Mehrfachauswahl umgesetzt (eigener Schritt, ggf. eigenes ADR).
 
 ### 4. Layer-Panel als Tabelle  ✓ umgesetzt
 

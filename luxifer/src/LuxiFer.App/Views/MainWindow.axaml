@@ -167,11 +167,11 @@
                     HorizontalAlignment="Right" VerticalAlignment="Stretch"
                     IsVisible="{Binding IsDesignMode}">
                 <DockPanel>
-                    <!-- Auswahl-Eigenschaften unten angedockt -->
+                    <!-- Transform-Palette unten angedockt -->
                     <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="10">
                         <Rectangle Height="1" Fill="{StaticResource BorderSubtleBrush}"/>
-                        <TextBlock Text="AUSWAHL" Classes="h"/>
-                        <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto,Auto,Auto"
+                        <TextBlock Text="TRANSFORM" Classes="h"/>
+                        <Grid ColumnDefinitions="72,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                               IsEnabled="{Binding HasSelection}">
                             <Grid.Styles>
                                 <Style Selector="TextBox">
@@ -190,6 +190,15 @@
                             <TextBlock Classes="label" Grid.Row="3" Grid.Column="0" Text="Höhe mm"/>
                             <TextBox Grid.Row="3" Grid.Column="1" LostFocus="OnSelectionEditCommit"
                                      Text="{Binding SelHeight, UpdateSourceTrigger=LostFocus}"/>
+                            <CheckBox Grid.Row="4" Grid.Column="1" Margin="0,2"
+                                      Content="Seitenverhältnis sperren"
+                                      IsChecked="{Binding LockAspect}"/>
+                            <TextBlock Classes="label" Grid.Row="5" Grid.Column="0" Text="Skalierung %"/>
+                            <TextBox Grid.Row="5" Grid.Column="1" LostFocus="OnSelectionEditCommit"
+                                     Text="{Binding SelScalePct, UpdateSourceTrigger=LostFocus}"/>
+                            <TextBlock Classes="label" Grid.Row="6" Grid.Column="0" Text="Drehung °"/>
+                            <TextBox Grid.Row="6" Grid.Column="1" LostFocus="OnSelectionEditCommit"
+                                     Text="{Binding SelRotation, UpdateSourceTrigger=LostFocus}"/>
                         </Grid>
                         <TextBlock Text="Kein Objekt ausgewählt" Classes="muted"
                                    IsVisible="{Binding ShowNoSelectionHint}"/>

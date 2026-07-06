@@ -481,6 +481,8 @@ public sealed class CanvasControl : Control
 
     private ResizeHandle? HitHandle(Point screenPos)
     {
+        // Bei rotierten Objekten sind keine Handles aktiv (siehe DrawSelection).
+        if (SelectedObject is { Rotation: not 0 }) return null;
         foreach (var (handle, center) in HandlePositions())
             if (Math.Abs(screenPos.X - center.X) <= HandleSizePx && Math.Abs(screenPos.Y - center.Y) <= HandleSizePx)
                 return handle;
@@ -550,7 +552,10 @@ public sealed class CanvasControl : Control
                 ? new SolidColorBrush(color, 0.28)
                 : null;
             foreach (var obj in layer.Objects)
-                DrawObject(context, obj, pen, fill);
+            {
+                using (PushRotation(context, obj))
+                    DrawObject(context, obj, pen, fill);
+            }
         }
 
         // Vorschau-Segment der laufenden Polyline
@@ -627,7 +632,15 @@ public sealed class CanvasControl : Control
         var (bx, by, bw, bh) = SelectedObject.Bounds;
         var tl = ToScreen(bx, by);
         var selRect = new Rect(tl, new Size(bw * _zoom, bh * _zoom));
-        context.DrawRectangle(new Pen(Brushes.DeepSkyBlue, 1, dashStyle: DashStyle.Dash), selRect.Inflate(4));
+
+        // Auswahlrahmen folgt der Rotation des Objekts.
+        using (PushRotation(context, SelectedObject))
+            context.DrawRectangle(new Pen(Brushes.DeepSkyBlue, 1, dashStyle: DashStyle.Dash), selRect.Inflate(4));
+
+        // Größen-Handles nur bei achsenparallelen Objekten anbieten; bei
+        // rotierten Objekten erfolgt die Größenänderung über die Transform-Palette
+        // (das gedrehte Handle-Ziehen wäre sonst irreführend).
+        if (SelectedObject.Rotation != 0) return;
 
         var handleBrush = Brushes.White;
         var handlePen = new Pen(Brushes.DeepSkyBlue, 1);
@@ -636,6 +649,21 @@ public sealed class CanvasControl : Control
             var r = new Rect(center.X - HandleSizePx / 2, center.Y - HandleSizePx / 2, HandleSizePx, HandleSizePx);
             context.DrawRectangle(handleBrush, handlePen, r);
         }
+    }
+
+    /// <summary>
+    /// Dreht den Zeichenkontext um den Bildschirm-Mittelpunkt des Objekts,
+    /// falls es rotiert ist. Gibt <c>null</c> zurück (kein Push) bei Rotation 0.
+    /// </summary>
+    private IDisposable? PushRotation(DrawingContext context, CanvasObject obj)
+    {
+        if (obj.Rotation == 0) return null;
+        var (bx, by, bw, bh) = obj.Bounds;
+        var c = ToScreen(bx + bw / 2, by + bh / 2);
+        var m = Matrix.CreateTranslation(-c.X, -c.Y)
+            * Matrix.CreateRotation(obj.Rotation * Math.PI / 180.0)
+            * Matrix.CreateTranslation(c.X, c.Y);
+        return context.PushTransform(m);
     }
 
     /// <summary>
