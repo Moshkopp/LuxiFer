@@ -130,6 +130,21 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusText = $"{layer.Name} hinzugefügt";
     }
 
+    /// <summary>
+    /// Weist einem Layer eine Palettenfarbe zu. Da <see cref="Layer"/> ein
+    /// reines Core-POCO ohne Change-Notification ist, wird die Zeile über einen
+    /// Replace derselben Instanz neu gebunden; die Auswahl bleibt erhalten.
+    /// </summary>
+    [RelayCommand]
+    private void SetLayerColor((Layer Layer, string Color) arg)
+    {
+        arg.Layer.ColorHex = arg.Color;
+        var index = Layers.IndexOf(arg.Layer);
+        if (index >= 0) Layers[index] = arg.Layer;
+        ActiveLayer = arg.Layer;
+        CanvasInvalidateRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     [RelayCommand]
     private void RemoveLayer(Layer? layer)
     {

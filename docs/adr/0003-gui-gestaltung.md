@@ -80,11 +80,15 @@ im Panel bearbeitet, sondern per **Doppelklick** auf einen Layer im
     mit Seitenverhältnis-Sperre.
   - **Anordnen-Palette**: Ausrichten und Verteilen der Auswahl.
 
-### 4. Layer-Panel als Tabelle
+### 4. Layer-Panel als Tabelle  ✓ umgesetzt
 
 Layer werden als kompakte Tabelle dargestellt: Farbfeld, Name, Modus,
-Geschwindigkeit/Leistung, plus Umschalter für Sichtbarkeit und Sperre.
-Eine **Farbpalette** erlaubt die schnelle Zuordnung einer Layer-Farbe.
+Geschwindigkeit, plus Umschalter für Sichtbarkeit und Sperre. Ein Klick auf das
+Farbfeld öffnet eine **Farbpalette** (`Layer.SwatchColors`) zur schnellen
+Zuordnung einer Layer-Farbe; die Zuweisung läuft über `SetLayerColorCommand` im
+ViewModel und lässt den Canvas neu zeichnen (die Fill-Vorschau nutzt die Farbe
+direkt). Leistung und die weiteren Parameter bleiben dem Doppelklick-Dialog
+vorbehalten, damit die Zeile schmal bleibt.
 
 ### 5. Fill-Vorschau  ✓ umgesetzt
 
