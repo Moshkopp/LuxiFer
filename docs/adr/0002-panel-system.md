@@ -1,7 +1,7 @@
 # ADR 0002: Panel-System (Raster-Layout, Reiter, Theming, Arbeitsplatz-Settings)
 
 ## Status
-Vorschlag — 2026-07-06
+Akzeptiert — 2026-07-06
 
 ## Kontext
 
@@ -34,15 +34,25 @@ Ein Panel belegt einen Zellbereich `{ col, row, colSpan, rowSpan }`.
   Stelle — nie mehr außerhalb.
 - **Snap:** Beim Verschieben/Größenändern rastet ein Panel auf ganze Zellen ein.
   Es gibt keine „krummen" Pixel-Positionen.
+- **Panele dürfen sich überlappen (frei schwebend).** Es gibt **keine
+  Verdrängungs- oder Kollisionslogik** — zwei Panele können denselben Zellbereich
+  belegen, die z-Reihenfolge entscheidet, was oben liegt. Kollisionen vermeidet
+  der Nutzer selbst beim Anordnen. Das hält den Umbau schlank (kein „Tetris-
+  Solver") und passt dazu, dass Panele ohnehin über dem Canvas schweben.
 - **Größe passt Inhalt an:** Panele sind responsiv; der Inhalt fließt in die
   gegebene Zellfläche (Toolbar wird bei genügend Breite **1- oder 2-spaltig**,
   Listen scrollen bei Bedarf). `colSpan` steuert also unmittelbar das
   Erscheinungsbild.
-- **Rastermaße (Spalten × Zeilen) sind ein Settings-Wert.** Standard 12 × 8,
-  aber in den Settings frei anpassbar, damit man experimentieren kann. Die
-  Spaltenzahl bestimmt die Feinheit — z. B. mehr Spalten = Toolbar kann 1 oder 2
-  davon breit sein. Ändert man das Raster, bleiben die Panel-Zuordnungen
-  relativ gültig (ggf. mit Clamping auf die neuen Grenzen).
+- **Rastermaße (Spalten × Zeilen) sind ein Settings-Wert** — vorerst zum
+  **Experimentieren** frei anpassbar (Standard 12 × 8), bis ein gutes Maß
+  gefunden ist; danach wird es **fixiert**. Die Spaltenzahl bestimmt die
+  Feinheit — z. B. mehr Spalten = Toolbar kann 1 oder 2 davon breit sein.
+- **Positionen werden als Bruchteile gespeichert, nicht als Zellindex.** Ein
+  Panel merkt sich `col/Spaltenzahl` und `row/Zeilenzahl` (bzw. den Startanteil
+  0…1), nicht die rohe Zelle. So ist ein **Rasterwechsel verlustfrei**: geht man
+  von 12 × 8 auf 6 × 4 und zurück, sitzen die Panele wieder da, wo sie waren —
+  gerade beim Experimentieren zwingend, sonst „vergisst" jedes Umstellen die
+  Anordnung. Gerundet/gesnappt wird erst zur Anzeige auf das aktuelle Raster.
 
 Panele „schweben" weiter über dem Canvas (Canvas ist die vollflächige
 Grundebene); das Raster bestimmt nur ihre Position/Größe, nicht ob sie den
@@ -79,6 +89,12 @@ Layout wechselt.
   (Sättigung/Helligkeit) ein, wie dezent oder knallig er wirkt. So trifft man
   „ruhig" bis „kräftig" ohne Farbtheorie. Das beantwortet die offene Frage „wie
   kräftig" durch einen eigenen Regler statt eines festen Werts.
+- **Der Regler ist auf einen lesbaren Bereich geklemmt** (Entscheidung): Der
+  Slider deckt **nicht** die vollen 0–100 % ab, sondern nur einen Korridor, in
+  dem Text/Icons auf dem Glass-Hintergrund lesbar und die Buttons erkennbar
+  bleiben (Richtwert Sättigung ~30–90 %, Helligkeit nicht bis an die Extreme).
+  So kann man sich nicht in Unlesbarkeit oder unsichtbare Buttons regeln. Die
+  genauen Grenzen werden beim Umbau am echten Glass-Look feinjustiert.
 - **Umsetzung** über CSS-Variablen (`--accent`, `--btn`), die aus den Settings
   gesetzt werden — eine Quelle, überall wirksam.
 - **Bedient wird das nicht über ein Settings-Menü, sondern über ein Flyout im
@@ -91,10 +107,11 @@ Layout wechselt.
   „Laptop").
 - **GUI-Settings** werden **lokal als JSON** gespeichert — pro Arbeitsplatz.
   Kein Charon nötig, um zu arbeiten (offline-first). Enthalten:
-  - Reiter-Layouts (sichtbare Panele + `{col,row,span}` je Reiter),
+  - Reiter-Layouts (sichtbare Panele + Position/Größe **als Bruchteile**,
+    siehe §1, je Reiter),
   - Akzentfarbe + ihre Intensität, Button-Farbe + ihre Intensität,
   - Arbeitsplatzname,
-  - Rastermaße (Spalten × Zeilen).
+  - Rastermaße (Spalten × Zeilen) — solange noch experimentiert wird.
   Der Editier-Modus selbst ist **flüchtig** (wird nicht gespeichert).
 - Die JSON-Struktur wird so gehalten, dass **Charon sie später übernehmen und
   pro Arbeitsplatz synchronisieren** kann. Charon speichert dann GUI-Settings
@@ -126,8 +143,9 @@ unverrückbar bleibt.
 
 ## Invarianten
 
-1. **Panel-Positionen sind relativ (Rasterzellen), nie feste Pixel.** Das ist
-   der Kern gegen das Auflösungsproblem.
+1. **Panel-Positionen sind relativ (Bruchteile des Rasters), nie feste Pixel.**
+   Das ist der Kern gegen das Auflösungsproblem und macht Rasterwechsel
+   verlustfrei.
 2. Jeder Reiter hält sein eigenes Layout; Umschalten verändert kein anderes.
 3. Akzent- und Button-Farbe (samt Intensität) kommen aus den Settings (eine
    Quelle, CSS-Variablen), nicht hartkodiert.
@@ -149,10 +167,12 @@ unverrückbar bleibt.
 
 ## Offen / nicht Teil dieser Entscheidung
 
-- Der Standard-Startwert der Rastermaße (12×8 als Vorgabe; anpassbar in den
-  Settings — das ist bereits entschieden, siehe §1).
-- Genaue Interaktion beim Verschieben (Drag-Handles, Kollision zweier Panele in
-  derselben Zelle) — wird beim Umbau ausgearbeitet.
+- Genaue Drag-Handle-Interaktion (Greifpunkte, Vorschau beim Ziehen) — Feinschliff
+  beim Umbau. Die **Kollisionsfrage ist entschieden** (frei überlappend, §1).
+- Die endgültigen Rastermaße — vorerst zum Experimentieren einstellbar, werden
+  später fixiert (§1).
+- Die genauen Grenzen des Intensitäts-Korridors — am echten Glass-Look
+  feinjustieren (§3).
 - Charon-Sync-Protokoll (eigener späterer Schritt); hier nur die JSON-Struktur
   vorbereiten.
 - Monitor-Reiter-Inhalte.
