@@ -496,25 +496,16 @@ public sealed class CanvasControl : Control
 
     // ----- Rendering -----
 
+    /// <summary>Rasterabstand in mm.</summary>
+    private const double GridStepMm = 50;
+
     public override void Render(DrawingContext context)
     {
         context.FillRectangle(new SolidColorBrush(Color.FromRgb(30, 30, 34)), new Rect(Bounds.Size));
         if (Document is null) return;
 
-        var bedTopLeft = ToScreen(0, 0);
-        var bedRect = new Rect(bedTopLeft, new Size(Document.WidthMm * _zoom, Document.HeightMm * _zoom));
-
-        // Maschinenbett
-        context.FillRectangle(new SolidColorBrush(Color.FromRgb(44, 44, 50)), bedRect);
-
-        // Raster alle 50 mm
-        var gridPen = new Pen(new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)));
-        for (double x = 0; x <= Document.WidthMm; x += 50)
-            context.DrawLine(gridPen, ToScreen(x, 0), ToScreen(x, Document.HeightMm));
-        for (double y = 0; y <= Document.HeightMm; y += 50)
-            context.DrawLine(gridPen, ToScreen(0, y), ToScreen(Document.WidthMm, y));
-
-        context.DrawRectangle(new Pen(Brushes.SlateGray, 1.5), bedRect);
+        DrawGrid(context);
+        DrawWorkArea(context);
 
         foreach (var layer in Document.Layers)
         {
@@ -534,6 +525,62 @@ public sealed class CanvasControl : Control
         }
 
         DrawSelection(context);
+    }
+
+    /// <summary>
+    /// Zeichnet das Raster über die gesamte sichtbare Fläche (unendliche
+    /// Millimeterpapier-Ebene), ausgerichtet am mm-Nullpunkt.
+    /// </summary>
+    private void DrawGrid(DrawingContext context)
+    {
+        var step = GridStepMm;
+        // Bei sehr kleinem Zoom das Raster ausdünnen, damit es nicht zumatscht.
+        while (step * _zoom < 8) step *= 2;
+
+        var gridPen = new Pen(new SolidColorBrush(Color.FromArgb(28, 255, 255, 255)));
+        var axisPen = new Pen(new SolidColorBrush(Color.FromArgb(55, 255, 255, 255)));
+
+        // Sichtbarer Bereich in mm
+        var topLeftMm = ToMm(new Point(0, 0));
+        var bottomRightMm = ToMm(new Point(Bounds.Width, Bounds.Height));
+
+        var startX = Math.Floor(topLeftMm.X / step) * step;
+        for (var x = startX; x <= bottomRightMm.X; x += step)
+        {
+            var sx = ToScreen(x, 0).X;
+            context.DrawLine(Math.Abs(x) < 0.01 ? axisPen : gridPen,
+                new Point(sx, 0), new Point(sx, Bounds.Height));
+        }
+
+        var startY = Math.Floor(topLeftMm.Y / step) * step;
+        for (var y = startY; y <= bottomRightMm.Y; y += step)
+        {
+            var sy = ToScreen(0, y).Y;
+            context.DrawLine(Math.Abs(y) < 0.01 ? axisPen : gridPen,
+                new Point(0, sy), new Point(Bounds.Width, sy));
+        }
+    }
+
+    /// <summary>
+    /// Zeichnet den Laser-Arbeitsraum als farbig hervorgehobenes Rechteck
+    /// (Größe der Maschinenfläche) mit markiertem Nullpunkt in der Ecke.
+    /// </summary>
+    private void DrawWorkArea(DrawingContext context)
+    {
+        var topLeft = ToScreen(0, 0);
+        var rect = new Rect(topLeft, new Size(Document!.WidthMm * _zoom, Document.HeightMm * _zoom));
+
+        // Farbige Arbeitsfläche, leicht hervorgehoben gegenüber dem Umfeld
+        context.FillRectangle(new SolidColorBrush(Color.FromArgb(30, 90, 150, 220)), rect);
+        context.DrawRectangle(new Pen(new SolidColorBrush(Color.FromRgb(90, 150, 220)), 1.5), rect);
+
+        // Nullpunkt-Markierung in der oberen linken Ecke (Maschinen-Origin)
+        var origin = ToScreen(0, 0);
+        var markLen = 18.0;
+        var originPen = new Pen(new SolidColorBrush(Color.FromRgb(240, 180, 60)), 2.5);
+        context.DrawLine(originPen, origin, new Point(origin.X + markLen, origin.Y));
+        context.DrawLine(originPen, origin, new Point(origin.X, origin.Y + markLen));
+        context.DrawEllipse(new SolidColorBrush(Color.FromRgb(240, 180, 60)), null, origin, 3.5, 3.5);
     }
 
     private void DrawSelection(DrawingContext context)

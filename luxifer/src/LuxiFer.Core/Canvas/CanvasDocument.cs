@@ -6,8 +6,8 @@ namespace LuxiFer.Core.Canvas;
 /// </summary>
 public sealed class CanvasDocument
 {
-    public double WidthMm { get; set; } = 900;
-    public double HeightMm { get; set; } = 600;
+    public double WidthMm { get; set; } = 600;
+    public double HeightMm { get; set; } = 400;
     public List<Layer> Layers { get; } = [];
 
     /// <summary>
