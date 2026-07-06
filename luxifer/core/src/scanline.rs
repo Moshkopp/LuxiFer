@@ -1,0 +1,143 @@
+//! Even-Odd-Scanline-Füllung: geschlossene Konturen → horizontale Segmente.
+//!
+//! Reine Geometrie in mm (UI-frei, testbar). Angelehnt an ThorBurns
+//! `hardware/job/scanline.rs` (docs/referenz/): Even-Odd (nicht Nonzero, damit
+//! Löcher/Buchstaben-Innenräume ausgespart bleiben), nur geschlossene Konturen
+//! schließen implizit, halb-offenes Y-Intervall (jede Kante zählt einmal).
+
+use crate::geometry::Pt;
+
+/// Ein horizontales Füll-Segment in mm: bei `y` von `x0` bis `x1`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FillSegment {
+    pub y: f64,
+    pub x0: f64,
+    pub x1: f64,
+}
+
+/// Eine Kontur für die Scanline: Punktfolge + ob geschlossen.
+pub struct Contour<'a> {
+    pub points: &'a [Pt],
+    pub closed: bool,
+}
+
+/// Füllt alle Konturen gemeinsam (Even-Odd) mit Zeilenabstand `step_mm`.
+/// Überlappende Formen werden korrekt kombiniert. `step_mm` wird auf ein
+/// sinnvolles Minimum begrenzt.
+pub fn fill_segments(contours: &[Contour], step_mm: f64) -> Vec<FillSegment> {
+    let step = step_mm.max(0.01);
+
+    // Y-Bereich über alle (geschlossenen, ≥3 Punkte) Konturen.
+    let mut min_y = f64::MAX;
+    let mut max_y = f64::MIN;
+    let mut any = false;
+    for c in contours {
+        if c.points.len() < 3 {
+            continue;
+        }
+        for &(_, y) in c.points {
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            any = true;
+        }
+    }
+    if !any || min_y >= max_y {
+        return vec![];
+    }
+
+    let mut out = Vec::new();
+    let mut y = min_y;
+    while y <= max_y {
+        // X-Schnittpunkte aller Kanten mit der Zeile y sammeln.
+        let mut xs: Vec<f64> = Vec::new();
+        for c in contours {
+            let n = c.points.len();
+            if n < 3 {
+                continue;
+            }
+            let edges = if c.closed { n } else { n - 1 };
+            for i in 0..edges {
+                let (x0, y0) = c.points[i];
+                let (x1, y1) = c.points[(i + 1) % n];
+                // Halb-offenes Intervall: Kante zählt, wenn y genau eine
+                // Endpunktseite unterschreitet (verhindert Doppelkreuzung an
+                // Scheitelpunkten).
+                if (y0 <= y) != (y1 <= y) {
+                    let t = (y - y0) / (y1 - y0);
+                    xs.push(x0 + t * (x1 - x0));
+                }
+            }
+        }
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        // Even-Odd: paarweise füllen.
+        let mut i = 0;
+        while i + 1 < xs.len() {
+            let (lo, hi) = (xs[i], xs[i + 1]);
+            if hi > lo {
+                out.push(FillSegment { y, x0: lo, x1: hi });
+            }
+            i += 2;
+        }
+        y += step;
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect_pts(x: f64, y: f64, w: f64, h: f64) -> Vec<Pt> {
+        vec![(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+    }
+
+    #[test]
+    fn rechteck_wird_zeilenweise_gefuellt() {
+        let pts = rect_pts(0.0, 0.0, 10.0, 10.0);
+        let c = Contour {
+            points: &pts,
+            closed: true,
+        };
+        let segs = fill_segments(&[c], 1.0);
+        assert!(!segs.is_empty());
+        // Jedes Segment spannt die volle Breite 0..10.
+        for s in &segs {
+            assert!((s.x0 - 0.0).abs() < 1e-6);
+            assert!((s.x1 - 10.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn loch_bleibt_ausgespart_even_odd() {
+        // Äußeres 20x20-Quadrat, inneres 10x10-Loch (beide geschlossen).
+        let outer = rect_pts(0.0, 0.0, 20.0, 20.0);
+        let inner = rect_pts(5.0, 5.0, 10.0, 10.0);
+        let cs = [
+            Contour {
+                points: &outer,
+                closed: true,
+            },
+            Contour {
+                points: &inner,
+                closed: true,
+            },
+        ];
+        let segs = fill_segments(&cs, 1.0);
+        // In einer Zeile mitten durchs Loch (y=10) muss es ZWEI Segmente geben
+        // (links und rechts vom Loch), nicht eins durchgehend.
+        let row: Vec<_> = segs.iter().filter(|s| (s.y - 10.0).abs() < 1e-9).collect();
+        assert_eq!(row.len(), 2, "Loch muss ausgespart sein");
+    }
+
+    #[test]
+    fn offene_kontur_wird_nicht_gefuellt() {
+        // Zu wenige Punkte / offen → keine Fläche.
+        let pts = vec![(0.0, 0.0), (10.0, 0.0)];
+        let c = Contour {
+            points: &pts,
+            closed: false,
+        };
+        assert!(fill_segments(&[c], 1.0).is_empty());
+    }
+}

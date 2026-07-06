@@ -54,7 +54,6 @@ impl GrblDriver {
         for jl in &plan.layers {
             let s = (jl.power_pct / 100.0 * self.config.max_power_s).round();
             let feed = (jl.speed_mm_s * 60.0).round(); // mm/s → mm/min
-            let LayerWork::Cut { paths } = &jl.work;
 
             g.push_str(&format!(
                 "; Ebene {} — {} mm/s, {} %\n",
@@ -64,22 +63,36 @@ impl GrblDriver {
 
             let passes = jl.passes.max(1);
             for _pass in 0..passes {
-                for path in paths {
-                    if path.points.is_empty() {
-                        continue;
+                match &jl.work {
+                    LayerWork::Cut { paths } => {
+                        for path in paths {
+                            if path.points.is_empty() {
+                                continue;
+                            }
+                            // Zum Startpunkt fahren (Laser aus), dann Kontur brennen.
+                            let (x0, y0) = path.points[0];
+                            g.push_str("M5\n");
+                            g.push_str(&format!("G0 X{} Y{}\n", num(x0), num(y0)));
+                            g.push_str(&format!("{laser_on} S{}\n", num(s)));
+                            for &(x, y) in &path.points[1..] {
+                                g.push_str(&format!("G1 X{} Y{}\n", num(x), num(y)));
+                            }
+                            if path.closed {
+                                g.push_str(&format!("G1 X{} Y{}\n", num(x0), num(y0)));
+                            }
+                            g.push_str("M5\n"); // Laser nach jedem Pfad aus
+                        }
                     }
-                    // Zum Startpunkt fahren (Laser aus), dann Kontur brennen.
-                    let (x0, y0) = path.points[0];
-                    g.push_str("M5\n");
-                    g.push_str(&format!("G0 X{} Y{}\n", num(x0), num(y0)));
-                    g.push_str(&format!("{laser_on} S{}\n", num(s)));
-                    for &(x, y) in &path.points[1..] {
-                        g.push_str(&format!("G1 X{} Y{}\n", num(x), num(y)));
+                    LayerWork::Fill { segments } => {
+                        // Jedes horizontale Segment: anfahren, brennen, aus.
+                        for seg in segments {
+                            g.push_str("M5\n");
+                            g.push_str(&format!("G0 X{} Y{}\n", num(seg.x0), num(seg.y)));
+                            g.push_str(&format!("{laser_on} S{}\n", num(s)));
+                            g.push_str(&format!("G1 X{} Y{}\n", num(seg.x1), num(seg.y)));
+                            g.push_str("M5\n");
+                        }
                     }
-                    if path.closed {
-                        g.push_str(&format!("G1 X{} Y{}\n", num(x0), num(y0)));
-                    }
-                    g.push_str("M5\n"); // Laser nach jedem Pfad aus
                 }
             }
         }

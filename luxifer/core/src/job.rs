@@ -6,6 +6,7 @@
 
 use crate::geometry::{rotate_point, Geo, Pt};
 use crate::model::{Layer, LayerMode, Shape};
+use crate::scanline::{fill_segments, Contour, FillSegment};
 
 /// Ein zusammenhängender Pfad in mm (Polygonzug). `closed` = Kontur schließt sich.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,7 +20,9 @@ pub struct Path {
 pub enum LayerWork {
     /// Konturen abfahren (Cut/Gravur-Linien).
     Cut { paths: Vec<Path> },
-    // Fill { segments: ... } und Raster { ... } folgen später.
+    /// Fläche mit horizontalen Linien füllen (Even-Odd-Scanline).
+    Fill { segments: Vec<FillSegment> },
+    // Raster { ... } folgt mit dem Bild-Support.
 }
 
 /// Ein Layer-Block des Jobs: Parameter + Arbeit. Referenziert den Original-Layer.
@@ -46,9 +49,9 @@ impl JobPlan {
     /// Layer kommen hinein; unsichtbare werden übersprungen. Rotation wird auf
     /// die Punkte angewandt, sodass Treiber nur noch fertige mm-Pfade sehen.
     ///
-    /// Fürs Erste erzeugt jeder Layer einen `Cut`-Block (Kontur). Fill/Raster
-    /// folgen später; bis dahin werden Fill/Raster-Layer ebenfalls als Kontur
-    /// geplant (sichtbares, korrektes Verhalten, nur ohne Flächenfüllung).
+    /// Cut-Layer erhalten Kontur-Pfade, Fill-Layer eine Scanline-Füllung
+    /// (Zeilenabstand aus `line_step_mm`). Raster wird bis zum Bild-Support wie
+    /// Fill behandelt. Nur **aktive, nicht gesperrte, sichtbare** Layer.
     pub fn from_shapes(shapes: &[Shape], layers: &[Layer]) -> JobPlan {
         let mut job_layers: Vec<JobLayer> = Vec::new();
 
@@ -64,14 +67,29 @@ impl JobPlan {
             if paths.is_empty() {
                 continue;
             }
-            let _ = layer.mode; // Fill/Raster später; aktuell immer Kontur.
+
+            let work = if layer.mode.is_filled() {
+                // Fill/Raster: geschlossene Konturen des Layers gemeinsam füllen.
+                let contours: Vec<Contour> = paths
+                    .iter()
+                    .map(|p| Contour {
+                        points: &p.points,
+                        closed: p.closed,
+                    })
+                    .collect();
+                let segments = fill_segments(&contours, layer.line_step_mm);
+                LayerWork::Fill { segments }
+            } else {
+                LayerWork::Cut { paths }
+            };
+
             job_layers.push(JobLayer {
                 layer_id: li,
                 speed_mm_s: layer.speed_mm_s,
                 power_pct: layer.power_pct,
                 min_power_pct: layer.min_power_pct,
                 passes: layer.passes,
-                work: LayerWork::Cut { paths },
+                work,
             });
         }
 
@@ -126,15 +144,27 @@ fn bounding_box(layers: &[JobLayer]) -> Option<(f64, f64, f64, f64)> {
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
     let mut any = false;
+    let mut acc = |x: f64, y: f64| {
+        any = true;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    };
     for jl in layers {
-        let LayerWork::Cut { paths } = &jl.work;
-        for p in paths {
-            for &(x, y) in &p.points {
-                any = true;
-                min_x = min_x.min(x);
-                min_y = min_y.min(y);
-                max_x = max_x.max(x);
-                max_y = max_y.max(y);
+        match &jl.work {
+            LayerWork::Cut { paths } => {
+                for p in paths {
+                    for &(x, y) in &p.points {
+                        acc(x, y);
+                    }
+                }
+            }
+            LayerWork::Fill { segments } => {
+                for s in segments {
+                    acc(s.x0, s.y);
+                    acc(s.x1, s.y);
+                }
             }
         }
     }
@@ -182,7 +212,9 @@ mod tests {
         let s = state_one_rect();
         let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
         assert_eq!(plan.layers.len(), 1);
-        let LayerWork::Cut { paths } = &plan.layers[0].work;
+        let LayerWork::Cut { paths } = &plan.layers[0].work else {
+            panic!("Cut erwartet")
+        };
         assert_eq!(paths.len(), 1);
         assert!(paths[0].closed);
         assert_eq!(paths[0].points.len(), 4);
@@ -215,7 +247,9 @@ mod tests {
         });
         s.shapes[0].rotation = 90.0;
         let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
-        let LayerWork::Cut { paths } = &plan.layers[0].work;
+        let LayerWork::Cut { paths } = &plan.layers[0].work else {
+            panic!("Cut erwartet")
+        };
         // Um 90° gedreht muss die Bounding-Box der Punkte ~20 breit, ~100 hoch sein.
         let xs: Vec<f64> = paths[0].points.iter().map(|p| p.0).collect();
         let ys: Vec<f64> = paths[0].points.iter().map(|p| p.1).collect();
@@ -237,7 +271,9 @@ mod tests {
             ry: 5.0,
         });
         let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
-        let LayerWork::Cut { paths } = &plan.layers[0].work;
+        let LayerWork::Cut { paths } = &plan.layers[0].work else {
+            panic!("Cut erwartet")
+        };
         assert!(paths[0].closed);
         assert!(paths[0].points.len() >= 32);
     }

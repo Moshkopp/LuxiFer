@@ -16,6 +16,7 @@ pub mod interact;
 pub mod job;
 pub mod model;
 pub mod project;
+pub mod scanline;
 pub mod state;
 
 pub use arrange::{Align, Distribute};
@@ -24,4 +25,5 @@ pub use interact::Handle;
 pub use job::{JobLayer, JobPlan, LayerWork, MachineDriver, Path};
 pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};
 pub use project::{ProjectFile, ProjectInfo};
+pub use scanline::FillSegment;
 pub use state::AppState;
