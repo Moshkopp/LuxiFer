@@ -1,7 +1,8 @@
 <script lang="ts">
   import Canvas from "./lib/Canvas.svelte";
+  import LayerDialog from "./lib/LayerDialog.svelte";
   import * as core from "./lib/core";
-  import type { Scene } from "./lib/core";
+  import type { Scene, LayerParams } from "./lib/core";
 
   type Tool = "select" | "rect" | "ellipse";
 
@@ -9,6 +10,8 @@
   let tool = $state<Tool>("rect");
   let swatches = $state<[number, number, number][]>([]);
   let error = $state<string | null>(null);
+  // Index des Layers, dessen Dialog offen ist (oder null).
+  let editLayer = $state<number | null>(null);
 
   async function load() {
     try {
@@ -52,6 +55,16 @@
   }
   async function doDistribute(kind: core.DistributeKind) {
     scene = await core.distribute(kind);
+  }
+
+  async function saveLayer(p: LayerParams) {
+    if (editLayer !== null) {
+      scene = await core.setLayerParams(editLayer, p);
+      editLayer = null;
+    }
+  }
+  async function toggleLayer(i: number, field: "visible" | "locked") {
+    scene = await core.toggleLayer(i, field);
   }
 
   const selCount = $derived(scene?.selected.length ?? 0);
@@ -129,18 +142,46 @@
   <!-- Ebenen rechts -->
   {#if scene}
     <div class="panel layers">
-      <span class="label">Ebenen</span>
-      {#each scene.layers as l}
-        <div class="layer">
+      <span class="label">Ebenen · Doppelklick bearbeitet</span>
+      {#each scene.layers as l, i}
+        <div
+          class="layer"
+          ondblclick={() => (editLayer = i)}
+          onkeydown={(e) => e.key === "Enter" && (editLayer = i)}
+          role="button"
+          tabindex="0"
+        >
           <span class="chip" style="background: {rgb(l.color)}"></span>
-          <span>{l.name}</span>
-          <span class="muted">{l.mode}</span>
+          <div class="layer-info">
+            <span>{l.name}</span>
+            <span class="muted">{l.mode} · {l.speed_mm_s} mm/s · {l.power_pct}%</span>
+          </div>
+          <button
+            class="mini"
+            class:off={!l.visible}
+            title="Sichtbar"
+            onclick={(e) => { e.stopPropagation(); toggleLayer(i, "visible"); }}
+          >{l.visible ? "👁" : "◠"}</button>
+          <button
+            class="mini"
+            class:on={l.locked}
+            title="Sperre"
+            onclick={(e) => { e.stopPropagation(); toggleLayer(i, "locked"); }}
+          >{l.locked ? "🔒" : "🔓"}</button>
         </div>
       {/each}
       {#if scene.layers.length === 0}
         <div class="muted">— noch leer —</div>
       {/if}
     </div>
+  {/if}
+
+  {#if scene && editLayer !== null && scene.layers[editLayer]}
+    <LayerDialog
+      layer={scene.layers[editLayer]}
+      onsave={saveLayer}
+      oncancel={() => (editLayer = null)}
+    />
   {/if}
 </main>
 
@@ -227,11 +268,47 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .layer:hover {
+    background: #26282d;
+  }
+  .layer-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+  }
+  .layer-info span:first-child {
+    font-weight: 500;
+  }
+  .layer-info .muted {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mini {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    font-size: 13px;
+    background: transparent;
+  }
+  .mini.off {
+    opacity: 0.4;
+  }
+  .mini.on {
+    color: var(--accent);
   }
   .chip {
     width: 14px;
     height: 14px;
     border-radius: 4px;
+    flex-shrink: 0;
   }
   .label {
     font-size: 11px;

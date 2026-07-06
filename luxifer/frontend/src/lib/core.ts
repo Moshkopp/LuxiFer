@@ -87,6 +87,24 @@ export const clearSelection = () => invoke<Scene>("clear_selection");
 
 export const deleteSelected = () => invoke<Scene>("delete_selected");
 
+export interface LayerParams {
+  name: string;
+  mode: "Cut" | "Fill" | "Raster";
+  speed_mm_s: number;
+  power_pct: number;
+  min_power_pct: number;
+  passes: number;
+  air_assist: boolean;
+  line_step_mm: number;
+  dpi: number;
+}
+
+export const setLayerParams = (index: number, p: LayerParams) =>
+  invoke<Scene>("set_layer_params", { index, p });
+
+export const toggleLayer = (index: number, field: "visible" | "locked") =>
+  invoke<Scene>("toggle_layer", { index, field });
+
 export const undo = () => invoke<Scene>("undo");
 export const redo = () => invoke<Scene>("redo");
 

@@ -180,6 +180,59 @@ fn delete_selected(data: State<AppData>) -> Scene {
     Scene::from_state(&s)
 }
 
+/// Vom Frontend gelieferte Layer-Parameter (Doppelklick-Dialog).
+#[derive(serde::Deserialize)]
+struct LayerParams {
+    name: String,
+    mode: String,
+    speed_mm_s: f64,
+    power_pct: f64,
+    min_power_pct: f64,
+    passes: u32,
+    air_assist: bool,
+    line_step_mm: f64,
+    dpi: f64,
+}
+
+/// Setzt die Parameter eines Layers (ein Undo-Punkt).
+#[tauri::command]
+fn set_layer_params(data: State<AppData>, index: usize, p: LayerParams) -> Scene {
+    use luxifer_core::LayerMode;
+    let mut s = data.state.lock().unwrap();
+    if index < s.layers.len() {
+        s.push_undo();
+        let l = &mut s.layers[index];
+        l.name = p.name;
+        l.mode = match p.mode.as_str() {
+            "Fill" => LayerMode::Fill,
+            "Raster" => LayerMode::Raster,
+            _ => LayerMode::Cut,
+        };
+        l.speed_mm_s = p.speed_mm_s;
+        l.power_pct = p.power_pct;
+        l.min_power_pct = p.min_power_pct;
+        l.passes = p.passes;
+        l.air_assist = p.air_assist;
+        l.line_step_mm = p.line_step_mm;
+        l.dpi = p.dpi;
+    }
+    Scene::from_state(&s)
+}
+
+/// Sicht-/Sperr-Zustand eines Layers umschalten.
+#[tauri::command]
+fn toggle_layer(data: State<AppData>, index: usize, field: String) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    if let Some(l) = s.layers.get_mut(index) {
+        match field.as_str() {
+            "visible" => l.visible = !l.visible,
+            "locked" => l.locked = !l.locked,
+            _ => {}
+        }
+    }
+    Scene::from_state(&s)
+}
+
 #[tauri::command]
 fn undo(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
@@ -215,6 +268,8 @@ pub fn run() {
             scale_selected,
             align,
             distribute,
+            set_layer_params,
+            toggle_layer,
             clear_selection,
             delete_selected,
             undo,
