@@ -5,15 +5,22 @@
         allen Controls ein einheitliches, modernes Erscheinungsbild.
     -->
 
+    <!-- Inter als Standard-Schrift für die ganze App -->
+    <Style Selector="Window">
+        <Setter Property="FontFamily" Value="Inter"/>
+        <Setter Property="FontSize" Value="13"/>
+    </Style>
+
     <!-- ===== Basistypografie ===== -->
     <Style Selector="TextBlock">
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
     </Style>
+    <!-- Abschnitts-Überschrift: klein, versal, weit gesperrt (Figma-Panel-Header) -->
     <Style Selector="TextBlock.h">
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontSize" Value="11"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="LetterSpacing" Value="0.5"/>
+        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+        <Setter Property="LetterSpacing" Value="1.2"/>
     </Style>
     <Style Selector="TextBlock.label">
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
@@ -54,9 +61,26 @@
         <Setter Property="CornerRadius" Value="{StaticResource RadiusSmall}"/>
         <Setter Property="Padding" Value="12,7"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.14"/>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.10"/>
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="Button /template/ ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.14"/>
+            </Transitions>
+        </Setter>
     </Style>
     <Style Selector="Button:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
+    </Style>
+    <!-- Leichtes „Eindrücken" beim Klick -->
+    <Style Selector="Button:pressed">
+        <Setter Property="RenderTransform" Value="scale(0.97)"/>
     </Style>
     <Style Selector="Button.accent">
         <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
@@ -86,6 +110,13 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Cursor" Value="Hand"/>
     </Style>
+    <Style Selector="ToggleButton.tool /template/ ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.14"/>
+            </Transitions>
+        </Setter>
+    </Style>
     <Style Selector="ToggleButton.tool:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
     </Style>
@@ -107,6 +138,13 @@
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="ToggleButton.mode /template/ ContentPresenter, ToggleButton.seg /template/ ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.18"/>
+            </Transitions>
+        </Setter>
     </Style>
     <Style Selector="ToggleButton.mode:checked /template/ ContentPresenter, ToggleButton.seg:checked /template/ ContentPresenter">
         <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
@@ -151,9 +189,9 @@
         <Setter Property="Height" Value="18"/>
     </Style>
 
-    <!-- ===== Schwebendes Panel ===== -->
+    <!-- ===== Schwebendes Panel (mit Verlauf und Tiefe) ===== -->
     <Style Selector="Border.floating">
-        <Setter Property="Background" Value="{StaticResource SurfacePanelBrush}"/>
+        <Setter Property="Background" Value="{StaticResource PanelGradientBrush}"/>
         <Setter Property="CornerRadius" Value="{StaticResource RadiusLarge}"/>
         <Setter Property="BoxShadow" Value="{StaticResource PanelShadow}"/>
         <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}"/>
@@ -169,6 +207,13 @@
         <Setter Property="Padding" Value="8,7"/>
         <Setter Property="CornerRadius" Value="{StaticResource RadiusSmall}"/>
         <Setter Property="Margin" Value="0,1"/>
+    </Style>
+    <Style Selector="ListBoxItem /template/ ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.14"/>
+            </Transitions>
+        </Setter>
     </Style>
     <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
         <Setter Property="Background" Value="{StaticResource AccentMutedBrush}"/>

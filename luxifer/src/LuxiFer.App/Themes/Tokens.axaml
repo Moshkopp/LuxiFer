@@ -6,21 +6,22 @@
         damit die Oberfläche als ein System wirkt.
     -->
 
-    <!-- Flächen (von hinten nach vorn heller) -->
-    <Color x:Key="SurfaceBase">#0F1115</Color>      <!-- Fenster-/Canvas-Hintergrund -->
-    <Color x:Key="SurfacePanel">#181B21</Color>     <!-- Panele -->
-    <Color x:Key="SurfacePanelAlt">#1F232B</Color>  <!-- Eingaben, Zeilen -->
-    <Color x:Key="SurfaceHover">#272C35</Color>
-    <Color x:Key="SurfaceActive">#2E3440</Color>
+    <!-- Flächen (Figma/Affinity: warm-neutrale Graustufen, feine Stufung) -->
+    <Color x:Key="SurfaceBase">#141518</Color>      <!-- Fenster-/Canvas-Hintergrund -->
+    <Color x:Key="SurfacePanel">#1C1E22</Color>     <!-- Panele -->
+    <Color x:Key="SurfacePanelHi">#232529</Color>   <!-- Panel-Oberkante (Verlauf) -->
+    <Color x:Key="SurfacePanelAlt">#26282D</Color>  <!-- Eingaben, Zeilen -->
+    <Color x:Key="SurfaceHover">#2E3036</Color>
+    <Color x:Key="SurfaceActive">#363940</Color>
 
     <!-- Linien / Trenner -->
-    <Color x:Key="BorderSubtle">#20262E</Color>
-    <Color x:Key="BorderStrong">#2C333D</Color>
+    <Color x:Key="BorderSubtle">#2A2D33</Color>
+    <Color x:Key="BorderStrong">#3A3E45</Color>
 
     <!-- Text -->
-    <Color x:Key="TextPrimary">#E6E9EF</Color>
-    <Color x:Key="TextSecondary">#9BA3B0</Color>
-    <Color x:Key="TextMuted">#5B6472</Color>
+    <Color x:Key="TextPrimary">#EDEEF0</Color>
+    <Color x:Key="TextSecondary">#A2A6AD</Color>
+    <Color x:Key="TextMuted">#6A6E76</Color>
 
     <!-- Akzent (eine Farbe, konsequent) -->
     <Color x:Key="Accent">#4C82F7</Color>
@@ -50,11 +51,20 @@
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource Warning}"/>
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource Danger}"/>
 
+    <!-- Panel-Verlauf: oben minimal heller, gibt schwebenden Panelen Tiefe -->
+    <LinearGradientBrush x:Key="PanelGradientBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Offset="0" Color="{StaticResource SurfacePanelHi}"/>
+        <GradientStop Offset="1" Color="{StaticResource SurfacePanel}"/>
+    </LinearGradientBrush>
+
+    <!-- Feiner Innen-Highlight-Rand (Glaskante oben) -->
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#33FFFFFF"/>
+
     <!-- Radien -->
     <CornerRadius x:Key="RadiusSmall">6</CornerRadius>
     <CornerRadius x:Key="RadiusMedium">10</CornerRadius>
     <CornerRadius x:Key="RadiusLarge">14</CornerRadius>
 
-    <!-- Schatten für schwebende Panele -->
-    <BoxShadows x:Key="PanelShadow">0 8 28 0 #66000000</BoxShadows>
+    <!-- Gestaffelte Schatten (weicher, tiefer – wie schwebende Ebenen) -->
+    <BoxShadows x:Key="PanelShadow">0 2 6 0 #40000000, 0 12 40 -4 #70000000</BoxShadows>
 </ResourceDictionary>
