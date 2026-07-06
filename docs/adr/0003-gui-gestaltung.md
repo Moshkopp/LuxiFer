@@ -55,9 +55,10 @@ Das entlastet das rechte Panel: im Design-Modus stehen Objekt-/Auswahl-
 Eigenschaften im Vordergrund, im Laser-Modus die Layer-Maschinenparameter
 (Speed, Power, Passes, Air Assist, Modus).
 
-### 2. Canvas mit Linealen und mm-first
+### 2. Canvas mit Linealen und mm-first  ✓ umgesetzt
 
-- Lineale am oberen und linken Canvas-Rand mit mm-Skala.
+- Lineale am oberen und linken Canvas-Rand mit mm-Skala, synchron zu Zoom/Pan
+  des Canvas (`RulerControl`, gespeist über das `ViewChanged`-Event).
 - Alle Maße, Positionen und Eingaben in Millimetern (bereits im Core so
   modelliert). Der Canvas ist ein strukturiertes Dokument, kein Bild.
 - Cursorposition in mm bleibt in der Statuszeile.

@@ -68,13 +68,24 @@
 
         <!-- Arbeitsbereich: Canvas vollflächig, Panele schweben darüber -->
         <Panel>
-            <!-- Unterste Ebene: der Canvas füllt die gesamte Fläche -->
-            <ctrl:CanvasControl x:Name="Canvas"
-                                Document="{Binding Project.Canvas}"
-                                Tool="{Binding ActiveTool}"
-                                ActiveLayer="{Binding ActiveLayer}"
-                                UndoStack="{Binding Undo}"
-                                SelectedObject="{Binding SelectedObject, Mode=TwoWay}"/>
+            <!-- Canvas + Lineale am Rand -->
+            <Grid ColumnDefinitions="24,*" RowDefinitions="24,*">
+                <!-- Eckfeld oben links -->
+                <Border Grid.Row="0" Grid.Column="0" Background="#252528"/>
+                <!-- Horizontales Lineal oben -->
+                <ctrl:RulerControl x:Name="RulerTop" Grid.Row="0" Grid.Column="1"
+                                   Orientation="Horizontal"/>
+                <!-- Vertikales Lineal links -->
+                <ctrl:RulerControl x:Name="RulerLeft" Grid.Row="1" Grid.Column="0"
+                                   Orientation="Vertical"/>
+                <!-- Canvas füllt den Rest -->
+                <ctrl:CanvasControl x:Name="Canvas" Grid.Row="1" Grid.Column="1"
+                                    Document="{Binding Project.Canvas}"
+                                    Tool="{Binding ActiveTool}"
+                                    ActiveLayer="{Binding ActiveLayer}"
+                                    UndoStack="{Binding Undo}"
+                                    SelectedObject="{Binding SelectedObject, Mode=TwoWay}"/>
+            </Grid>
 
             <!-- Schwebende Werkzeug-Palette links -->
             <Border Classes="floating" Padding="6" Margin="12"

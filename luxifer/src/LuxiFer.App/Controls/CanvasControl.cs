@@ -94,8 +94,40 @@ public sealed class CanvasControl : Control
     /// <summary>Dokument wurde durch eine Benutzeraktion geändert.</summary>
     public event EventHandler? DocumentChanged;
 
-    private double _zoom = 1.0;             // Pixel pro mm
-    private Point _panOffset = new(40, 40); // Pixel
+    /// <summary>Zoom oder Pan hat sich geändert (für synchronisierte Lineale).</summary>
+    public event EventHandler? ViewChanged;
+
+    private double _zoomBacking = 1.0;             // Pixel pro mm
+    private Point _panOffsetBacking = new(40, 40); // Pixel
+
+    private double _zoom
+    {
+        get => _zoomBacking;
+        set
+        {
+            if (_zoomBacking == value) return;
+            _zoomBacking = value;
+            ViewChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private Point _panOffset
+    {
+        get => _panOffsetBacking;
+        set
+        {
+            if (_panOffsetBacking == value) return;
+            _panOffsetBacking = value;
+            ViewChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>Aktueller Zoom in Pixel pro mm.</summary>
+    public double ZoomPxPerMm => _zoomBacking;
+
+    /// <summary>Pan-Versatz in Pixeln (Bildschirmposition des mm-Nullpunkts).</summary>
+    public Point PanOffset => _panOffsetBacking;
+
     private bool _panning;
     private Point _panStart, _panOffsetStart;
     private bool _userAdjustedView;         // hat der Nutzer selbst gezoomt/gepannt?

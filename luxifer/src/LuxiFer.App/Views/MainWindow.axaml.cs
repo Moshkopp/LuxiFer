@@ -15,6 +15,7 @@ public partial class MainWindow : Window
 
         Canvas.PointerMillimeterMoved += (_, mm) => ViewModel?.ReportCursor(mm.X, mm.Y);
         Canvas.DocumentChanged += (_, _) => ViewModel?.MarkDirty();
+        Canvas.ViewChanged += (_, _) => SyncRulers();
 
         DataContextChanged += (_, _) =>
         {
@@ -22,14 +23,25 @@ public partial class MainWindow : Window
                 vm.CanvasInvalidateRequested += (_, _) => Canvas.InvalidateVisual();
         };
 
-        // Bett beim Einpassen zwischen den schwebenden Panelen freihalten
-        // (links Werkzeug-Palette ~64px, rechts Layer-Panel ~294px).
-        Canvas.ContentInset = new Thickness(72, 24, 300, 24);
+        // Bett beim Einpassen freihalten: links die schwebende Werkzeug-Palette
+        // (~64px), rechts das Layer-Panel (~294px), oben/unten etwas Luft.
+        // Die Lineale sitzen bereits außerhalb der Canvas-Fläche.
+        Canvas.ContentInset = new Thickness(64, 16, 292, 16);
 
         KeyDown += OnWindowKeyDown;
+        Loaded += (_, _) => SyncRulers();
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
+
+    /// <summary>Überträgt Zoom und Nullpunkt-Versatz des Canvas auf die Lineale.</summary>
+    private void SyncRulers()
+    {
+        RulerTop.ZoomPxPerMm = Canvas.ZoomPxPerMm;
+        RulerTop.OriginOffset = Canvas.PanOffset.X;
+        RulerLeft.ZoomPxPerMm = Canvas.ZoomPxPerMm;
+        RulerLeft.OriginOffset = Canvas.PanOffset.Y;
+    }
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
