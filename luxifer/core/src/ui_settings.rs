@@ -25,14 +25,22 @@ pub const UI_FORMAT_VERSION: u32 = 1;
 /// Reiter der Oberfläche. Jeder Reiter hat ein eigenes Layout (ADR §2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tab {
+    Projekt,
     Design,
     Laser,
     Monitor,
+    Preview,
 }
 
 impl Tab {
     /// Alle Reiter in Anzeige-Reihenfolge.
-    pub const ALL: [Tab; 3] = [Tab::Design, Tab::Laser, Tab::Monitor];
+    pub const ALL: [Tab; 5] = [
+        Tab::Projekt,
+        Tab::Design,
+        Tab::Laser,
+        Tab::Monitor,
+        Tab::Preview,
+    ];
 }
 
 /// Fachliche Panele. Als Enum (nicht Strings), damit Layouts typsicher und
@@ -259,24 +267,29 @@ pub fn default_layout(tab: Tab) -> TabLayout {
     let p = |kind: PanelKind, rect: PanelRect| PanelPlacement { kind, rect };
 
     let panels = match tab {
+        // Projekt- und Preview-Reiter haben noch keine eigenen Panele; Inhalt
+        // (Projektverwaltung bzw. Job-Vorschau) folgt als eigener Meilenstein.
+        Tab::Projekt => vec![],
+        Tab::Preview => vec![],
+        // y-Start unter dem Header (~0.08), damit Panele nicht darunter kleben.
         Tab::Design => vec![
             // Werkzeuge links, schmal und hoch (21 Werkzeuge in 5 Gruppen).
-            p(PanelKind::Werkzeuge, r(0.0, 0.06, 0.09, 0.82, 0)),
+            p(PanelKind::Werkzeuge, r(0.0, 0.09, 0.09, 0.82, 0)),
             // Ebenen rechts oben.
-            p(PanelKind::Ebenen, r(0.80, 0.0, 0.20, 0.6, 0)),
+            p(PanelKind::Ebenen, r(0.80, 0.09, 0.20, 0.55, 0)),
             // Farbpalette rechts unten.
-            p(PanelKind::Farbpalette, r(0.80, 0.62, 0.20, 0.18, 0)),
+            p(PanelKind::Farbpalette, r(0.80, 0.66, 0.20, 0.18, 0)),
             // Anordnen-Toolbar oben mittig, flach.
-            p(PanelKind::Anordnen, r(0.14, 0.0, 0.40, 0.08, 0)),
+            p(PanelKind::Anordnen, r(0.30, 0.09, 0.40, 0.08, 0)),
         ],
         Tab::Laser => vec![
-            p(PanelKind::Ebenen, r(0.0, 0.0, 0.20, 0.6, 0)),
+            p(PanelKind::Ebenen, r(0.0, 0.09, 0.20, 0.55, 0)),
             // Laser-Control unten rechts (wie bisher).
-            p(PanelKind::Laser, r(0.78, 0.30, 0.22, 0.68, 0)),
+            p(PanelKind::Laser, r(0.78, 0.30, 0.22, 0.66, 0)),
         ],
         Tab::Monitor => vec![
             // Vorerst nur ein Platzhalter-Panel; Inhalt folgt später.
-            p(PanelKind::JobStatus, r(0.70, 0.0, 0.30, 0.5, 0)),
+            p(PanelKind::JobStatus, r(0.70, 0.09, 0.30, 0.5, 0)),
         ],
     };
     TabLayout { tab, panels }
@@ -289,7 +302,7 @@ mod tests {
     #[test]
     fn default_hat_ein_layout_je_reiter() {
         let s = UiSettings::default();
-        assert_eq!(s.layouts.len(), 3);
+        assert_eq!(s.layouts.len(), Tab::ALL.len());
         for tab in Tab::ALL {
             assert!(s.layout(tab).is_some(), "{tab:?} fehlt");
         }

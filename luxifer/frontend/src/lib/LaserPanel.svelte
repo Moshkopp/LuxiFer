@@ -287,16 +287,16 @@
   button {
     background: linear-gradient(
       180deg,
-      hsl(var(--btn-h) var(--btn-s) 75% / 0.16),
-      hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.14)
+      hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) + 14%) / 0.42),
+      hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.34)
     );
     color: var(--text);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid hsl(var(--btn-h) var(--btn-s) 80% / 0.28);
     border-radius: 9px;
     padding: 7px 10px;
     cursor: pointer;
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
       0 1px 2px rgba(0, 0, 0, 0.25);
     transition:
       background 0.16s ease,
@@ -306,10 +306,10 @@
   button:hover {
     background: linear-gradient(
       180deg,
-      hsl(var(--btn-h) var(--btn-s) 78% / 0.3),
-      hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.26)
+      hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) + 16%) / 0.6),
+      hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.52)
     );
-    border-color: rgba(255, 255, 255, 0.22);
+    border-color: hsl(var(--btn-h) var(--btn-s) 82% / 0.45);
   }
   button:active {
     transform: translateY(1px);

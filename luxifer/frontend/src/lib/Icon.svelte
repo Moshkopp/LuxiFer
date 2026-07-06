@@ -16,7 +16,8 @@
     | "tri" | "quad" | "penta" | "hex" | "octa" | "star" | "sun" | "gear" | "heart"
     // Header-/Panel-Aktionen
     | "undo" | "redo" | "trash" | "gcode" | "pause" | "stop" | "home" | "frame"
-    | "contour" | "send" | "power" | "speed" | "wind" | "eye" | "eye-off" | "lock";
+    | "contour" | "send" | "power" | "speed" | "wind" | "eye" | "eye-off" | "lock"
+    | "settings" | "logo";
 
   export const ICONS: Record<IconName, string> = {
     // ── Werkzeuge ──────────────────────────────────────────────────────────
@@ -70,6 +71,9 @@
     eye: `<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>`,
     "eye-off": `<path d="M9.9 5A9.8 9.8 0 0 1 12 5c6 0 10 7 10 7a13 13 0 0 1-2 2.5M6 6C3 8 2 12 2 12s4 7 10 7a9.6 9.6 0 0 0 4-.9"/><path d="M3 3l18 18"/>`,
     lock: `<rect x="5" y="11" width="14" height="9" rx="1"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>`,
+    settings: `<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>`,
+    // LuxiFer-Platzhalter-Logo: stilisierter Laser-Funke / Strahl. Leicht ersetzbar.
+    logo: `<path d="M12 2v6"/><path d="M12 16v6"/><path d="M2 12h6"/><path d="M16 12h6"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M5.6 5.6l3 3M15.4 15.4l3 3M18.4 5.6l-3 3M8.6 15.4l-3 3"/>`,
   };
 </script>
 

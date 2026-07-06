@@ -122,7 +122,7 @@ export const swatchColors = () =>
 // Spiegelt luxifer-core::ui_settings. Positionen sind Bruchteile (0…1) des
 // Fensters, nie Pixel — das Snapping aufs Raster passiert erst beim Zeichnen.
 
-export type Tab = "Design" | "Laser" | "Monitor";
+export type Tab = "Projekt" | "Design" | "Laser" | "Monitor" | "Preview";
 
 export type PanelKind =
   | "Werkzeuge"

@@ -9,6 +9,7 @@
   import ArrangePanel from "./lib/ArrangePanel.svelte";
   import EditFlyout from "./lib/EditFlyout.svelte";
   import Icon from "./lib/Icon.svelte";
+  import logoUrl from "./assets/logo.png";
   import * as core from "./lib/core";
   import type {
     Scene,
@@ -241,21 +242,41 @@
     />
   {/if}
 
-  <!-- Header: links Undo/Redo, mittig die Reiter -->
+  <!-- Header über volle Breite: links Logo + Name + Undo/Redo, Reiter mittig
+       zentriert, rechts Zahnrad (Settings/Editier-Modus). -->
   {#if settings}
     <div class="header glass">
-      <div class="hgroup">
-        <button class="gbtn hbtn" onclick={doUndo} title="Rückgängig (Strg+Z)" aria-label="Rückgängig">
-          <Icon name="undo" />
-        </button>
-        <button class="gbtn hbtn" onclick={doRedo} title="Wiederholen (Strg+Y)" aria-label="Wiederholen">
-          <Icon name="redo" />
-        </button>
+      <div class="hleft">
+        <span class="brand">
+          <img class="brand-logo" src={logoUrl} alt="LuxiFer" width="26" height="26" />
+          <span class="brand-name">LuxiFer</span>
+        </span>
+        <div class="hgroup">
+          <button class="gbtn hbtn" onclick={doUndo} title="Rückgängig (Strg+Z)" aria-label="Rückgängig">
+            <Icon name="undo" />
+          </button>
+          <button class="gbtn hbtn" onclick={doRedo} title="Wiederholen (Strg+Y)" aria-label="Wiederholen">
+            <Icon name="redo" />
+          </button>
+        </div>
       </div>
+
       <div class="tabs">
-        {#each ["Design", "Laser", "Monitor"] as t}
+        {#each ["Projekt", "Design", "Laser", "Monitor", "Preview"] as t}
           <button class="tab" class:active={activeTab === t} onclick={() => (activeTab = t as Tab)}>{t}</button>
         {/each}
+      </div>
+
+      <div class="hright">
+        <button
+          class="gbtn hbtn"
+          class:active={editing}
+          onclick={() => (editing = !editing)}
+          title="Einstellungen / Oberfläche bearbeiten"
+          aria-label="Einstellungen"
+        >
+          <Icon name="settings" />
+        </button>
       </div>
     </div>
   {/if}
@@ -279,6 +300,19 @@
         {/if}
       {/snippet}
     </PanelHost>
+  {/if}
+
+  <!-- Noch leere Reiter (Projekt/Preview): dezenter Hinweis mittig. -->
+  {#if settings && panels.length === 0}
+    <div class="empty-tab">
+      {#if activeTab === "Projekt"}
+        Projektverwaltung folgt als eigener Meilenstein.
+      {:else if activeTab === "Preview"}
+        Laser-Vorschau folgt als eigener Meilenstein.
+      {:else}
+        Dieser Reiter ist noch leer.
+      {/if}
+    </div>
   {/if}
 
   <!-- Layer-Dialog -->
@@ -348,22 +382,53 @@
     position: absolute;
     inset: 0;
   }
+  /* Header über die volle Breite; drei Zonen (links | Reiter mittig | rechts).
+     Das mittlere Grid-Fach ist zentriert, egal wie breit links/rechts sind. */
   .header {
     position: absolute;
-    left: 50%;
-    top: 10px;
-    transform: translateX(-50%);
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    z-index: 50;
+  }
+  .hleft {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 4px 6px;
-    z-index: 50;
+    justify-self: start;
+  }
+  .hright {
+    display: flex;
+    align-items: center;
+    justify-self: end;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brand-logo {
+    display: block;
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 5px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.45));
+  }
+  .brand-name {
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    font-size: 15px;
   }
   .hgroup {
     display: flex;
     gap: 4px;
-    padding-right: 8px;
-    border-right: 1px solid var(--border);
+    padding-left: 10px;
+    border-left: 1px solid var(--border);
   }
   .hbtn {
     display: flex;
@@ -375,6 +440,7 @@
   .tabs {
     display: flex;
     gap: 4px;
+    justify-self: center;
   }
   .tab {
     background: transparent;
@@ -403,6 +469,16 @@
     color: var(--muted);
     font-size: 13px;
     padding: 8px;
+  }
+  .empty-tab {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+    pointer-events: none;
   }
   .lock {
     position: absolute;
