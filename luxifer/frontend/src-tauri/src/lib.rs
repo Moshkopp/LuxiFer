@@ -315,6 +315,13 @@ pub fn run() {
             app.manage(AppData {
                 state: Mutex::new(AppState::new()),
             });
+            // Fenster-/Taskleisten-Icon zur Laufzeit setzen (greift auch im
+            // Dev-Modus, wo das gebündelte Icon sonst nicht verwendet wird).
+            if let (Some(win), Some(icon)) =
+                (app.get_webview_window("main"), app.default_window_icon())
+            {
+                let _ = win.set_icon(icon.clone());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
