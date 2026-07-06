@@ -10,8 +10,10 @@
 
 pub mod geometry;
 pub mod model;
+pub mod project;
 pub mod state;
 
 pub use geometry::{BBox, Geo, Pt};
 pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};
+pub use project::{ProjectFile, ProjectInfo};
 pub use state::AppState;
