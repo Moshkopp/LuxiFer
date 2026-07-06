@@ -1,0 +1,36 @@
+# --- Referenzprojekt (nur lokal, nicht Teil von LuxiFer) ---
+/nur zur Referenu/
+
+# --- .NET / Avalonia (luxifer/) ---
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+artifacts/
+project.lock.json
+*.nupkg
+
+# --- Rust (sharon/) ---
+target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# --- IDE / Editor ---
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+*.swp
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- LuxiFer-Laufzeitdaten (lokale Projekte/Assets/Fonts) ---
+/local-data/
+*.log
