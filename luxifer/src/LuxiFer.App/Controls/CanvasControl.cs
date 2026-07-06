@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Media;
 using LuxiFer.Core.Canvas;
+using LuxiFer.Core.Undo;
 
 namespace LuxiFer.App.Controls;
 
@@ -65,6 +67,16 @@ public sealed class CanvasControl : Control
         set => SetValue(ActiveLayerProperty, value);
     }
 
+    public static readonly StyledProperty<UndoStack?> UndoStackProperty =
+        AvaloniaProperty.Register<CanvasControl, UndoStack?>(nameof(UndoStack));
+
+    /// <summary>Historie, in die alle Canvas-Aktionen als Commands laufen.</summary>
+    public UndoStack? UndoStack
+    {
+        get => GetValue(UndoStackProperty);
+        set => SetValue(UndoStackProperty, value);
+    }
+
     private CanvasObject? _selectedObject;
     public CanvasObject? SelectedObject
     {
@@ -88,10 +100,12 @@ public sealed class CanvasControl : Control
     private Point _panStart, _panOffsetStart;
 
     private CanvasObject? _drawingObject;   // Rect/Ellipse/Linie im Aufziehen
+    private Layer? _drawingLayer;           // Layer, in dem gerade gezeichnet wird
     private PolylineObject? _polyInProgress;
     private Point _polyPreviewMm;
     private Point _dragStartMm;
     private bool _draggingSelection;
+    private Point _moveStartMm;             // Startpunkt eines Verschiebe-Drags
 
     private ResizeHandle? _activeHandle;
     private (double X, double Y, double W, double H) _resizeStartBounds;
@@ -181,6 +195,7 @@ public sealed class CanvasControl : Control
                 {
                     _draggingSelection = true;
                     _dragStartMm = mm;
+                    _moveStartMm = mm;
                 }
                 break;
 
@@ -214,6 +229,9 @@ public sealed class CanvasControl : Control
         if (_drawingObject is not null)
         {
             _dragStartMm = mm;
+            _drawingLayer = ActiveLayer;
+            // Live in den Layer, damit man beim Aufziehen sieht was entsteht;
+            // beim Loslassen wird daraus ein Undo-Command (siehe OnPointerReleased).
             ActiveLayer!.Objects.Add(_drawingObject);
             InvalidateVisual();
         }
@@ -284,10 +302,15 @@ public sealed class CanvasControl : Control
     {
         _panning = false;
 
-        if (_activeHandle is not null)
+        if (_activeHandle is not null && SelectedObject is not null)
         {
             _activeHandle = null;
-            RaiseDocumentChanged();
+            var after = SelectedObject.Bounds;
+            if (after != _resizeStartBounds)
+            {
+                UndoStack?.Push(new ResizeObjectCommand(SelectedObject, _resizeStartBounds, after));
+                RaiseDocumentChanged();
+            }
             return;
         }
 
@@ -296,21 +319,44 @@ public sealed class CanvasControl : Control
             // Degenerierte Objekte (bloßer Klick) wieder entfernen
             var (_, _, w, h) = _drawingObject.Bounds;
             if (w < 0.1 && h < 0.1)
-                ActiveLayer?.Objects.Remove(_drawingObject);
+                _drawingLayer?.Objects.Remove(_drawingObject);
             else
-            {
-                SelectedObject = _drawingObject;
-                RaiseDocumentChanged();
-            }
+                RegisterAdd(_drawingObject, _drawingLayer);
             _drawingObject = null;
+            _drawingLayer = null;
             InvalidateVisual();
         }
 
-        if (_draggingSelection)
+        if (_draggingSelection && SelectedObject is not null)
         {
             _draggingSelection = false;
-            RaiseDocumentChanged();
+            var dx = _dragStartMm.X - _moveStartMm.X;
+            var dy = _dragStartMm.Y - _moveStartMm.Y;
+            if (dx != 0 || dy != 0)
+            {
+                // Verschiebung ist bereits live erfolgt → nur als Command ablegen.
+                UndoStack?.Push(new MoveObjectCommand(SelectedObject, dx, dy));
+                RaiseDocumentChanged();
+            }
         }
+    }
+
+    /// <summary>
+    /// Überführt ein interaktiv bereits eingefügtes Objekt in ein
+    /// AddObjectCommand: einmal entfernen, dann via Execute sauber hinzufügen.
+    /// So sind Do/Undo konsistent und das Objekt bleibt selektiert.
+    /// </summary>
+    private void RegisterAdd(CanvasObject obj, Layer? layer)
+    {
+        layer ??= ActiveLayer;
+        if (layer is null) return;
+        layer.Objects.Remove(obj);
+        if (UndoStack is not null)
+            UndoStack.Execute(new AddObjectCommand(layer, obj));
+        else
+            layer.Objects.Add(obj);
+        SelectedObject = obj;
+        RaiseDocumentChanged();
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -328,26 +374,38 @@ public sealed class CanvasControl : Control
                 e.Handled = true;
                 break;
             case Key.Delete or Key.Back when SelectedObject is not null && Document is not null:
-                foreach (var layer in Document.Layers)
-                    layer.Objects.Remove(SelectedObject);
-                SelectedObject = null;
-                RaiseDocumentChanged();
-                InvalidateVisual();
+                DeleteSelected();
                 e.Handled = true;
                 break;
         }
     }
 
+    /// <summary>Löscht das ausgewählte Objekt über die Historie.</summary>
+    public void DeleteSelected()
+    {
+        if (SelectedObject is null || Document is null) return;
+        var obj = SelectedObject;
+        var layer = Document.Layers.FirstOrDefault(l => l.Objects.Contains(obj));
+        if (layer is null) return;
+
+        if (UndoStack is not null)
+            UndoStack.Execute(new RemoveObjectCommand(layer, obj));
+        else
+            layer.Objects.Remove(obj);
+
+        SelectedObject = null;
+        RaiseDocumentChanged();
+        InvalidateVisual();
+    }
+
     private void FinishPolyline()
     {
         if (_polyInProgress is null) return;
+        var layer = ActiveLayer;
         if (_polyInProgress.Points.Count < 2)
-            ActiveLayer?.Objects.Remove(_polyInProgress);
+            layer?.Objects.Remove(_polyInProgress);
         else
-        {
-            SelectedObject = _polyInProgress;
-            RaiseDocumentChanged();
-        }
+            RegisterAdd(_polyInProgress, layer);
         _polyInProgress = null;
         InvalidateVisual();
     }

@@ -28,8 +28,27 @@ public partial class MainWindow : Window
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
-        // Kürzel nicht auslösen, während in einem Textfeld getippt wird
-        if (e.KeyModifiers != KeyModifiers.None || ViewModel is null) return;
+        if (ViewModel is null) return;
+
+        // Undo/Redo mit Strg (auch bei fokussiertem Textfeld erlaubt)
+        if (e.KeyModifiers == KeyModifiers.Control)
+        {
+            switch (e.Key)
+            {
+                case Key.Z:
+                    ViewModel.UndoActionCommand.Execute(null);
+                    e.Handled = true;
+                    return;
+                case Key.Y:
+                    ViewModel.RedoActionCommand.Execute(null);
+                    e.Handled = true;
+                    return;
+            }
+            return;
+        }
+
+        // Werkzeug-Kürzel nicht auslösen, während in einem Textfeld getippt wird
+        if (e.KeyModifiers != KeyModifiers.None) return;
         if (FocusManager?.GetFocusedElement() is TextBox) return;
 
         var tool = e.Key switch
@@ -51,6 +70,9 @@ public partial class MainWindow : Window
 
     private void OnLayerVisibilityClick(object? sender, RoutedEventArgs e) =>
         Canvas.InvalidateVisual();
+
+    private void OnSelectionEditCommit(object? sender, RoutedEventArgs e) =>
+        ViewModel?.CommitSelectionEdit();
 
     private void OnZoomToFitClick(object? sender, RoutedEventArgs e) =>
         Canvas.ZoomToFit();

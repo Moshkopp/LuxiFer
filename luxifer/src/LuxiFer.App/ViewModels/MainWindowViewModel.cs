@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using LuxiFer.App.Controls;
 using LuxiFer.Core.Canvas;
 using LuxiFer.Core.Projects;
+using LuxiFer.Core.Undo;
 
 namespace LuxiFer.App.ViewModels;
 
@@ -11,6 +12,9 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     [ObservableProperty]
     private Project _project;
+
+    /// <summary>Undo-/Redo-Historie; alle Canvas-Aktionen laufen hierüber.</summary>
+    public UndoStack Undo { get; } = new();
 
     [ObservableProperty]
     private CanvasTool _activeTool = CanvasTool.Select;
@@ -35,9 +39,39 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _project = NewProjectInternal();
         SyncLayers();
+        Undo.Changed += (_, _) =>
+        {
+            UndoActionCommand.NotifyCanExecuteChanged();
+            RedoActionCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(UndoHint));
+            OnPropertyChanged(nameof(RedoHint));
+            RefreshSelectionFields();
+            CanvasInvalidateRequested?.Invoke(this, EventArgs.Empty);
+        };
     }
 
     public string Title => $"LuxiFer — {Project.Name}";
+
+    public string UndoHint => Undo.NextUndoLabel is { } l ? $"Rückgängig: {l}" : "Rückgängig";
+    public string RedoHint => Undo.NextRedoLabel is { } l ? $"Wiederholen: {l}" : "Wiederholen";
+
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void UndoAction()
+    {
+        Undo.Undo();
+        StatusText = "Rückgängig";
+    }
+
+    private bool CanUndo() => Undo.CanUndo;
+
+    [RelayCommand(CanExecute = nameof(CanRedo))]
+    private void RedoAction()
+    {
+        Undo.Redo();
+        StatusText = "Wiederholt";
+    }
+
+    private bool CanRedo() => Undo.CanRedo;
 
     private static Project NewProjectInternal()
     {
@@ -60,6 +94,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         Project = NewProjectInternal();
         SelectedObject = null;
+        Undo.Clear();
         SyncLayers();
         StatusText = "Neues Projekt angelegt";
     }
@@ -140,6 +175,10 @@ public partial class MainWindowViewModel : ViewModelBase
         _updatingSelectionFields = false;
     }
 
+    // Bounds vor Beginn einer Panel-Bearbeitung, für ein einziges Undo-Command
+    // über die gesamte Feld-Editiersequenz (bis CommitSelectionEdit).
+    private (double X, double Y, double W, double H)? _editStartBounds;
+
     partial void OnSelXChanged(double value) => ApplySelectionBounds();
     partial void OnSelYChanged(double value) => ApplySelectionBounds();
     partial void OnSelWidthChanged(double value) => ApplySelectionBounds();
@@ -148,8 +187,26 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ApplySelectionBounds()
     {
         if (_updatingSelectionFields || SelectedObject is null) return;
+        _editStartBounds ??= SelectedObject.Bounds;
         SelectedObject.SetBounds(SelX, SelY, Math.Max(0.1, SelWidth), Math.Max(0.1, SelHeight));
         Project.ModifiedAt = DateTimeOffset.UtcNow;
         CanvasInvalidateRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Schließt eine Feld-Bearbeitung ab (Enter/Fokusverlust) und legt die
+    /// gesamte Änderung als ein Undo-Command ab. Von der View aufgerufen.
+    /// </summary>
+    public void CommitSelectionEdit()
+    {
+        if (_editStartBounds is not { } before || SelectedObject is null)
+        {
+            _editStartBounds = null;
+            return;
+        }
+        var after = SelectedObject.Bounds;
+        _editStartBounds = null;
+        if (after != before)
+            Undo.Push(new ResizeObjectCommand(SelectedObject, before, after));
     }
 }

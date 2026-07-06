@@ -38,6 +38,12 @@
                 <Separator/>
                 <MenuItem Header="_Beenden" Click="OnExitClick"/>
             </MenuItem>
+            <MenuItem Header="_Bearbeiten">
+                <MenuItem Header="{Binding UndoHint}" Command="{Binding UndoActionCommand}"
+                          InputGesture="Ctrl+Z"/>
+                <MenuItem Header="{Binding RedoHint}" Command="{Binding RedoActionCommand}"
+                          InputGesture="Ctrl+Y"/>
+            </MenuItem>
             <MenuItem Header="_Ansicht">
                 <MenuItem Header="_Einpassen" Click="OnZoomToFitClick"/>
             </MenuItem>
@@ -149,13 +155,17 @@
                             </Style>
                         </Grid.Styles>
                         <TextBlock Classes="label" Grid.Row="0" Grid.Column="0" Text="X mm"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelX}"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" LostFocus="OnSelectionEditCommit"
+                                 Text="{Binding SelX, UpdateSourceTrigger=LostFocus}"/>
                         <TextBlock Classes="label" Grid.Row="1" Grid.Column="0" Text="Y mm"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelY}"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" LostFocus="OnSelectionEditCommit"
+                                 Text="{Binding SelY, UpdateSourceTrigger=LostFocus}"/>
                         <TextBlock Classes="label" Grid.Row="2" Grid.Column="0" Text="Breite mm"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelWidth}"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" LostFocus="OnSelectionEditCommit"
+                                 Text="{Binding SelWidth, UpdateSourceTrigger=LostFocus}"/>
                         <TextBlock Classes="label" Grid.Row="3" Grid.Column="0" Text="Höhe mm"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelHeight}"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" LostFocus="OnSelectionEditCommit"
+                                 Text="{Binding SelHeight, UpdateSourceTrigger=LostFocus}"/>
                     </Grid>
                     <TextBlock Text="Kein Objekt ausgewählt" Foreground="#6b6b70"
                                IsVisible="{Binding !HasSelection}"/>
@@ -168,6 +178,7 @@
                             Document="{Binding Project.Canvas}"
                             Tool="{Binding ActiveTool}"
                             ActiveLayer="{Binding ActiveLayer}"
+                            UndoStack="{Binding Undo}"
                             SelectedObject="{Binding SelectedObject, Mode=TwoWay}"/>
     </DockPanel>
 </Window>
