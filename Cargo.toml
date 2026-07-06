@@ -8,6 +8,7 @@ resolver = "2"
 members = [
     "luxifer/core",
     "luxifer/drivers/grbl",
+    "luxifer/drivers/ruida",
     "charon",
 ]
 # Das Tauri-Backend baut eigenständig über die Tauri-CLI (eigene crate-types).
