@@ -22,9 +22,9 @@ Server und niemals Voraussetzung für lokale Arbeit.
 
 | Pfad | Inhalt |
 |------|--------|
-| `crates/luxifer-core/` | Rust-Core (UI-frei, testbar) |
+| `luxifer/core/` | Rust-Core (UI-frei, testbar) |
+| `luxifer/frontend/` | Tauri-App (Rust-Backend + Svelte-Frontend) |
 | `charon/` | Charon-Server (Rust, noch leer) |
-| `luxifer/` | Tauri-App (Rust-Backend + Svelte-Frontend) — kommt, sobald Node da ist |
 | `docs/referenz/` | ThorBurn-Analyse + Funktions-Worksheet (Bauplan) |
 | `nur zur Referenu/` | Altes ThorBurn-Projekt — **nur Referenz, gitignored** |
 
@@ -63,9 +63,16 @@ cargo test        # müssen grün sein; neue Core-Logik bekommt Tests
 cargo clippy
 cargo fmt
 
-# Frontend (später, sobald Node installiert ist)
-# npm install && npm run tauri dev
+# Frontend (aus luxifer/frontend/)
+npm install
+./dev.sh            # startet tauri dev mit den nötigen Wayland-Flags
 ```
+
+**Wayland-Hinweis:** WebKitGTK braucht unter Wayland
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` (+ `WEBKIT_DISABLE_COMPOSITING_MODE=1`),
+sonst bleibt das App-Fenster leer oder der Prozess stirbt still beim Start.
+`dev.sh` setzt das. Das `src-tauri`-Crate ist bewusst aus dem Cargo-Workspace
+`exclude`t (eigene crate-types, baut über die Tauri-CLI).
 
 7. **Vor jedem Commit:** `cargo build` + `cargo test` grün, `cargo clippy` ohne
    Warnungen, `cargo fmt`. Neue Core-Fachlogik bekommt Tests.

@@ -1,0 +1,74 @@
+// Brücke zum Rust-Core über Tauri-Commands. Das Frontend hält KEINEN eigenen
+// Wahrheits-Zustand — es holt den Zustand hier und zeichnet ihn nur.
+import { invoke } from "@tauri-apps/api/core";
+
+// Spiegelt luxifer-core::Geo (serde-Enum, extern getaggt).
+export type Geo =
+  | { Rect: { x: number; y: number; w: number; h: number } }
+  | { Ellipse: { cx: number; cy: number; rx: number; ry: number } }
+  | { Polyline: { pts: [number, number][]; closed: boolean } };
+
+export interface Layer {
+  name: string;
+  color: [number, number, number];
+  visible: boolean;
+  active: boolean;
+  locked: boolean;
+  mode: "Cut" | "Fill" | "Raster";
+  speed_mm_s: number;
+  power_pct: number;
+  min_power_pct: number;
+  air_assist: boolean;
+  line_step_mm: number;
+  passes: number;
+  dpi: number;
+}
+
+export interface Shape {
+  layer_id: number;
+  geo: Geo;
+  rotation: number;
+  group_id?: number | null;
+  speed_override?: number | null;
+  power_override?: number | null;
+}
+
+// Was der Core dem Frontend zum Zeichnen gibt.
+export interface Scene {
+  layers: Layer[];
+  shapes: Shape[];
+  selected: number[];
+  bed_w_mm: number;
+  bed_h_mm: number;
+}
+
+export function rgb(color: [number, number, number]): string {
+  const [r, g, b] = color;
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// ---- Command-Aufrufe -------------------------------------------------------
+
+export const getScene = () => invoke<Scene>("get_scene");
+
+export const addRect = (x: number, y: number, w: number, h: number) =>
+  invoke<Scene>("add_rect", { x, y, w, h });
+
+export const addEllipse = (cx: number, cy: number, rx: number, ry: number) =>
+  invoke<Scene>("add_ellipse", { cx, cy, rx, ry });
+
+export const activateColor = (color: [number, number, number]) =>
+  invoke<Scene>("activate_color", { color });
+
+export const selectAt = (x: number, y: number, tol: number) =>
+  invoke<Scene>("select_at", { x, y, tol });
+
+export const clearSelection = () => invoke<Scene>("clear_selection");
+
+export const deleteSelected = () => invoke<Scene>("delete_selected");
+
+export const undo = () => invoke<Scene>("undo");
+export const redo = () => invoke<Scene>("redo");
+
+export const swatchColors = () =>
+  invoke<[number, number, number][]>("swatch_colors");

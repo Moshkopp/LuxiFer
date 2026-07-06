@@ -6,8 +6,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/luxifer-core",
+    "luxifer/core",
     "charon",
+]
+# Das Tauri-Backend baut eigenständig über die Tauri-CLI (eigene crate-types).
+exclude = [
+    "luxifer/frontend/src-tauri",
 ]
 
 [workspace.package]

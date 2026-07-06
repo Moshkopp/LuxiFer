@@ -7,4 +7,4 @@ authors.workspace = true
 description = "Charon — optionaler Koordinations-Server für LuxiFer (Sync/Bibliotheken). Noch leer."
 
 [dependencies]
-luxifer-core = { path = "../crates/luxifer-core" }
+luxifer-core = { path = "../luxifer/core" }

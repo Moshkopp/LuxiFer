@@ -6,11 +6,17 @@ target/
 **/*.rs.bk
 Cargo.lock.orig
 
-# --- Node / Tauri-Frontend (kommt später) ---
+# --- Node / Tauri-Frontend ---
 node_modules/
 dist/
 .svelte-kit/
 *.local
+
+# Tauri-generierte Schemas (aus tauri.conf.json/capabilities abgeleitet)
+luxifer/frontend/src-tauri/gen/
+# Android-Icon-Varianten (Desktop-App braucht sie nicht)
+luxifer/frontend/src-tauri/icons/android/
+luxifer/frontend/src-tauri/icons/ios/
 
 # --- IDE / Editor ---
 .idea/
