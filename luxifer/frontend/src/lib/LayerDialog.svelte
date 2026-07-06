@@ -11,15 +11,26 @@
     oncancel: () => void;
   } = $props();
 
-  // Lokale, editierbare Kopie.
+  // Lokale, editierbare Kopie der Layer-Werte. Bewusst nur der Startwert beim
+  // Öffnen — der Dialog soll nicht live mitziehen, sondern erst beim Speichern
+  // zurückschreiben. Daher hier die state_referenced_locally-Warnung ignorieren.
+  /* svelte-ignore state_referenced_locally */
   let name = $state(layer.name);
+  /* svelte-ignore state_referenced_locally */
   let mode = $state<"Cut" | "Fill" | "Raster">(layer.mode);
+  /* svelte-ignore state_referenced_locally */
   let speed = $state(layer.speed_mm_s);
+  /* svelte-ignore state_referenced_locally */
   let power = $state(layer.power_pct);
+  /* svelte-ignore state_referenced_locally */
   let minPower = $state(layer.min_power_pct);
+  /* svelte-ignore state_referenced_locally */
   let passes = $state(layer.passes);
+  /* svelte-ignore state_referenced_locally */
   let airAssist = $state(layer.air_assist);
+  /* svelte-ignore state_referenced_locally */
   let lineStep = $state(layer.line_step_mm);
+  /* svelte-ignore state_referenced_locally */
   let dpi = $state(layer.dpi);
 
   const isRaster = $derived(mode === "Raster");
@@ -47,6 +58,7 @@
   role="button"
   tabindex="-1"
 >
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
     <h3>Ebene bearbeiten</h3>
 
