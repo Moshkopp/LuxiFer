@@ -29,6 +29,15 @@
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+        <!-- Modus-Umschalter Design/Laser -->
+        <Style Selector="ToggleButton.mode">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="0,6"/>
+        </Style>
+        <Style Selector="ToggleButton.mode:checked">
+            <Setter Property="Background" Value="#3B82F6"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
         <!-- Schwebendes Overlay-Panel über dem Canvas -->
         <Style Selector="Border.floating">
             <Setter Property="Background" Value="#F02b2b30"/>
@@ -124,7 +133,21 @@
                 <ScrollViewer Padding="10">
                     <StackPanel Spacing="10">
 
-                        <!-- Layer-Liste -->
+                        <!-- Modus-Umschalter Design / Laser -->
+                        <Grid ColumnDefinitions="*,*">
+                            <ToggleButton Grid.Column="0" Content="Design" Classes="mode"
+                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                          IsChecked="{Binding IsDesignMode, Mode=OneWay}"
+                                          Command="{Binding SetModeCommand}"
+                                          CommandParameter="{x:Static vm:WorkMode.Design}"/>
+                            <ToggleButton Grid.Column="1" Content="Laser" Classes="mode"
+                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                          IsChecked="{Binding IsLaserMode, Mode=OneWay}"
+                                          Command="{Binding SetModeCommand}"
+                                          CommandParameter="{x:Static vm:WorkMode.Laser}"/>
+                        </Grid>
+
+                        <!-- Layer-Liste (in beiden Modi sichtbar) -->
                         <DockPanel>
                             <Button DockPanel.Dock="Right" Content="+" Width="30"
                                     Command="{Binding AddLayerCommand}" ToolTip.Tip="Layer hinzufügen"/>
@@ -150,9 +173,11 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
 
-                        <!-- Parameter des aktiven Layers -->
-                        <TextBlock Text="Layer-Parameter" FontWeight="Bold"/>
+                        <!-- Laser-Modus: Maschinenparameter des aktiven Layers -->
+                        <TextBlock Text="Layer-Parameter" FontWeight="Bold"
+                                   IsVisible="{Binding IsLaserMode}"/>
                         <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                              IsVisible="{Binding IsLaserMode}"
                               IsEnabled="{Binding ActiveLayer, Converter={x:Static ObjectConverters.IsNotNull}}">
                             <Grid.Styles>
                                 <Style Selector="TextBox, ComboBox, CheckBox">
@@ -177,10 +202,12 @@
                             <CheckBox Grid.Row="6" Grid.Column="1" IsChecked="{Binding ActiveLayer.AirAssist}"/>
                         </Grid>
 
-                        <!-- Auswahl -->
-                        <TextBlock Text="Auswahl" FontWeight="Bold"/>
+                        <!-- Design-Modus: Auswahl-Eigenschaften -->
+                        <TextBlock Text="Auswahl" FontWeight="Bold"
+                                   IsVisible="{Binding IsDesignMode}"/>
                         <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto,Auto"
-                              IsVisible="{Binding HasSelection}">
+                              IsVisible="{Binding IsDesignMode}"
+                              IsEnabled="{Binding HasSelection}">
                             <Grid.Styles>
                                 <Style Selector="TextBox">
                                     <Setter Property="Margin" Value="0,2"/>
@@ -200,7 +227,7 @@
                                      Text="{Binding SelHeight, UpdateSourceTrigger=LostFocus}"/>
                         </Grid>
                         <TextBlock Text="Kein Objekt ausgewählt" Foreground="#6b6b70"
-                                   IsVisible="{Binding !HasSelection}"/>
+                                   IsVisible="{Binding ShowNoSelectionHint}"/>
                     </StackPanel>
                 </ScrollViewer>
             </Border>

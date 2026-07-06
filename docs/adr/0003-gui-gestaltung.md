@@ -47,13 +47,14 @@ verkleinern den Canvas) durch ein `Panel`/`Grid`, in dem der Canvas die unterste
 vollflächige Ebene ist und die Panele als darüberliegende Kinder positioniert
 werden.
 
-### 1. Zwei Arbeitsmodi: Design und Laser
+### 1. Zwei Arbeitsmodi: Design und Laser  ✓ umgesetzt
 
 Die Oberfläche trennt **Design** (Zeichnen, Formen, Anordnen) von **Laser**
-(Maschinenparameter je Layer, Job-Vorbereitung). Umschaltung oben rechts.
-Das entlastet das rechte Panel: im Design-Modus stehen Objekt-/Auswahl-
-Eigenschaften im Vordergrund, im Laser-Modus die Layer-Maschinenparameter
-(Speed, Power, Passes, Air Assist, Modus).
+(Maschinenparameter je Layer, Job-Vorbereitung). Umschaltung oben rechts im
+Panel (`WorkMode` im ViewModel). Das entlastet das rechte Panel: im
+Design-Modus stehen Objekt-/Auswahl-Eigenschaften im Vordergrund, im
+Laser-Modus die Layer-Maschinenparameter (Speed, Power, Passes, Air Assist,
+Modus). Die Layer-Liste bleibt in beiden Modi sichtbar.
 
 ### 2. Canvas mit Linealen und mm-first  ✓ umgesetzt
 

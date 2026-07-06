@@ -20,6 +20,27 @@ public partial class MainWindowViewModel : ViewModelBase
     private CanvasTool _activeTool = CanvasTool.Select;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDesignMode))]
+    [NotifyPropertyChangedFor(nameof(IsLaserMode))]
+    [NotifyPropertyChangedFor(nameof(ShowNoSelectionHint))]
+    private WorkMode _mode = WorkMode.Design;
+
+    public bool IsDesignMode => Mode == WorkMode.Design;
+    public bool IsLaserMode => Mode == WorkMode.Laser;
+
+    /// <summary>Hinweis „kein Objekt" nur im Design-Modus ohne Auswahl.</summary>
+    public bool ShowNoSelectionHint => IsDesignMode && !HasSelection;
+
+    [RelayCommand]
+    private void SetMode(WorkMode mode)
+    {
+        Mode = mode;
+        StatusText = mode == WorkMode.Design
+            ? "Design-Modus: Zeichnen und Anordnen"
+            : "Laser-Modus: Maschinenparameter und Job";
+    }
+
+    [ObservableProperty]
     private Layer? _activeLayer;
 
     [ObservableProperty]
@@ -150,6 +171,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(ShowNoSelectionHint))]
     private CanvasObject? _selectedObject;
 
     public bool HasSelection => SelectedObject is not null;
