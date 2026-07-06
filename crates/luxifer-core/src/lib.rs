@@ -8,12 +8,16 @@
 //! - [`model`]: [`Shape`] und [`Layer`] (Farbe = Layer).
 //! - [`state`]: [`AppState`] mit Undo/Redo und dem automatischen Farbe=Layer-Modell.
 
+pub mod arrange;
 pub mod geometry;
+pub mod interact;
 pub mod model;
 pub mod project;
 pub mod state;
 
+pub use arrange::{Align, Distribute};
 pub use geometry::{BBox, Geo, Pt};
+pub use interact::Handle;
 pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};
 pub use project::{ProjectFile, ProjectInfo};
 pub use state::AppState;
