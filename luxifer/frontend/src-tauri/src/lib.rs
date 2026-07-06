@@ -3,7 +3,7 @@
 
 use std::sync::Mutex;
 
-use luxifer_core::{AppState, Geo, Layer, Shape};
+use luxifer_core::{AppState, Geo, Layer, Shape, UiSettings};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -266,6 +266,22 @@ fn ruida_send(data: State<AppData>, ip: String) -> Result<String, String> {
     Ok(format!("Job gesendet ({} Byte).", packet.len()))
 }
 
+/// Lädt die GUI-Settings (Panel-Layouts, Theming, Arbeitsplatz) — ADR 0002.
+/// Fehlt die Datei, kommt der Default zurück; die GUI startet immer.
+#[tauri::command]
+fn get_ui_settings() -> UiSettings {
+    UiSettings::load()
+}
+
+/// Speichert die vom Frontend gelieferten GUI-Settings lokal als JSON.
+/// Werte werden vor dem Schreiben geklemmt/aufgeräumt (sanitize).
+#[tauri::command]
+fn save_ui_settings(mut settings: UiSettings) -> Result<UiSettings, String> {
+    settings.sanitize();
+    settings.save()?;
+    Ok(settings)
+}
+
 #[tauri::command]
 fn undo(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
@@ -308,6 +324,8 @@ pub fn run() {
             ruida_send,
             clear_selection,
             delete_selected,
+            get_ui_settings,
+            save_ui_settings,
             undo,
             redo,
         ])

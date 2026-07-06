@@ -9,6 +9,8 @@
 //! - [`state`]: [`AppState`] mit Undo/Redo und dem automatischen Farbe=Layer-Modell.
 //! - [`job`]: geräteunabhängiger [`JobPlan`] + [`MachineDriver`]-Trait (ADR 0001);
 //!   Treiber (Ruida, GRBL, …) sind eigene Crates.
+//! - [`ui_settings`]: auflösungsunabhängiges Panel-Layout, Theming und
+//!   Arbeitsplatz-Settings (ADR 0002); von der GUI genutzt, aber UI-frei.
 
 pub mod arrange;
 pub mod geometry;
@@ -18,6 +20,7 @@ pub mod model;
 pub mod project;
 pub mod scanline;
 pub mod state;
+pub mod ui_settings;
 
 pub use arrange::{Align, Distribute};
 pub use geometry::{BBox, Geo, Pt};
@@ -27,3 +30,6 @@ pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};
 pub use project::{ProjectFile, ProjectInfo};
 pub use scanline::FillSegment;
 pub use state::AppState;
+pub use ui_settings::{
+    Grid, PanelKind, PanelPlacement, PanelRect, Tab, TabLayout, Theme, ThemeColor, UiSettings,
+};

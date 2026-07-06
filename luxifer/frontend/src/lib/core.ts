@@ -115,3 +115,64 @@ export const redo = () => invoke<Scene>("redo");
 
 export const swatchColors = () =>
   invoke<[number, number, number][]>("swatch_colors");
+
+// ---- GUI-Settings (Panel-System, ADR 0002) ---------------------------------
+// Spiegelt luxifer-core::ui_settings. Positionen sind Bruchteile (0…1) des
+// Fensters, nie Pixel — das Snapping aufs Raster passiert erst beim Zeichnen.
+
+export type Tab = "Design" | "Laser" | "Monitor";
+
+export type PanelKind =
+  | "Werkzeuge"
+  | "Ebenen"
+  | "Farbpalette"
+  | "Anordnen"
+  | "Laser"
+  | "JobStatus";
+
+export interface PanelRect {
+  x: number; // linke obere Ecke, Bruchteil 0…1
+  y: number;
+  w: number; // Ausdehnung, Bruchteil 0…1
+  h: number;
+  z: number; // Stapel-Reihenfolge bei Überlappung
+}
+
+export interface PanelPlacement {
+  kind: PanelKind;
+  rect: PanelRect;
+}
+
+export interface TabLayout {
+  tab: Tab;
+  panels: PanelPlacement[];
+}
+
+export interface Grid {
+  cols: number;
+  rows: number;
+}
+
+export interface ThemeColor {
+  hue: [number, number, number];
+  intensity: number; // geklemmt auf lesbaren Korridor (0.3…0.9)
+}
+
+export interface Theme {
+  accent: ThemeColor;
+  button: ThemeColor;
+}
+
+export interface UiSettings {
+  version: number;
+  workplace: string;
+  grid: Grid;
+  theme: Theme;
+  layouts: TabLayout[];
+}
+
+export const getUiSettings = () => invoke<UiSettings>("get_ui_settings");
+
+// Speichert und gibt die aufgeräumten (geklemmten) Settings zurück.
+export const saveUiSettings = (settings: UiSettings) =>
+  invoke<UiSettings>("save_ui_settings", { settings });
