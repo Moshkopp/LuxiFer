@@ -28,6 +28,9 @@ public partial class MainWindow : Window
         // Die Lineale sitzen bereits außerhalb der Canvas-Fläche.
         Canvas.ContentInset = new Thickness(64, 16, 292, 16);
 
+        WireLayerPanel(LayerPanelRight);
+        WireLayerPanel(LayerPanelLeft);
+
         KeyDown += OnWindowKeyDown;
         Loaded += (_, _) => SyncRulers();
     }
@@ -85,8 +88,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnLayerVisibilityClick(object? sender, RoutedEventArgs e) =>
-        Canvas.InvalidateVisual();
+    private void WireLayerPanel(LuxiFer.App.Controls.LayerPanel panel)
+    {
+        panel.LayerEditRequested += async (_, layer) =>
+        {
+            await new LayerEditDialog(layer).ShowDialog(this);
+            Canvas.InvalidateVisual(); // Farbe/Modus könnten sich geändert haben
+        };
+        panel.LayerToggled += (_, _) => Canvas.InvalidateVisual();
+    }
 
     private void OnSelectionEditCommit(object? sender, RoutedEventArgs e) =>
         ViewModel?.CommitSelectionEdit();

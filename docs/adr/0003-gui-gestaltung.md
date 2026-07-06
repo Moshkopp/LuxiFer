@@ -50,11 +50,18 @@ werden.
 ### 1. Zwei Arbeitsmodi: Design und Laser  ✓ umgesetzt
 
 Die Oberfläche trennt **Design** (Zeichnen, Formen, Anordnen) von **Laser**
-(Maschinenparameter je Layer, Job-Vorbereitung). Umschaltung oben rechts im
-Panel (`WorkMode` im ViewModel). Das entlastet das rechte Panel: im
-Design-Modus stehen Objekt-/Auswahl-Eigenschaften im Vordergrund, im
-Laser-Modus die Layer-Maschinenparameter (Speed, Power, Passes, Air Assist,
-Modus). Die Layer-Liste bleibt in beiden Modi sichtbar.
+(Maschinensteuerung, Job) über einen Umschalter oben rechts (`WorkMode` im
+ViewModel). Die Panele **wechseln je Modus die Seite**:
+
+- **Design:** Werkzeug-Palette links, Anordnen-Toolbar oben mittig,
+  Layer-Panel + Auswahl-Eigenschaften rechts.
+- **Laser:** Layer-Panel links, keine Werkzeuge/Anordnen, Maschinen-
+  Steuerpanel (`LaserPanel`) rechts — bewusst breit und touch-freundlich.
+
+Die Layer-Parameter (Speed, Power, Passes, Air Assist, Modus) werden **nicht**
+im Panel bearbeitet, sondern per **Doppelklick** auf einen Layer im
+`LayerEditDialog`. Das Layer-Panel selbst ist als wiederverwendbares
+`LayerPanel`-Control ausgelagert.
 
 ### 2. Canvas mit Linealen und mm-first  ✓ umgesetzt
 

@@ -96,9 +96,25 @@
                                     SelectedObject="{Binding SelectedObject, Mode=TwoWay}"/>
             </Grid>
 
-            <!-- Schwebende Werkzeug-Palette links -->
+            <!-- Modus-Umschalter oben rechts (immer sichtbar) -->
+            <Border Classes="floating" Padding="4" Margin="12"
+                    HorizontalAlignment="Right" VerticalAlignment="Top">
+                <Grid ColumnDefinitions="Auto,Auto">
+                    <ToggleButton Grid.Column="0" Content="Design" Classes="mode" Width="90"
+                                  IsChecked="{Binding IsDesignMode, Mode=OneWay}"
+                                  Command="{Binding SetModeCommand}"
+                                  CommandParameter="{x:Static vm:WorkMode.Design}"/>
+                    <ToggleButton Grid.Column="1" Content="Laser" Classes="mode" Width="90"
+                                  IsChecked="{Binding IsLaserMode, Mode=OneWay}"
+                                  Command="{Binding SetModeCommand}"
+                                  CommandParameter="{x:Static vm:WorkMode.Laser}"/>
+                </Grid>
+            </Border>
+
+            <!-- DESIGN: Werkzeug-Palette links -->
             <Border Classes="floating" Padding="6" Margin="12"
-                    HorizontalAlignment="Left" VerticalAlignment="Center">
+                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                    IsVisible="{Binding IsDesignMode}">
                 <StackPanel Spacing="6">
                     <ToggleButton Classes="tool" Content="⬚" ToolTip.Tip="Auswählen (V)"
                                   IsChecked="{Binding ActiveTool, Converter={x:Static ctrl:ToolConverters.Equals}, ConverterParameter={x:Static ctrl:CanvasTool.Select}, Mode=OneWay}"
@@ -127,86 +143,42 @@
                 </StackPanel>
             </Border>
 
-            <!-- Schwebendes Panel rechts: Layer + Parameter + Auswahl -->
-            <Border Classes="floating" Width="270" Margin="12"
-                    HorizontalAlignment="Right" VerticalAlignment="Stretch">
-                <ScrollViewer Padding="10">
-                    <StackPanel Spacing="10">
+            <!-- DESIGN: Anordnen-Toolbar oben mittig -->
+            <Border Classes="floating" Padding="4" Margin="12,12,0,0"
+                    HorizontalAlignment="Center" VerticalAlignment="Top"
+                    IsVisible="{Binding IsDesignMode}">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <StackPanel.Styles>
+                        <Style Selector="Button.arrange">
+                            <Setter Property="Width" Value="38"/>
+                            <Setter Property="Height" Value="38"/>
+                            <Setter Property="FontSize" Value="16"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                        </Style>
+                    </StackPanel.Styles>
+                    <Button Classes="arrange" Content="⊨" ToolTip.Tip="Links ausrichten"/>
+                    <Button Classes="arrange" Content="≡" ToolTip.Tip="Horizontal zentrieren"/>
+                    <Button Classes="arrange" Content="⊨" ToolTip.Tip="Rechts ausrichten"/>
+                    <Rectangle Width="1" Height="24" Fill="#30FFFFFF" Margin="4,0"/>
+                    <Button Classes="arrange" Content="⊤" ToolTip.Tip="Oben ausrichten"/>
+                    <Button Classes="arrange" Content="≡" ToolTip.Tip="Vertikal zentrieren"/>
+                    <Button Classes="arrange" Content="⊥" ToolTip.Tip="Unten ausrichten"/>
+                    <Rectangle Width="1" Height="24" Fill="#30FFFFFF" Margin="4,0"/>
+                    <Button Classes="arrange" Content="⇔" ToolTip.Tip="Horizontal verteilen"/>
+                    <Button Classes="arrange" Content="⇕" ToolTip.Tip="Vertikal verteilen"/>
+                </StackPanel>
+            </Border>
 
-                        <!-- Modus-Umschalter Design / Laser -->
-                        <Grid ColumnDefinitions="*,*">
-                            <ToggleButton Grid.Column="0" Content="Design" Classes="mode"
-                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                          IsChecked="{Binding IsDesignMode, Mode=OneWay}"
-                                          Command="{Binding SetModeCommand}"
-                                          CommandParameter="{x:Static vm:WorkMode.Design}"/>
-                            <ToggleButton Grid.Column="1" Content="Laser" Classes="mode"
-                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                          IsChecked="{Binding IsLaserMode, Mode=OneWay}"
-                                          Command="{Binding SetModeCommand}"
-                                          CommandParameter="{x:Static vm:WorkMode.Laser}"/>
-                        </Grid>
-
-                        <!-- Layer-Liste (in beiden Modi sichtbar) -->
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right" Content="+" Width="30"
-                                    Command="{Binding AddLayerCommand}" ToolTip.Tip="Layer hinzufügen"/>
-                            <TextBlock Text="Layer" FontWeight="Bold" VerticalAlignment="Center"/>
-                        </DockPanel>
-                        <ListBox ItemsSource="{Binding Layers}" SelectedItem="{Binding ActiveLayer}"
-                                 Background="Transparent" MaxHeight="220">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate x:DataType="canvas:Layer">
-                                    <DockPanel>
-                                        <Border DockPanel.Dock="Left" Width="14" Height="14" CornerRadius="3"
-                                                Background="{Binding ColorHex, Converter={x:Static ctrl:ToolConverters.HexToBrush}}"
-                                                VerticalAlignment="Center"/>
-                                        <CheckBox DockPanel.Dock="Right" IsChecked="{Binding Locked}"
-                                                  Click="OnLayerVisibilityClick" ToolTip.Tip="Gesperrt"
-                                                  Margin="4,0,0,0">🔒</CheckBox>
-                                        <CheckBox DockPanel.Dock="Right" IsChecked="{Binding Visible}"
-                                                  Click="OnLayerVisibilityClick" ToolTip.Tip="Sichtbar"
-                                                  Margin="4,0,0,0">👁</CheckBox>
-                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                                    </DockPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-
-                        <!-- Laser-Modus: Maschinenparameter des aktiven Layers -->
-                        <TextBlock Text="Layer-Parameter" FontWeight="Bold"
-                                   IsVisible="{Binding IsLaserMode}"/>
-                        <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
-                              IsVisible="{Binding IsLaserMode}"
-                              IsEnabled="{Binding ActiveLayer, Converter={x:Static ObjectConverters.IsNotNull}}">
-                            <Grid.Styles>
-                                <Style Selector="TextBox, ComboBox, CheckBox">
-                                    <Setter Property="Margin" Value="0,2"/>
-                                </Style>
-                            </Grid.Styles>
-                            <TextBlock Classes="label" Grid.Row="0" Grid.Column="0" Text="Name"/>
-                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ActiveLayer.Name}"/>
-                            <TextBlock Classes="label" Grid.Row="1" Grid.Column="0" Text="Modus"/>
-                            <ComboBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch"
-                                      ItemsSource="{Binding LayerModes}"
-                                      SelectedItem="{Binding ActiveLayer.Mode}"/>
-                            <TextBlock Classes="label" Grid.Row="2" Grid.Column="0" Text="Speed mm/s"/>
-                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ActiveLayer.SpeedMmS}"/>
-                            <TextBlock Classes="label" Grid.Row="3" Grid.Column="0" Text="Power %"/>
-                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding ActiveLayer.PowerPct}"/>
-                            <TextBlock Classes="label" Grid.Row="4" Grid.Column="0" Text="Min-Power %"/>
-                            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding ActiveLayer.MinPowerPct}"/>
-                            <TextBlock Classes="label" Grid.Row="5" Grid.Column="0" Text="Passes"/>
-                            <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding ActiveLayer.Passes}"/>
-                            <TextBlock Classes="label" Grid.Row="6" Grid.Column="0" Text="Air Assist"/>
-                            <CheckBox Grid.Row="6" Grid.Column="1" IsChecked="{Binding ActiveLayer.AirAssist}"/>
-                        </Grid>
-
-                        <!-- Design-Modus: Auswahl-Eigenschaften -->
-                        <TextBlock Text="Auswahl" FontWeight="Bold"
-                                   IsVisible="{Binding IsDesignMode}"/>
-                        <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto,Auto"
-                              IsVisible="{Binding IsDesignMode}"
+            <!-- DESIGN: Layer-Panel + Auswahl rechts -->
+            <Border Classes="floating" Width="240" Margin="12,64,12,12"
+                    HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                    IsVisible="{Binding IsDesignMode}">
+                <DockPanel>
+                    <!-- Auswahl-Eigenschaften unten angedockt -->
+                    <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="10">
+                        <Rectangle Height="1" Fill="#20FFFFFF"/>
+                        <TextBlock Text="Auswahl" FontWeight="Bold"/>
+                        <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto,Auto,Auto"
                               IsEnabled="{Binding HasSelection}">
                             <Grid.Styles>
                                 <Style Selector="TextBox">
@@ -229,7 +201,22 @@
                         <TextBlock Text="Kein Objekt ausgewählt" Foreground="#6b6b70"
                                    IsVisible="{Binding ShowNoSelectionHint}"/>
                     </StackPanel>
-                </ScrollViewer>
+                    <ctrl:LayerPanel x:Name="LayerPanelRight" DataContext="{Binding}"/>
+                </DockPanel>
+            </Border>
+
+            <!-- LASER: Layer-Panel links -->
+            <Border Classes="floating" Width="240" Margin="12"
+                    HorizontalAlignment="Left" VerticalAlignment="Stretch"
+                    IsVisible="{Binding IsLaserMode}">
+                <ctrl:LayerPanel x:Name="LayerPanelLeft" DataContext="{Binding}"/>
+            </Border>
+
+            <!-- LASER: Maschinen-Steuerpanel rechts -->
+            <Border Classes="floating" Width="300" Margin="12,64,12,12"
+                    HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                    IsVisible="{Binding IsLaserMode}">
+                <ctrl:LaserPanel Margin="10"/>
             </Border>
         </Panel>
     </DockPanel>
