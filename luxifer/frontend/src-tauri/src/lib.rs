@@ -3,7 +3,7 @@
 
 use std::sync::Mutex;
 
-use luxifer_core::{AppState, Geo, Layer, Shape, UiSettings};
+use luxifer_core::{AppState, Geo, Layer, Shape, Tab, UiSettings};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -219,14 +219,16 @@ fn set_layer_params(data: State<AppData>, index: usize, p: LayerParams) -> Scene
     Scene::from_state(&s)
 }
 
-/// Sicht-/Sperr-Zustand eines Layers umschalten.
+/// Schalter eines Layers umschalten (Anzeige, Brennen, Luft, Sperre).
 #[tauri::command]
 fn toggle_layer(data: State<AppData>, index: usize, field: String) -> Scene {
     let mut s = data.state.lock().unwrap();
     if let Some(l) = s.layers.get_mut(index) {
         match field.as_str() {
-            "visible" => l.visible = !l.visible,
-            "locked" => l.locked = !l.locked,
+            "visible" => l.visible = !l.visible,   // Objekte anzeigen
+            "enabled" => l.enabled = !l.enabled,   // im Job mitbrennen
+            "air_assist" => l.air_assist = !l.air_assist, // Luftunterstützung
+            "locked" => l.locked = !l.locked,      // Editiersperre
             _ => {}
         }
     }
@@ -282,6 +284,16 @@ fn save_ui_settings(mut settings: UiSettings) -> Result<UiSettings, String> {
     Ok(settings)
 }
 
+/// Setzt einen Reiter auf sein Standard-Layout zurück (ADR §2), speichert und
+/// gibt die aktualisierten Settings zurück. Andere Reiter bleiben unberührt.
+#[tauri::command]
+fn reset_ui_tab(tab: Tab) -> Result<UiSettings, String> {
+    let mut settings = UiSettings::load();
+    settings.reset_tab(tab);
+    settings.save()?;
+    Ok(settings)
+}
+
 #[tauri::command]
 fn undo(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
@@ -326,6 +338,7 @@ pub fn run() {
             delete_selected,
             get_ui_settings,
             save_ui_settings,
+            reset_ui_tab,
             undo,
             redo,
         ])

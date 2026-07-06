@@ -36,7 +36,7 @@
   }
 </script>
 
-<div class="panel laser">
+<div class="laser">
   <!-- Verbindung -->
   <section>
     <div class="head">
@@ -121,22 +121,11 @@
 </div>
 
 <style>
+  /* Im Grid-Slot: fuellt die zugewiesene Flaeche, kein eigenes Positionieren. */
   .laser {
-    position: absolute;
-    right: 12px;
-    bottom: 12px;
-    width: 240px;
-    max-height: calc(100% - 24px);
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 12px 40px -4px rgba(0, 0, 0, 0.5);
-    padding: 12px;
-    z-index: 10;
   }
   section {
     display: flex;
@@ -201,16 +190,29 @@
     font-size: 16px;
   }
   .tile.start {
-    background: var(--accent);
+    background: linear-gradient(
+      180deg,
+      hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 8%)),
+      var(--accent)
+    );
     color: white;
+    border-color: hsl(var(--accent-h) var(--accent-s) 80% / 0.6);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      0 0 16px -3px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.55);
   }
+  /* Sende-Knopf bleibt als Signalfarbe gruen, aber mit Glow-Tiefe. */
   .send {
-    background: #3fb27f;
+    background: linear-gradient(180deg, #48c78e, #37a877);
     color: white;
     font-weight: 600;
+    border-color: rgba(120, 240, 190, 0.5);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      0 0 16px -4px rgba(63, 178, 127, 0.6);
   }
   .send:hover {
-    background: #4bc48f;
+    background: linear-gradient(180deg, #55d49b, #3fb587);
   }
   .field {
     display: flex;
@@ -235,8 +237,8 @@
     width: 14px;
     height: 14px;
     border-radius: 3px;
-    background: #16171b;
-    border: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.12);
   }
   .apt.on {
     background: var(--accent);
@@ -269,8 +271,8 @@
   }
   input,
   select {
-    background: #16171b;
-    border: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 6px;
     color: var(--text);
     padding: 6px 8px;
@@ -281,16 +283,35 @@
     outline: none;
     border-color: var(--accent);
   }
+  /* Frosted-Depth-Buttons passend zum globalen .gbtn (app.css). */
   button {
-    background: #26282d;
+    background: linear-gradient(
+      180deg,
+      hsl(var(--btn-h) var(--btn-s) 75% / 0.16),
+      hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.14)
+    );
     color: var(--text);
-    border: none;
-    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 9px;
     padding: 7px 10px;
     cursor: pointer;
-    transition: background 0.14s;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 1px 2px rgba(0, 0, 0, 0.25);
+    transition:
+      background 0.16s ease,
+      border-color 0.16s ease,
+      transform 0.08s ease;
   }
   button:hover {
-    background: #2e3036;
+    background: linear-gradient(
+      180deg,
+      hsl(var(--btn-h) var(--btn-s) 78% / 0.3),
+      hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.26)
+    );
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+  button:active {
+    transform: translateY(1px);
   }
 </style>

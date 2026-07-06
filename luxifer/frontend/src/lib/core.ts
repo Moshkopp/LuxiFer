@@ -12,6 +12,7 @@ export interface Layer {
   name: string;
   color: [number, number, number];
   visible: boolean;
+  enabled: boolean;
   active: boolean;
   locked: boolean;
   mode: "Cut" | "Fill" | "Raster";
@@ -102,7 +103,8 @@ export interface LayerParams {
 export const setLayerParams = (index: number, p: LayerParams) =>
   invoke<Scene>("set_layer_params", { index, p });
 
-export const toggleLayer = (index: number, field: "visible" | "locked") =>
+export type LayerToggle = "visible" | "enabled" | "air_assist" | "locked";
+export const toggleLayer = (index: number, field: LayerToggle) =>
   invoke<Scene>("toggle_layer", { index, field });
 
 export const generateGcode = () => invoke<string>("generate_gcode");
@@ -148,11 +150,6 @@ export interface TabLayout {
   panels: PanelPlacement[];
 }
 
-export interface Grid {
-  cols: number;
-  rows: number;
-}
-
 export interface ThemeColor {
   hue: [number, number, number];
   intensity: number; // geklemmt auf lesbaren Korridor (0.3…0.9)
@@ -166,7 +163,6 @@ export interface Theme {
 export interface UiSettings {
   version: number;
   workplace: string;
-  grid: Grid;
   theme: Theme;
   layouts: TabLayout[];
 }
@@ -176,3 +172,8 @@ export const getUiSettings = () => invoke<UiSettings>("get_ui_settings");
 // Speichert und gibt die aufgeräumten (geklemmten) Settings zurück.
 export const saveUiSettings = (settings: UiSettings) =>
   invoke<UiSettings>("save_ui_settings", { settings });
+
+// Setzt einen Reiter auf sein Standard-Layout zurück, speichert und gibt die
+// aktualisierten Settings zurück (ADR §2).
+export const resetTab = (tab: Tab) =>
+  invoke<UiSettings>("reset_ui_tab", { tab });

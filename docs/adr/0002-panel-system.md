@@ -1,4 +1,4 @@
-# ADR 0002: Panel-System (Raster-Layout, Reiter, Theming, Arbeitsplatz-Settings)
+# ADR 0002: Panel-System (freie Positionierung, Reiter, Theming, Arbeitsplatz-Settings)
 
 ## Status
 Akzeptiert — 2026-07-06
@@ -15,57 +15,47 @@ Wechsel der Auflösung/des Monitors an der falschen Stelle oder außerhalb des
 sichtbaren Bereichs — das „Positionier-Problem", das sich durch alle bisherigen
 Versionen zog.
 
-Diese ADR legt ein **auflösungsunabhängiges Panel-System** fest, dazu wählbares
-Theming (Glassmorphism + Akzentfarbe), reiterbasierte Sichtbarkeit und
-arbeitsplatzbezogene, lokal gespeicherte GUI-Settings (später über Charon
-synchronisierbar).
+Diese ADR legt ein **auflösungsunabhängiges Panel-System** fest (Panele frei
+relativ positioniert), dazu wählbares „Frosted Depth"-Glas-Theming (Akzent- +
+Button-Farbe), reiterbasierte Sichtbarkeit und arbeitsplatzbezogene, lokal
+gespeicherte GUI-Settings (später über Charon synchronisierbar).
 
 ## Entscheidung
 
-### 1. Relatives Raster-Layout (löst das Auflösungsproblem)
+### 1. Freie relative Positionierung (löst das Auflösungsproblem)
 
-Panele werden **nicht in Pixeln**, sondern in **Rasterzellen** positioniert. Das
-Fenster ist ein Raster aus **Spalten × Zeilen** (z. B. 12 Spalten × 8 Zeilen).
-Ein Panel belegt einen Zellbereich `{ col, row, colSpan, rowSpan }`.
+Panele werden **nicht in Pixeln**, sondern in **Bruchteilen des Fensters**
+positioniert. Jedes Panel merkt sich `{ x, y, w, h }` als Anteil 0…1 der
+Fensterbreite/-höhe plus ein `z` für die Stapel-Reihenfolge.
 
-- **Auflösungsunabhängig:** Die Zellengröße ergibt sich aus der aktuellen
-  Fenstergröße (`Zellbreite = Fensterbreite / Spaltenzahl`). Dieselbe
-  `{col,row,span}` sitzt auf FullHD und WQHD an der *gleichen relativen*
-  Stelle — nie mehr außerhalb.
-- **Snap:** Beim Verschieben/Größenändern rastet ein Panel auf ganze Zellen ein.
-  Es gibt keine „krummen" Pixel-Positionen.
+- **Auflösungsunabhängig:** Dieselben Bruchteile sitzen auf FullHD und WQHD an
+  der *gleichen relativen* Stelle — nie mehr außerhalb. Das war der Kern gegen
+  das Positionier-Problem.
+- **Frei, ohne Raster/Snap.** Panele lassen sich **stufenlos** verschieben und
+  in der Größe ziehen. Ein festes Zell-Raster mit Snap wurde verworfen: es war
+  in der Praxis entweder zu grob oder zu fummelig. Freie Positionierung trifft
+  genau die gewünschte Stelle.
 - **Panele dürfen sich überlappen (frei schwebend).** Es gibt **keine
-  Verdrängungs- oder Kollisionslogik** — zwei Panele können denselben Zellbereich
-  belegen, die z-Reihenfolge entscheidet, was oben liegt. Kollisionen vermeidet
-  der Nutzer selbst beim Anordnen. Das hält den Umbau schlank (kein „Tetris-
-  Solver") und passt dazu, dass Panele ohnehin über dem Canvas schweben.
+  Verdrängungs- oder Kollisionslogik** — die z-Reihenfolge entscheidet, was oben
+  liegt. Kollisionen vermeidet der Nutzer selbst beim Anordnen. Das hält den
+  Umbau schlank und passt dazu, dass Panele ohnehin über dem Canvas schweben.
 - **Größe passt Inhalt an:** Panele sind responsiv; der Inhalt fließt in die
-  gegebene Zellfläche (Toolbar wird bei genügend Breite **1- oder 2-spaltig**,
-  Listen scrollen bei Bedarf). `colSpan` steuert also unmittelbar das
+  gegebene Fläche (Toolbar wird bei genügend Breite **1- oder 2-spaltig**,
+  Listen scrollen bei Bedarf). Die Breite steuert also unmittelbar das
   Erscheinungsbild.
-- **Rastermaße (Spalten × Zeilen) sind ein Settings-Wert** — vorerst zum
-  **Experimentieren** frei anpassbar (Standard 12 × 8), bis ein gutes Maß
-  gefunden ist; danach wird es **fixiert**. Die Spaltenzahl bestimmt die
-  Feinheit — z. B. mehr Spalten = Toolbar kann 1 oder 2 davon breit sein.
-- **Positionen werden als Bruchteile gespeichert, nicht als Zellindex.** Ein
-  Panel merkt sich `col/Spaltenzahl` und `row/Zeilenzahl` (bzw. den Startanteil
-  0…1), nicht die rohe Zelle. So ist ein **Rasterwechsel verlustfrei**: geht man
-  von 12 × 8 auf 6 × 4 und zurück, sitzen die Panele wieder da, wo sie waren —
-  gerade beim Experimentieren zwingend, sonst „vergisst" jedes Umstellen die
-  Anordnung. Gerundet/gesnappt wird erst zur Anzeige auf das aktuelle Raster.
 
-Panele „schweben" weiter über dem Canvas (Canvas ist die vollflächige
-Grundebene); das Raster bestimmt nur ihre Position/Größe, nicht ob sie den
-Canvas verdrängen.
+Panele „schweben" über dem Canvas (Canvas ist die vollflächige Grundebene); die
+Bruchteile bestimmen nur ihre Position/Größe, nicht ob sie den Canvas
+verdrängen.
 
 ### 2. Reiter: Design / Laser / Monitor
 
 Oben gibt es Reiter **Design**, **Laser**, **Monitor** (Monitor kommt später).
 **Jeder Reiter hat sein eigenes, gespeichertes Layout** (welche Panele sichtbar
-sind und wo sie im Raster sitzen). Reiter wechseln = das ganze Panel-Set +
-Layout wechselt.
+sind und wo sie sitzen). Reiter wechseln = das ganze Panel-Set + Layout
+wechselt.
 
-- Pro Reiter: Menge sichtbarer Panele + deren `{col,row,span}`.
+- Pro Reiter: Menge sichtbarer Panele + deren `{x,y,w,h,z}` (Bruchteile).
 - Panele lassen sich pro Reiter ein-/ausblenden.
 - Beispiel: Design zeigt Werkzeuge/Ebenen/Farbpalette; Laser zeigt Ebenen +
   Laser-Control; Monitor (später) Job-Fortschritt/Status.
@@ -74,11 +64,19 @@ Layout wechselt.
   Reiter auf sein Standard zurück (die anderen Reiter bleiben unberührt). Beim
   allerersten Start bzw. ohne gespeicherte Settings gilt das Standard.
 
-### 3. Theming: Glassmorphism + zwei einstellbare Farben
+### 3. Theming: „Frosted Depth"-Glas + zwei einstellbare Farben
 
-- **Glassmorphism:** Panele mit Milchglas-Effekt (Hintergrund-Blur,
-  Halbtransparenz, feiner heller Rand, weicher Schatten). Der Canvas scheint
-  gedämpft durch.
+- **Frosted-Depth-Glas:** Panele sind mehrschichtiges Frostglas mit echter
+  Tiefe — starker Hintergrund-Blur, diagonaler Licht-Sheen, akzentgetönter
+  Verlauf, Außenschatten + Akzent-Halo + innere Licht-Kante oben + Dunkelschatten
+  unten. Der Canvas scheint gedämpft durch. Bedienelemente (Buttons, Kacheln)
+  sind selbst durchscheinend statt harte Flächen; aktive Elemente glühen im
+  Akzent. Das **Rauchglas selbst ist mit dem Akzent getönt** (dezent), nicht nur
+  der Rand.
+- **Layer-Kacheln:** Jede Ebene ist eine eigene Glaskachel. Die Layer-Farbe
+  färbt linke/rechte Kante und zieht sich als dezenter Waschgang durch die
+  Fläche; die Kachel trägt Modus, Speed, Min–Max-Leistung und drei Schalter
+  (Air Assist, Aktiv=brennen, Zeigen=Objekte anzeigen).
 - **Zwei wählbare Farben:**
   - **Akzentfarbe** — aktive Werkzeuge, Auswahl, Handles, Hervorhebungen.
   - **Button-Farbe** — Grundfläche der Buttons, getrennt einstellbar, damit man
@@ -95,8 +93,10 @@ Layout wechselt.
   bleiben (Richtwert Sättigung ~30–90 %, Helligkeit nicht bis an die Extreme).
   So kann man sich nicht in Unlesbarkeit oder unsichtbare Buttons regeln. Die
   genauen Grenzen werden beim Umbau am echten Glass-Look feinjustiert.
-- **Umsetzung** über CSS-Variablen (`--accent`, `--btn`), die aus den Settings
-  gesetzt werden — eine Quelle, überall wirksam.
+- **Umsetzung** über CSS-Variablen, die aus den Settings gesetzt werden — eine
+  Quelle, überall wirksam. Neben den fertigen Farben (`--accent`, `--btn`) werden
+  auch die H/S/L-Kanäle einzeln gesetzt (`--accent-h/-s/-l`, `--btn-h/-s/-l`),
+  damit das Glas-Design beliebige Transparenzen aus der Theme-Farbe bauen kann.
 - **Bedient wird das nicht über ein Settings-Menü, sondern über ein Flyout im
   Editier-Modus** (siehe §5): Farben/Intensität ändert man direkt, während man
   die Oberfläche umbaut, mit sofortiger Vorschau.
@@ -110,8 +110,7 @@ Layout wechselt.
   - Reiter-Layouts (sichtbare Panele + Position/Größe **als Bruchteile**,
     siehe §1, je Reiter),
   - Akzentfarbe + ihre Intensität, Button-Farbe + ihre Intensität,
-  - Arbeitsplatzname,
-  - Rastermaße (Spalten × Zeilen) — solange noch experimentiert wird.
+  - Arbeitsplatzname.
   Der Editier-Modus selbst ist **flüchtig** (wird nicht gespeichert).
 - Die JSON-Struktur wird so gehalten, dass **Charon sie später übernehmen und
   pro Arbeitsplatz synchronisieren** kann. Charon speichert dann GUI-Settings
@@ -129,13 +128,14 @@ unverrückbar bleibt.
   nicht unnötig unruhig macht. Klick schaltet den Editier-Modus um (offen ↔
   gesperrt).
 - **Im Editier-Modus:**
-  - Panele sind **verschiebbar und in der Größe änderbar** (Snap aufs Raster).
+  - Panele bekommen eine **Bounding-Box** wie eine selektierte Shape im Canvas
+    (Akzent-Rahmen + Greifpunkte). Fläche ziehen verschiebt, Griffe skalieren —
+    **frei, ohne Raster-Snap** (§1).
   - Panele lassen sich **ein-/ausblenden** (pro Reiter).
   - Ein **Theming-Flyout** erlaubt Akzent-/Button-Farbe + Intensität (§3) mit
     Live-Vorschau.
   - Ein **„Zurücksetzen"** stellt das Standard-Layout des aktuellen Reiters her
     (§2).
-  - Optional die **Rastermaße** (Spalten × Zeilen, §1) zum Experimentieren.
 - **Außerhalb des Editier-Modus** sind Panele fixiert; kein versehentliches
   Verschieben.
 - Änderungen werden beim Verlassen des Editier-Modus (oder laufend) in die
@@ -143,9 +143,8 @@ unverrückbar bleibt.
 
 ## Invarianten
 
-1. **Panel-Positionen sind relativ (Bruchteile des Rasters), nie feste Pixel.**
-   Das ist der Kern gegen das Auflösungsproblem und macht Rasterwechsel
-   verlustfrei.
+1. **Panel-Positionen sind relativ (Bruchteile des Fensters), nie feste Pixel.**
+   Das ist der Kern gegen das Auflösungsproblem; frei positioniert, ohne Raster.
 2. Jeder Reiter hält sein eigenes Layout; Umschalten verändert kein anderes.
 3. Akzent- und Button-Farbe (samt Intensität) kommen aus den Settings (eine
    Quelle, CSS-Variablen), nicht hartkodiert.
@@ -155,24 +154,20 @@ unverrückbar bleibt.
 
 ## Konsequenzen
 
-- Das aktuelle Frontend (feste `position:absolute`-Panele) wird auf ein
-  Grid-Layout-System umgebaut. Panele werden zu Grid-Kindern mit
-  `{col,row,span}` und Drag/Resize-Snap.
-- Ein **Settings-Modell** (JSON) + Lade-/Speicherweg entsteht (zunächst lokale
-  Datei über einen Tauri-Command; Struktur Charon-kompatibel).
-- Theming wird über CSS-Variablen zentralisiert; Glassmorphism als
-  Panel-Grundstil.
-- Die Reiter Design/Laser existieren funktional; **Monitor** wird als Reiter
+- Das frühere Frontend (feste `position:absolute`-Panele) wurde auf freie,
+  relative Positionierung umgebaut: ein `PanelHost` positioniert Panele aus
+  Bruchteil-Rects, im Editier-Modus mit Bounding-Box und freiem Drag/Resize.
+- Ein **Settings-Modell** (`luxifer-core::ui_settings`, JSON) + Lade-/Speicherweg
+  entstand (lokale Datei über Tauri-Commands; Struktur Charon-kompatibel).
+- Theming ist über CSS-Variablen zentralisiert; „Frosted Depth"-Glas als
+  Panel-Grundstil, Bedienelemente aus den Theme-Farben abgeleitet.
+- Die Reiter Design/Laser existieren funktional; **Monitor** ist als Reiter
   angelegt, aber inhaltlich später gefüllt.
 
 ## Offen / nicht Teil dieser Entscheidung
 
-- Genaue Drag-Handle-Interaktion (Greifpunkte, Vorschau beim Ziehen) — Feinschliff
-  beim Umbau. Die **Kollisionsfrage ist entschieden** (frei überlappend, §1).
-- Die endgültigen Rastermaße — vorerst zum Experimentieren einstellbar, werden
-  später fixiert (§1).
-- Die genauen Grenzen des Intensitäts-Korridors — am echten Glass-Look
-  feinjustieren (§3).
+- Feinschliff der Drag-Interaktion (z. B. Tastatur-Nudging) — später.
+- Charon-Sync-Protokoll (eigener späterer Schritt); hier nur die JSON-Struktur
 - Charon-Sync-Protokoll (eigener späterer Schritt); hier nur die JSON-Struktur
   vorbereiten.
 - Monitor-Reiter-Inhalte.

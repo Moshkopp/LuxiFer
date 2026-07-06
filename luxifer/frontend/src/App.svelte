@@ -2,8 +2,23 @@
   import Canvas from "./lib/Canvas.svelte";
   import LayerDialog from "./lib/LayerDialog.svelte";
   import LaserPanel from "./lib/LaserPanel.svelte";
+  import PanelHost from "./lib/PanelHost.svelte";
+  import ToolsPanel from "./lib/ToolsPanel.svelte";
+  import LayersPanel from "./lib/LayersPanel.svelte";
+  import PalettePanel from "./lib/PalettePanel.svelte";
+  import ArrangePanel from "./lib/ArrangePanel.svelte";
+  import EditFlyout from "./lib/EditFlyout.svelte";
   import * as core from "./lib/core";
-  import type { Scene, LayerParams } from "./lib/core";
+  import type {
+    Scene,
+    LayerParams,
+    UiSettings,
+    Tab,
+    PanelKind,
+    PanelRect,
+    PanelPlacement,
+  } from "./lib/core";
+  import { applyTheme } from "./lib/theme";
 
   type Tool = "select" | "rect" | "ellipse";
 
@@ -11,22 +26,85 @@
   let tool = $state<Tool>("rect");
   let swatches = $state<[number, number, number][]>([]);
   let error = $state<string | null>(null);
-  // Index des Layers, dessen Dialog offen ist (oder null).
   let editLayer = $state<number | null>(null);
-  // Erzeugter G-Code (Overlay), oder null.
   let gcode = $state<string | null>(null);
+  let status = $state<string | null>(null);
+
+  // --- GUI-Settings (Panel-System, ADR 0002) --------------------------------
+  let settings = $state<UiSettings | null>(null);
+  let activeTab = $state<Tab>("Design");
+  // Editier-Modus ist fluechtig (nicht gespeichert).
+  let editing = $state(false);
+  let lockHover = $state(false);
 
   async function load() {
     try {
       scene = await core.getScene();
       swatches = await core.swatchColors();
+      settings = await core.getUiSettings();
+      applyTheme(settings.theme);
     } catch (e) {
       error = String(e);
     }
   }
   load();
 
-  // --- Canvas-Callbacks (Interaktion geschieht im Canvas, Aktionen im Core) ---
+  // Aktuelles Reiter-Layout (Panele + Positionen).
+  const layout = $derived(settings?.layouts.find((l) => l.tab === activeTab));
+  const panels = $derived<PanelPlacement[]>(layout?.panels ?? []);
+  const visibleKinds = $derived<PanelKind[]>(panels.map((p) => p.kind));
+
+  // Settings speichern (debounced ueber ein Microtask reicht hier nicht — wir
+  // speichern direkt, das ist eine kleine lokale JSON).
+  async function persist(next: UiSettings) {
+    settings = next;
+    applyTheme(next.theme);
+    try {
+      settings = await core.saveUiSettings(next);
+      applyTheme(settings.theme);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // Ein Panel-Rect im aktuellen Reiter aendern (Drag/Resize aus dem Host).
+  function changeRect(i: number, rect: PanelRect) {
+    if (!settings) return;
+    const next: UiSettings = structuredClone($state.snapshot(settings));
+    const l = next.layouts.find((l) => l.tab === activeTab);
+    if (l && l.panels[i]) {
+      l.panels[i].rect = rect;
+      persist(next);
+    }
+  }
+
+  // Panel im aktuellen Reiter ein-/ausblenden.
+  function togglePanel(kind: PanelKind) {
+    if (!settings) return;
+    const next: UiSettings = structuredClone($state.snapshot(settings));
+    const l = next.layouts.find((l) => l.tab === activeTab);
+    if (!l) return;
+    const idx = l.panels.findIndex((p) => p.kind === kind);
+    if (idx >= 0) {
+      l.panels.splice(idx, 1);
+    } else {
+      // Neu einblenden: mittig, moderate Groesse.
+      l.panels.push({ kind, rect: { x: 0.35, y: 0.35, w: 0.3, h: 0.3, z: 0 } });
+    }
+    persist(next);
+  }
+
+  // Reiter auf sein Standard-Layout zuruecksetzen (Core-Command, ADR §2).
+  async function resetTab() {
+    try {
+      settings = await core.resetTab(activeTab);
+      applyTheme(settings.theme);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // --- Canvas-Callbacks -----------------------------------------------------
   async function ondrawrect(x: number, y: number, w: number, h: number) {
     scene = await core.addRect(x, y, w, h);
   }
@@ -52,24 +130,21 @@
   async function pickColor(c: [number, number, number]) {
     scene = await core.activateColor(c);
   }
-
   async function doAlign(kind: core.AlignKind) {
     scene = await core.align(kind);
   }
   async function doDistribute(kind: core.DistributeKind) {
     scene = await core.distribute(kind);
   }
-
   async function saveLayer(p: LayerParams) {
     if (editLayer !== null) {
       scene = await core.setLayerParams(editLayer, p);
       editLayer = null;
     }
   }
-  async function toggleLayer(i: number, field: "visible" | "locked") {
+  async function toggleLayer(i: number, field: core.LayerToggle) {
     scene = await core.toggleLayer(i, field);
   }
-
   async function generateGcode() {
     try {
       gcode = await core.generateGcode();
@@ -80,8 +155,6 @@
   function copyGcode() {
     if (gcode) navigator.clipboard?.writeText(gcode);
   }
-
-  let status = $state<string | null>(null);
   async function pingRuida(ip: string): Promise<boolean> {
     try {
       const ok = await core.ruidaPing(ip);
@@ -103,7 +176,8 @@
   }
 
   const selCount = $derived(scene?.selected.length ?? 0);
-
+  // Nie-null-Sicht auf die Ebenen fuers Snippet (Snippets erben kein Narrowing).
+  const sceneLayers = $derived(scene?.layers ?? []);
   async function doUndo() {
     scene = await core.undo();
   }
@@ -113,8 +187,6 @@
   async function doDelete() {
     scene = await core.deleteSelected();
   }
-
-  const rgb = core.rgb;
 </script>
 
 <main>
@@ -135,82 +207,37 @@
     />
   {/if}
 
-  <!-- Anordnen-Toolbar oben mittig (immer sichtbar; Knöpfe je nach Auswahl aktiv) -->
-  <div class="panel arrange">
-    <button disabled={selCount < 2} onclick={() => doAlign("left")} title="Links ausrichten">⇤</button>
-    <button disabled={selCount < 2} onclick={() => doAlign("hcenter")} title="Horizontal zentrieren">⇔</button>
-    <button disabled={selCount < 2} onclick={() => doAlign("right")} title="Rechts ausrichten">⇥</button>
-    <div class="vsep"></div>
-    <button disabled={selCount < 2} onclick={() => doAlign("top")} title="Oben ausrichten">⤒</button>
-    <button disabled={selCount < 2} onclick={() => doAlign("vcenter")} title="Vertikal zentrieren">⇕</button>
-    <button disabled={selCount < 2} onclick={() => doAlign("bottom")} title="Unten ausrichten">⤓</button>
-    <div class="vsep"></div>
-    <button disabled={selCount < 3} onclick={() => doDistribute("h")} title="Horizontal verteilen">⋯</button>
-    <button disabled={selCount < 3} onclick={() => doDistribute("v")} title="Vertikal verteilen">⋮</button>
-  </div>
-
-  <!-- Werkzeugleiste links -->
-  <div class="panel tools">
-    <button class:active={tool === "select"} onclick={() => (tool = "select")} title="Auswählen">▲</button>
-    <button class:active={tool === "rect"} onclick={() => (tool = "rect")} title="Rechteck">▭</button>
-    <button class:active={tool === "ellipse"} onclick={() => (tool = "ellipse")} title="Ellipse">◯</button>
-    <div class="sep"></div>
-    <button onclick={doUndo} title="Rückgängig">↶</button>
-    <button onclick={doRedo} title="Wiederholen">↷</button>
-    <button onclick={doDelete} title="Löschen">🗑</button>
-  </div>
-
-  <!-- Farbpalette unten -->
-  <div class="panel palette">
-    <span class="label">Farbe</span>
-    {#each swatches as c}
-      <button
-        class="swatch"
-        style="background: {rgb(c)}"
-        title={rgb(c)}
-        onclick={() => pickColor(c)}
-        aria-label={rgb(c)}
-      ></button>
-    {/each}
-  </div>
-
-  <!-- Ebenen rechts -->
-  {#if scene}
-    <div class="panel layers">
-      <span class="label">Ebenen · Doppelklick bearbeitet</span>
-      {#each scene.layers as l, i}
-        <div
-          class="layer"
-          ondblclick={() => (editLayer = i)}
-          onkeydown={(e) => e.key === "Enter" && (editLayer = i)}
-          role="button"
-          tabindex="0"
-        >
-          <span class="chip" style="background: {rgb(l.color)}"></span>
-          <div class="layer-info">
-            <span>{l.name}</span>
-            <span class="muted">{l.mode} · {l.speed_mm_s} mm/s · {l.power_pct}%</span>
-          </div>
-          <button
-            class="mini"
-            class:off={!l.visible}
-            title="Sichtbar"
-            onclick={(e) => { e.stopPropagation(); toggleLayer(i, "visible"); }}
-          >{l.visible ? "👁" : "◠"}</button>
-          <button
-            class="mini"
-            class:on={l.locked}
-            title="Sperre"
-            onclick={(e) => { e.stopPropagation(); toggleLayer(i, "locked"); }}
-          >{l.locked ? "🔒" : "🔓"}</button>
-        </div>
+  <!-- Reiter-Umschalter oben mittig -->
+  {#if settings}
+    <div class="tabs glass">
+      {#each ["Design", "Laser", "Monitor"] as t}
+        <button class:active={activeTab === t} onclick={() => (activeTab = t as Tab)}>{t}</button>
       {/each}
-      {#if scene.layers.length === 0}
-        <div class="muted">— noch leer —</div>
-      {/if}
     </div>
   {/if}
 
+  <!-- Panel-Host: rendert die Panele des aktiven Reiters aus den Settings -->
+  {#if settings && scene}
+    <PanelHost {panels} {editing} onchange={changeRect}>
+      {#snippet panel(p: PanelPlacement)}
+        {#if p.kind === "Werkzeuge"}
+          <ToolsPanel {tool} onpick={(t) => (tool = t)} onundo={doUndo} onredo={doRedo} ondelete={doDelete} />
+        {:else if p.kind === "Ebenen"}
+          <LayersPanel layers={sceneLayers} onedit={(i) => (editLayer = i)} ontoggle={toggleLayer} />
+        {:else if p.kind === "Farbpalette"}
+          <PalettePanel {swatches} onpick={pickColor} />
+        {:else if p.kind === "Anordnen"}
+          <ArrangePanel {selCount} onalign={doAlign} ondistribute={doDistribute} />
+        {:else if p.kind === "Laser"}
+          <LaserPanel ongenerate={generateGcode} onping={pingRuida} onsend={sendRuida} />
+        {:else if p.kind === "JobStatus"}
+          <div class="placeholder">Job-Status folgt (Monitor-Reiter).</div>
+        {/if}
+      {/snippet}
+    </PanelHost>
+  {/if}
+
+  <!-- Layer-Dialog -->
   {#if scene && editLayer !== null && scene.layers[editLayer]}
     <LayerDialog
       layer={scene.layers[editLayer]}
@@ -219,8 +246,30 @@
     />
   {/if}
 
-  <!-- Laser-Control-Panel unten rechts -->
-  <LaserPanel ongenerate={generateGcode} onping={pingRuida} onsend={sendRuida} />
+  <!-- Verstecktes Schloss unten links (Editier-Modus, ADR 0002 §5) -->
+  <button
+    class="lock"
+    class:show={lockHover || editing}
+    class:on={editing}
+    onmouseenter={() => (lockHover = true)}
+    onmouseleave={() => (lockHover = false)}
+    onclick={() => (editing = !editing)}
+    title={editing ? "Editier-Modus verlassen" : "Oberfläche bearbeiten"}
+    aria-label="Editier-Modus umschalten"
+  >{editing ? "🔓" : "🔒"}</button>
+
+  <!-- Theming-/Layout-Flyout im Editier-Modus -->
+  {#if editing && settings}
+    <EditFlyout
+      {settings}
+      tab={activeTab}
+      visiblePanels={visibleKinds}
+      onchange={persist}
+      ontogglepanel={togglePanel}
+      onreset={resetTab}
+      onclose={() => (editing = false)}
+    />
+  {/if}
 
   {#if status}
     <div class="status">{status}</div>
@@ -235,7 +284,8 @@
       role="button"
       tabindex="-1"
     >
-      <div class="gcode" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="gcode glass" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
         <div class="gc-head">
           <span>G-Code ({gcode.split("\n").length} Zeilen)</span>
           <div>
@@ -254,157 +304,67 @@
     position: absolute;
     inset: 0;
   }
-  .panel {
+  .tabs {
     position: absolute;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 12px 40px -4px rgba(0, 0, 0, 0.5);
-    padding: 8px;
-    z-index: 10;
-  }
-  .tools {
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .tools button {
-    width: 40px;
-    height: 40px;
-    font-size: 18px;
-  }
-  .sep {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 2px;
-  }
-  .arrange {
     left: 50%;
-    top: 12px;
+    top: 10px;
     transform: translateX(-50%);
     display: flex;
-    align-items: center;
-    gap: 3px;
+    gap: 4px;
+    padding: 4px;
+    z-index: 50;
   }
-  .arrange button {
+  .tabs button {
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    border-radius: 8px;
+    padding: 6px 16px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .tabs button:hover {
+    color: var(--text);
+  }
+  .tabs button.active {
+    background: linear-gradient(
+      180deg,
+      hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 8%)),
+      var(--accent)
+    );
+    color: white;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      0 0 14px -3px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.6);
+  }
+  .placeholder {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 8px;
+  }
+  .lock {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
     width: 34px;
     height: 34px;
-    font-size: 16px;
-  }
-  .vsep {
-    width: 1px;
-    align-self: stretch;
-    background: var(--border);
-    margin: 3px 4px;
-  }
-  .palette {
-    left: 50%;
-    bottom: 16px;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .swatch {
-    width: 22px;
-    height: 22px;
-    border-radius: 11px;
-    border: 2px solid transparent;
-    padding: 0;
-    cursor: pointer;
-  }
-  .swatch:hover {
-    border-color: white;
-    transform: scale(1.15);
-  }
-  .layers {
-    right: 12px;
-    top: 12px;
-    width: 220px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .layer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 6px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .layer:hover {
-    background: #26282d;
-  }
-  .layer-info {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    flex: 1;
-    min-width: 0;
-  }
-  .layer-info span:first-child {
-    font-weight: 500;
-  }
-  .layer-info .muted {
-    font-size: 11px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .mini {
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    font-size: 13px;
-    background: transparent;
-  }
-  .mini.off {
-    opacity: 0.4;
-  }
-  .mini.on {
-    color: var(--accent);
-  }
-  .chip {
-    width: 14px;
-    height: 14px;
-    border-radius: 4px;
-    flex-shrink: 0;
-  }
-  .label {
-    font-size: 11px;
-    letter-spacing: 1px;
-    color: var(--muted);
-    text-transform: uppercase;
-  }
-  .muted {
-    color: var(--muted);
-  }
-  button {
-    background: #26282d;
-    color: var(--text);
+    border-radius: 9px;
     border: none;
-    border-radius: 6px;
-    padding: 6px 10px;
+    background: rgba(28, 30, 34, 0.6);
+    color: var(--text);
     cursor: pointer;
-    transition: background 0.14s;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 70;
+    font-size: 15px;
   }
-  button:hover {
-    background: #2e3036;
+  .lock.show {
+    opacity: 0.85;
   }
-  button.active {
+  .lock.on {
     background: var(--accent);
-    color: white;
-  }
-  button:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-  button:disabled:hover {
-    background: #26282d;
+    opacity: 1;
+    box-shadow: 0 0 18px -2px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.7);
   }
   .error {
     position: absolute;
@@ -415,7 +375,7 @@
     color: #e5645d;
     padding: 6px 12px;
     border-radius: 8px;
-    z-index: 20;
+    z-index: 90;
   }
   .status {
     position: absolute;
@@ -426,7 +386,7 @@
     color: #3fb27f;
     padding: 8px 16px;
     border-radius: 8px;
-    z-index: 20;
+    z-index: 90;
     border: 1px solid #3fb27f55;
   }
   .backdrop {
@@ -439,14 +399,10 @@
     z-index: 100;
   }
   .gcode {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 14px;
     width: min(600px, 90%);
     max-height: 80%;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 20px 60px -8px rgba(0, 0, 0, 0.6);
   }
   .gc-head {
     display: flex;
@@ -468,6 +424,18 @@
     font-size: 12px;
     line-height: 1.5;
     color: var(--text);
+  }
+  button {
+    background: var(--btn);
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: filter 0.14s;
+  }
+  button:hover {
+    filter: brightness(1.15);
   }
   .primary {
     background: var(--accent);
