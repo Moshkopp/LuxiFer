@@ -47,26 +47,27 @@
             </DockPanel>
         </Border>
 
-        <!-- Arbeitsbereich: Canvas vollflächig, Panele schweben darüber -->
-        <Panel>
-            <!-- Canvas + Lineale am Rand -->
-            <Grid ColumnDefinitions="24,*" RowDefinitions="24,*">
-                <!-- Eckfeld oben links -->
-                <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource SurfacePanelBrush}"/>
-                <!-- Horizontales Lineal oben -->
-                <ctrl:RulerControl x:Name="RulerTop" Grid.Row="0" Grid.Column="1"
-                                   Orientation="Horizontal"/>
-                <!-- Vertikales Lineal links -->
-                <ctrl:RulerControl x:Name="RulerLeft" Grid.Row="1" Grid.Column="0"
-                                   Orientation="Vertical"/>
-                <!-- Canvas füllt den Rest -->
-                <ctrl:CanvasControl x:Name="Canvas" Grid.Row="1" Grid.Column="1"
+        <!-- Arbeitsbereich: Canvas + Lineale am Rand, Panele schweben über dem Canvas -->
+        <Grid ColumnDefinitions="24,*" RowDefinitions="24,*">
+            <!-- Eckfeld oben links -->
+            <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource SurfacePanelBrush}"/>
+            <!-- Horizontales Lineal oben -->
+            <ctrl:RulerControl x:Name="RulerTop" Grid.Row="0" Grid.Column="1"
+                               Orientation="Horizontal"/>
+            <!-- Vertikales Lineal links -->
+            <ctrl:RulerControl x:Name="RulerLeft" Grid.Row="1" Grid.Column="0"
+                               Orientation="Vertical"/>
+
+            <!-- Canvas + schwebende Panele liegen gemeinsam in der Canvas-Zelle,
+                 damit die Panele innerhalb des Canvas bleiben und nicht in die
+                 Lineale ragen. -->
+            <Panel Grid.Row="1" Grid.Column="1">
+                <ctrl:CanvasControl x:Name="Canvas"
                                     Document="{Binding Project.Canvas}"
                                     Tool="{Binding ActiveTool}"
                                     ActiveLayer="{Binding ActiveLayer}"
                                     UndoStack="{Binding Undo}"
                                     SelectedObject="{Binding SelectedObject, Mode=TwoWay}"/>
-            </Grid>
 
             <!-- Modus-Umschalter oben rechts (immer sichtbar) -->
             <Border Classes="floating" Padding="4" Margin="12"
@@ -210,6 +211,7 @@
                     IsVisible="{Binding IsLaserMode}">
                 <ctrl:LaserPanel Margin="10"/>
             </Border>
-        </Panel>
+            </Panel>
+        </Grid>
     </DockPanel>
 </Window>
