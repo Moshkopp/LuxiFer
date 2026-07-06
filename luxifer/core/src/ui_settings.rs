@@ -260,8 +260,8 @@ pub fn default_layout(tab: Tab) -> TabLayout {
 
     let panels = match tab {
         Tab::Design => vec![
-            // Werkzeuge links oben, schmal.
-            p(PanelKind::Werkzeuge, r(0.0, 0.0, 0.12, 0.5, 0)),
+            // Werkzeuge links, schmal und hoch (21 Werkzeuge in 5 Gruppen).
+            p(PanelKind::Werkzeuge, r(0.0, 0.06, 0.09, 0.82, 0)),
             // Ebenen rechts oben.
             p(PanelKind::Ebenen, r(0.80, 0.0, 0.20, 0.6, 0)),
             // Farbpalette rechts unten.

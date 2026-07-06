@@ -8,6 +8,7 @@
   import PalettePanel from "./lib/PalettePanel.svelte";
   import ArrangePanel from "./lib/ArrangePanel.svelte";
   import EditFlyout from "./lib/EditFlyout.svelte";
+  import Icon from "./lib/Icon.svelte";
   import * as core from "./lib/core";
   import type {
     Scene,
@@ -187,7 +188,40 @@
   async function doDelete() {
     scene = await core.deleteSelected();
   }
+
+  // Globale Tastatur-Kuerzel. Nicht ausloesen, waehrend ein Eingabefeld den
+  // Fokus hat (IP, Layer-Name, Zahlenfelder), sonst kann man dort nichts loeschen.
+  function isTyping(t: EventTarget | null): boolean {
+    const el = t as HTMLElement | null;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+  }
+  async function onKeydown(e: KeyboardEvent) {
+    if (isTyping(e.target)) return;
+    // Entf / Rueckschritt loescht die Auswahl.
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (selCount > 0) {
+        e.preventDefault();
+        await doDelete();
+      }
+      return;
+    }
+    // Strg+Z / Strg+Y (bzw. Strg+Shift+Z) fuer Undo/Redo.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        await doUndo();
+      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        await doRedo();
+      }
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <main>
   {#if error}
@@ -207,12 +241,22 @@
     />
   {/if}
 
-  <!-- Reiter-Umschalter oben mittig -->
+  <!-- Header: links Undo/Redo, mittig die Reiter -->
   {#if settings}
-    <div class="tabs glass">
-      {#each ["Design", "Laser", "Monitor"] as t}
-        <button class:active={activeTab === t} onclick={() => (activeTab = t as Tab)}>{t}</button>
-      {/each}
+    <div class="header glass">
+      <div class="hgroup">
+        <button class="gbtn hbtn" onclick={doUndo} title="Rückgängig (Strg+Z)" aria-label="Rückgängig">
+          <Icon name="undo" />
+        </button>
+        <button class="gbtn hbtn" onclick={doRedo} title="Wiederholen (Strg+Y)" aria-label="Wiederholen">
+          <Icon name="redo" />
+        </button>
+      </div>
+      <div class="tabs">
+        {#each ["Design", "Laser", "Monitor"] as t}
+          <button class="tab" class:active={activeTab === t} onclick={() => (activeTab = t as Tab)}>{t}</button>
+        {/each}
+      </div>
     </div>
   {/if}
 
@@ -221,7 +265,7 @@
     <PanelHost {panels} {editing} onchange={changeRect}>
       {#snippet panel(p: PanelPlacement)}
         {#if p.kind === "Werkzeuge"}
-          <ToolsPanel {tool} onpick={(t) => (tool = t)} onundo={doUndo} onredo={doRedo} ondelete={doDelete} />
+          <ToolsPanel {tool} onpick={(t) => (tool = t)} />
         {:else if p.kind === "Ebenen"}
           <LayersPanel layers={sceneLayers} onedit={(i) => (editLayer = i)} ontoggle={toggleLayer} />
         {:else if p.kind === "Farbpalette"}
@@ -256,7 +300,7 @@
     onclick={() => (editing = !editing)}
     title={editing ? "Editier-Modus verlassen" : "Oberfläche bearbeiten"}
     aria-label="Editier-Modus umschalten"
-  >{editing ? "🔓" : "🔒"}</button>
+  ><Icon name="lock" size={15} /></button>
 
   <!-- Theming-/Layout-Flyout im Editier-Modus -->
   {#if editing && settings}
@@ -304,17 +348,35 @@
     position: absolute;
     inset: 0;
   }
-  .tabs {
+  .header {
     position: absolute;
     left: 50%;
     top: 10px;
     transform: translateX(-50%);
     display: flex;
-    gap: 4px;
-    padding: 4px;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 6px;
     z-index: 50;
   }
-  .tabs button {
+  .hgroup {
+    display: flex;
+    gap: 4px;
+    padding-right: 8px;
+    border-right: 1px solid var(--border);
+  }
+  .hbtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+  }
+  .tab {
     background: transparent;
     color: var(--muted);
     border: none;
@@ -323,10 +385,10 @@
     cursor: pointer;
     font-size: 13px;
   }
-  .tabs button:hover {
+  .tab:hover {
     color: var(--text);
   }
-  .tabs button.active {
+  .tab.active {
     background: linear-gradient(
       180deg,
       hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 8%)),
@@ -356,7 +418,9 @@
     opacity: 0;
     transition: opacity 0.2s;
     z-index: 70;
-    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .lock.show {
     opacity: 0.85;
