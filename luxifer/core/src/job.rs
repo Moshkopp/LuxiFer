@@ -29,11 +29,47 @@ pub enum LayerWork {
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobLayer {
     pub layer_id: usize,
+    /// Layerfarbe (manche Treiber, z. B. Ruida, kodieren sie in der Config).
+    pub color: [u8; 3],
     pub speed_mm_s: f64,
     pub power_pct: f64,
     pub min_power_pct: f64,
     pub passes: u32,
     pub work: LayerWork,
+}
+
+impl JobLayer {
+    /// Bounding-Box der Arbeit dieses Layers in mm (min_x, min_y, max_x, max_y).
+    pub fn bbox(&self) -> Option<(f64, f64, f64, f64)> {
+        let mut min_x = f64::MAX;
+        let mut min_y = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut max_y = f64::MIN;
+        let mut any = false;
+        let mut acc = |x: f64, y: f64| {
+            any = true;
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        };
+        match &self.work {
+            LayerWork::Cut { paths } => {
+                for p in paths {
+                    for &(x, y) in &p.points {
+                        acc(x, y);
+                    }
+                }
+            }
+            LayerWork::Fill { segments } => {
+                for s in segments {
+                    acc(s.x0, s.y);
+                    acc(s.x1, s.y);
+                }
+            }
+        }
+        any.then_some((min_x, min_y, max_x, max_y))
+    }
 }
 
 /// Der komplette, geräteunabhängige Job. Alle Maße in mm.
@@ -85,6 +121,7 @@ impl JobPlan {
 
             job_layers.push(JobLayer {
                 layer_id: li,
+                color: layer.color,
                 speed_mm_s: layer.speed_mm_s,
                 power_pct: layer.power_pct,
                 min_power_pct: layer.min_power_pct,

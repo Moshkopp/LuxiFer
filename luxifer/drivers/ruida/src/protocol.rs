@@ -130,6 +130,25 @@ pub fn mm_to_um(mm: f64) -> i32 {
     (mm * 1000.0).round() as i32
 }
 
+// --- Job-Rahmen (Preamble/Trailer, HW-verifizierte Konstanten) --------------
+
+/// Dateiende-Byte (Job endet damit).
+pub const END_OF_FILE: u8 = 0xD7;
+/// Opcode „Dateisumme setzen".
+pub const SET_FILE_SUM: [u8; 2] = [0xE5, 0x05];
+/// Antwort-Bytes des Controllers.
+pub const ACK: u8 = 0xCC;
+pub const NAK: u8 = 0xCF;
+
+/// Trailer mit Dateisumme über den gesamten bisherigen Job.
+pub fn recompute_file_sum(job: &[u8]) -> Vec<u8> {
+    let sum = (job.iter().map(|&b| b as u64).sum::<u64>() + END_OF_FILE as u64) & 0xFFFF_FFFF;
+    let mut trailer = SET_FILE_SUM.to_vec();
+    trailer.extend(encode_value(sum, 5));
+    trailer.push(END_OF_FILE);
+    trailer
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
