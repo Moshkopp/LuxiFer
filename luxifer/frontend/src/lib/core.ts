@@ -34,6 +34,13 @@ export interface Shape {
   power_override?: number | null;
 }
 
+// Metadaten des offenen Projekts (oder null, wenn namenlos).
+export interface ProjectMeta {
+  name: string;
+  description: string;
+  tags: string[];
+}
+
 // Was der Core dem Frontend zum Zeichnen gibt.
 export interface Scene {
   layers: Layer[];
@@ -41,6 +48,8 @@ export interface Scene {
   selected: number[];
   bed_w_mm: number;
   bed_h_mm: number;
+  dirty: boolean;
+  project: ProjectMeta | null;
 }
 
 export function rgb(color: [number, number, number]): string {
@@ -212,6 +221,74 @@ export const ruidaSend = (ip: string) => invoke<string>("ruida_send", { ip });
 export const undo = () => invoke<Scene>("undo");
 export const redo = () => invoke<Scene>("redo");
 
+// ---- Projektverwaltung (ADR 0003) ------------------------------------------
+
+// Eine festgehaltene Version (spiegelt luxifer-core::VersionInfo).
+export interface VersionInfo {
+  id: string;
+  created_at: string;
+  note: string;
+}
+
+// Listeneintrag (linke Seite im Browser).
+export interface ProjectInfo {
+  name: string;
+  tags: string[];
+  description: string;
+  modified_at: string;
+}
+
+// Volle Detailansicht (rechte Seite im Browser).
+export interface ProjectDetail {
+  name: string;
+  description: string;
+  tags: string[];
+  created_at: string;
+  modified_at: string;
+  versions: VersionInfo[];
+  asset_refs: string[];
+}
+
+export const newProject = () => invoke<Scene>("new_project");
+
+// thumb ist ein PNG als Byte-Array (aus dem Offscreen-Canvas).
+export const saveProject = (
+  name: string,
+  description: string,
+  tags: string[],
+  thumb: number[],
+) => invoke<Scene>("save_project", { name, description, tags, thumbPng: thumb });
+
+export const saveVersion = (note: string, thumb: number[]) =>
+  invoke<Scene>("save_version", { note, thumbPng: thumb });
+
+export const openProject = (name: string) =>
+  invoke<Scene>("open_project", { name });
+
+export const openVersion = (name: string, versionId: string) =>
+  invoke<Scene>("open_version", { name, versionId });
+
+export const projectList = () => invoke<ProjectInfo[]>("project_list");
+
+export const projectDetail = (name: string) =>
+  invoke<ProjectDetail>("project_detail", { name });
+
+// Thumbnail als Data-URL (oder null). Fuer Liste/Detail/Versionen.
+export const projectThumb = (name: string) =>
+  invoke<string | null>("project_thumb", { name });
+
+export const versionThumb = (name: string, versionId: string) =>
+  invoke<string | null>("version_thumb", { name, versionId });
+
+export const projectDelete = (name: string) =>
+  invoke<void>("project_delete", { name });
+
+export const projectRename = (oldName: string, newName: string) =>
+  invoke<void>("project_rename", { oldName, newName });
+
+export const projectExport = (name: string, ziel: string) =>
+  invoke<void>("project_export", { name, ziel });
+
 export const swatchColors = () =>
   invoke<[number, number, number][]>("swatch_colors");
 
@@ -263,6 +340,7 @@ export interface UiSettings {
   workplace: string;
   theme: Theme;
   layouts: TabLayout[];
+  last_project: string;
 }
 
 export const getUiSettings = () => invoke<UiSettings>("get_ui_settings");

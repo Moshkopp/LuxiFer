@@ -88,6 +88,11 @@ impl AppState {
         self.dirty = true;
     }
 
+    /// Nach erfolgreichem Speichern: der Zustand gilt als gesichert.
+    pub fn mark_saved(&mut self) {
+        self.dirty = false;
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
     }

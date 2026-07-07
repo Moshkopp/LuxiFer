@@ -55,12 +55,15 @@ werden — Fachlogik jeweils in `luxifer-core`, das Frontend zeichnet nur.
 
 ## Projektverwaltung  *(wichtig)*
 
-- [~] **Projekt speichern / laden fertigstellen** — Core-Fundament steht
-      (`luxifer-core::project`: `ProjectFile`, `save_to_dir`, `load`,
-      `list_projects`), aber **noch keine Tauri-Commands und kein Frontend**.
-      Zu tun: Commands `save_project`/`load_project`/`list_projects`/`new_project`
-      + AppState laden/ersetzen, dazu die Projektliste im **Projekt-Reiter**
-      (anlegen/öffnen/speichern/umbenennen, Liste mit Vorschau).
+- [x] **Projekt speichern / laden** — umgesetzt nach **ADR 0003**. Format mit
+      stabiler `id`, Zeitstempeln, Beschreibung, `asset_refs` (vorbereitet) und
+      Versionshistorie; Commands (new/save/save_version/open/open_version/list/
+      detail/delete/rename/export); **Projekt-Reiter** als Browser (Liste+Suche
+      links, Details rechts inkl. Versionen mit Thumbnail, Charon-Status).
+      Workflows: Strg+S (still speichern / bei namenlos Reiter öffnen),
+      Shift+Strg+S (Version), Strg+N (neu), Start-Toast „zuletzt", Unsaved-Guard.
+      Offen als Folgeschritte: zentraler **Asset-Store** + Verlinkung (mit Import),
+      Tauri-Datei-Dialog statt `prompt()` für Export/Umbenennen, Auto-Save.
 - [ ] **Import: Bild / SVG / DXF — NUR nach vorheriger Planung!**
       In ThorBurn war der Import **absolut misslungen und fehlerhaft** — bevor
       hier eine Zeile Code entsteht, wird ein sauberes Konzept festgelegt (evtl.

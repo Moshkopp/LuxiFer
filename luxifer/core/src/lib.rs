@@ -28,7 +28,10 @@ pub use geometry::{Axis, BBox, Geo, Pt};
 pub use interact::Handle;
 pub use job::{JobLayer, JobPlan, LayerWork, MachineDriver, Path};
 pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};
-pub use project::{ProjectFile, ProjectInfo};
+pub use project::{
+    delete_project, list_projects, projects_dir, rename_project, version_thumb_path, ProjectFile,
+    ProjectInfo, VersionInfo,
+};
 pub use scanline::FillSegment;
 pub use shapes::{PolyShape, ShapeInfo};
 pub use state::AppState;

@@ -9,9 +9,11 @@
   import ShapesPanel from "./lib/ShapesPanel.svelte";
   import ArrangePanel from "./lib/ArrangePanel.svelte";
   import EditFlyout from "./lib/EditFlyout.svelte";
+  import ProjectBrowser from "./lib/ProjectBrowser.svelte";
   import Icon from "./lib/Icon.svelte";
   import logoUrl from "./assets/logo.png";
   import * as core from "./lib/core";
+  import { renderThumbnail } from "./lib/thumbnail";
   import type {
     Scene,
     LayerParams,
@@ -36,6 +38,14 @@
   let gcode = $state<string | null>(null);
   let status = $state<string | null>(null);
 
+  // --- Projektverwaltung (ADR 0003) -----------------------------------------
+  // saveMode: Projekt-Reiter zeigt das Speichern-Formular (Strg+S bei namenlos).
+  let saveMode = $state(false);
+  // Start-Toast „zuletzt gearbeitet an …".
+  let startToast = $state<string | null>(null);
+  // Unsaved-Guard: geplante Aktion (open/new), die nach Bestaetigung laeuft.
+  let pendingAction = $state<null | { kind: "new" } | { kind: "open"; name: string }>(null);
+
   // --- GUI-Settings (Panel-System, ADR 0002) --------------------------------
   let settings = $state<UiSettings | null>(null);
   let activeTab = $state<Tab>("Design");
@@ -50,6 +60,8 @@
       shapes = await core.shapeCatalog();
       settings = await core.getUiSettings();
       applyTheme(settings.theme);
+      // Start-Toast: zuletzt geoeffnetes Projekt anbieten (ADR 0003 §3).
+      if (settings.last_project) startToast = settings.last_project;
     } catch (e) {
       error = String(e);
     }
@@ -261,6 +273,130 @@
     scene = await core.deleteSelected();
   }
 
+  // --- Projektverwaltung-Handler --------------------------------------------
+
+  // Strg+S: namenlos → Projekt-Reiter mit Speichern-Formular; benannt → still
+  // speichern + Toast (bleibt im Designer).
+  async function saveShortcut() {
+    if (scene?.project) {
+      // Bereits benannt: still speichern.
+      try {
+        const thumb = await renderThumbnail(scene);
+        scene = await core.saveProject(
+          scene.project.name,
+          scene.project.description,
+          scene.project.tags,
+          thumb,
+        );
+        flash("Gespeichert ✓ · Shift+Strg+S legt eine Version an");
+      } catch (e) {
+        error = String(e);
+      }
+    } else {
+      // Namenlos: Projekt-Reiter zum Benennen öffnen.
+      saveMode = true;
+      activeTab = "Projekt";
+    }
+  }
+
+  // Aus dem Projekt-Reiter (Formular oder Detail-„Speichern"): mit Metadaten sichern.
+  async function saveWithMeta(name: string, description: string, tags: string[]) {
+    if (!scene) return;
+    const thumb = await renderThumbnail(scene);
+    scene = await core.saveProject(name, description, tags, thumb);
+    flash("Gespeichert ✓");
+  }
+
+  // Shift+Strg+S: neue Version festhalten. Nur bei benanntem Projekt.
+  async function saveVersionShortcut() {
+    if (!scene) return;
+    if (!scene.project) {
+      // Noch namenlos → erst benennen.
+      saveMode = true;
+      activeTab = "Projekt";
+      return;
+    }
+    try {
+      const thumb = await renderThumbnail(scene);
+      scene = await core.saveVersion("", thumb);
+      flash("Version festgehalten ✓");
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // Öffnen/Neu mit Unsaved-Guard.
+  async function requestOpen(name: string) {
+    if (scene?.dirty) pendingAction = { kind: "open", name };
+    else await doOpen(name);
+  }
+  async function requestNew() {
+    if (scene?.dirty) pendingAction = { kind: "new" };
+    else await doNew();
+  }
+  async function doOpen(name: string) {
+    try {
+      scene = await core.openProject(name);
+      saveMode = false;
+      activeTab = "Design";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function doNew() {
+    try {
+      scene = await core.newProject();
+      saveMode = false;
+      activeTab = "Design";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function openVersion(name: string, versionId: string) {
+    try {
+      scene = await core.openVersion(name, versionId);
+      activeTab = "Design";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // Unsaved-Guard aufgelöst.
+  async function guardDiscard() {
+    const a = pendingAction;
+    pendingAction = null;
+    if (a?.kind === "open") await doOpen(a.name);
+    else if (a?.kind === "new") await doNew();
+  }
+  async function guardSave() {
+    // Benannt → still speichern und dann die Aktion ausführen; namenlos →
+    // „Speichern unter…“ (Formular), Aktion verwerfen (Nutzer entscheidet neu).
+    if (scene?.project) {
+      await saveShortcut();
+      await guardDiscard();
+    } else {
+      pendingAction = null;
+      saveMode = true;
+      activeTab = "Projekt";
+    }
+  }
+  function guardCancel() {
+    pendingAction = null;
+  }
+
+  // Start-Toast-Aktionen.
+  async function toastOpen() {
+    const name = startToast;
+    startToast = null;
+    if (name) await requestOpen(name);
+  }
+
+  // Kurze Statusmeldung, die nach ein paar Sekunden verschwindet.
+  function flash(msg: string) {
+    status = msg;
+    setTimeout(() => (status = null), 3000);
+  }
+
   // Globale Tastatur-Kuerzel. Nicht ausloesen, waehrend ein Eingabefeld den
   // Fokus hat (IP, Layer-Name, Zahlenfelder), sonst kann man dort nichts loeschen.
   function isTyping(t: EventTarget | null): boolean {
@@ -279,7 +415,7 @@
       }
       return;
     }
-    // Strg+Z / Strg+Y (bzw. Strg+Shift+Z) fuer Undo/Redo.
+    // Strg-Kombinationen: Undo/Redo + Projekt-Shortcuts (ADR 0003).
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) {
@@ -288,6 +424,15 @@
       } else if (k === "y" || (k === "z" && e.shiftKey)) {
         e.preventDefault();
         await doRedo();
+      } else if (k === "s" && e.shiftKey) {
+        e.preventDefault();
+        await saveVersionShortcut();
+      } else if (k === "s") {
+        e.preventDefault();
+        await saveShortcut();
+      } else if (k === "n") {
+        e.preventDefault();
+        await requestNew();
       }
     }
   }
@@ -380,12 +525,24 @@
     </PanelHost>
   {/if}
 
-  <!-- Noch leere Reiter (Projekt/Preview): dezenter Hinweis mittig. -->
-  {#if settings && panels.length === 0}
+  <!-- Projekt-Reiter: voller Browser (ADR 0003). -->
+  {#if settings && scene && activeTab === "Projekt"}
+    <ProjectBrowser
+      project={scene.project}
+      {saveMode}
+      onsave={saveWithMeta}
+      onopen={requestOpen}
+      onopenversion={openVersion}
+      onnew={requestNew}
+      ondeleted={() => { scene && (scene.project = null); }}
+      onclosesavemode={() => (saveMode = false)}
+    />
+  {/if}
+
+  <!-- Weitere noch leere Reiter: dezenter Hinweis mittig. -->
+  {#if settings && panels.length === 0 && activeTab !== "Projekt"}
     <div class="empty-tab">
-      {#if activeTab === "Projekt"}
-        Projektverwaltung folgt als eigener Meilenstein.
-      {:else if activeTab === "Preview"}
+      {#if activeTab === "Preview"}
         Laser-Vorschau folgt als eigener Meilenstein.
       {:else}
         Dieser Reiter ist noch leer.
@@ -429,6 +586,38 @@
 
   {#if status}
     <div class="status">{status}</div>
+  {/if}
+
+  <!-- Start-Toast: zuletzt geoeffnetes Projekt anbieten (ADR 0003 §3). -->
+  {#if startToast}
+    <div class="toast glass">
+      <span>Zuletzt: <strong>{startToast}</strong></span>
+      <div class="toast-actions">
+        <button class="primary" onclick={toastOpen}>Öffnen</button>
+        <button onclick={() => (startToast = null)}>Verwerfen</button>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Unsaved-Guard: ungesicherte Aenderungen bei Neu/Oeffnen (ADR 0003 §3). -->
+  {#if pendingAction}
+    <div class="backdrop" role="button" tabindex="-1"
+      onclick={guardCancel}
+      onkeydown={(e) => e.key === "Escape" && guardCancel()}>
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="guard glass" onclick={(e) => e.stopPropagation()}>
+        <h3>Ungespeicherte Änderungen</h3>
+        <p>Der aktuelle Entwurf ist nicht gespeichert. Was möchtest du tun?</p>
+        <div class="guard-actions">
+          <button class="danger" onclick={guardDiscard}>Verwerfen</button>
+          <button class="primary" onclick={guardSave}>
+            {scene?.project ? "Speichern" : "Speichern unter…"}
+          </button>
+          <button onclick={guardCancel}>Abbrechen</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   <!-- G-Code-Overlay -->
@@ -607,6 +796,31 @@
     z-index: 90;
     border: 1px solid #3fb27f55;
   }
+  /* Start-Toast oben rechts (zuletzt geoeffnetes Projekt). */
+  .toast {
+    position: absolute;
+    top: 64px;
+    right: 16px;
+    z-index: 95;
+    padding: 12px 14px;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 280px;
+  }
+  .toast-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .toast button { padding: 5px 12px; font-size: 13px; }
+  /* Unsaved-Guard-Dialog. */
+  .guard {
+    width: min(420px, 90%);
+    padding: 20px 22px;
+    border-radius: 12px;
+  }
+  .guard h3 { margin: 0 0 8px; }
+  .guard p { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  .guard-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .guard .danger { background: #6b2b2b; color: #ffb4b4; }
   .backdrop {
     position: absolute;
     inset: 0;

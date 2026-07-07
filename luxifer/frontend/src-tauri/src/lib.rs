@@ -3,13 +3,32 @@
 
 use std::sync::Mutex;
 
-use luxifer_core::{AppState, Geo, Layer, PolyShape, Shape, ShapeInfo, Tab, UiSettings};
+use luxifer_core::{
+    delete_project, list_projects, projects_dir, rename_project, AppState, Geo, Layer, ProjectFile,
+    ProjectInfo, PolyShape, Shape, ShapeInfo, Tab, UiSettings, VersionInfo,
+};
 use serde::Serialize;
 use tauri::{Manager, State};
+
+/// Das aktuell geöffnete Projekt (Metadaten, ohne die Geometrie — die lebt im
+/// `AppState`). `None`, solange das Projekt noch namenlos ist.
+#[derive(Default)]
+struct CurrentProject {
+    file: Option<ProjectFile>,
+}
 
 /// Geteilter Zustand über alle Commands.
 struct AppData {
     state: Mutex<AppState>,
+    current: Mutex<CurrentProject>,
+}
+
+/// Metadaten des offenen Projekts fürs Frontend (Kopf im Designer/Toast).
+#[derive(Serialize, Clone)]
+struct ProjectMeta {
+    name: String,
+    description: String,
+    tags: Vec<String>,
 }
 
 /// Schlanke Sicht auf den Zustand fürs Frontend (ohne Undo-Stacks).
@@ -20,24 +39,42 @@ struct Scene {
     selected: Vec<usize>,
     bed_w_mm: f64,
     bed_h_mm: f64,
+    /// Ungespeicherte Änderungen? Steuert den Unsaved-Guard im Frontend.
+    dirty: bool,
+    /// Offenes Projekt (Name/Beschreibung/Tags) oder `None`, wenn namenlos.
+    project: Option<ProjectMeta>,
 }
 
 impl Scene {
-    fn from_state(s: &AppState) -> Self {
+    fn build(s: &AppState, cur: &CurrentProject) -> Self {
         Scene {
             layers: s.layers.clone(),
             shapes: s.shapes.clone(),
             selected: s.selected.clone(),
             bed_w_mm: s.bed_w_mm,
             bed_h_mm: s.bed_h_mm,
+            dirty: s.dirty,
+            project: cur.file.as_ref().map(|f| ProjectMeta {
+                name: f.name.clone(),
+                description: f.description.clone(),
+                tags: f.tags.clone(),
+            }),
         }
     }
 }
 
-// Hilfsmakro-Ersatz: Zustand sperren und Scene zurückgeben.
+// Sperrt beide Zustände und baut die Scene (der übliche Rückgabewert).
 fn scene(data: &State<AppData>) -> Scene {
     let s = data.state.lock().unwrap();
-    Scene::from_state(&s)
+    let cur = data.current.lock().unwrap();
+    Scene::build(&s, &cur)
+}
+
+// Baut die Scene aus einem bereits gelockten AppState + dem Projektkontext.
+// Ersetzt das frühere `Scene::from_state(&s)` in den einzelnen Commands.
+fn scene_with(s: &AppState, data: &State<AppData>) -> Scene {
+    let cur = data.current.lock().unwrap();
+    Scene::build(s, &cur)
 }
 
 #[tauri::command]
@@ -54,14 +91,14 @@ fn swatch_colors() -> Vec<[u8; 3]> {
 fn add_rect(data: State<AppData>, x: f64, y: f64, w: f64, h: f64) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.add_shape(Geo::Rect { x, y, w, h });
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
 fn add_ellipse(data: State<AppData>, cx: f64, cy: f64, rx: f64, ry: f64) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.add_shape(Geo::Ellipse { cx, cy, rx, ry });
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Fügt eine offene 2-Punkt-Linie als Polyline hinzu.
@@ -72,7 +109,7 @@ fn add_line(data: State<AppData>, x1: f64, y1: f64, x2: f64, y2: f64) -> Scene {
         pts: vec![(x1, y1), (x2, y2)],
         closed: false,
     });
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Fügt eine Polylinie aus den gelieferten Punkten hinzu. `closed` schließt die
@@ -83,7 +120,7 @@ fn add_polyline(data: State<AppData>, pts: Vec<(f64, f64)>, closed: bool) -> Sce
     if pts.len() >= 2 {
         s.add_shape(Geo::Polyline { pts, closed });
     }
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Katalog der parametrischen Formen für die Galerie im Werkzeug-Panel.
@@ -105,14 +142,14 @@ fn add_polygon(data: State<AppData>, shape: String, cx: f64, cy: f64, r: f64, ro
             s.add_shape(Geo::Polyline { pts, closed: true });
         }
     }
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
 fn activate_color(data: State<AppData>, color: [u8; 3]) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.activate_color(color);
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
@@ -137,7 +174,7 @@ fn select_at(data: State<AppData>, x: f64, y: f64, tol: f64, additive: bool) -> 
             }
         }
     }
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Marquee-Auswahl: alle Shapes, deren BBox vollständig im Rechteck liegt.
@@ -145,7 +182,7 @@ fn select_at(data: State<AppData>, x: f64, y: f64, tol: f64, additive: bool) -> 
 fn select_rect(data: State<AppData>, x1: f64, y1: f64, x2: f64, y2: f64) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.select_in_rect(x1, y1, x2, y2);
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Verschiebt die Auswahl um ein Gesamt-Delta (ein Undo-Punkt pro Geste).
@@ -156,7 +193,7 @@ fn move_selected(data: State<AppData>, dx: f64, dy: f64) -> Scene {
         s.push_undo();
         s.translate_selected(dx, dy);
     }
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Skaliert die Auswahl von der Start-Gruppenbox auf die Zielbox (ein Undo-Punkt).
@@ -177,7 +214,7 @@ fn scale_selected(
     let mut s = data.state.lock().unwrap();
     s.push_undo();
     s.scale_selection_to(BBox::new(sx, sy, sw, sh), BBox::new(tx, ty, tw, th));
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
@@ -191,10 +228,10 @@ fn align(data: State<AppData>, kind: String) -> Scene {
         "top" => Align::Top,
         "vcenter" => Align::VCenter,
         "bottom" => Align::Bottom,
-        _ => return Scene::from_state(&s),
+        _ => return scene_with(&s, &data),
     };
     s.align_selection(k);
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
@@ -204,10 +241,10 @@ fn distribute(data: State<AppData>, kind: String) -> Scene {
     let k = match kind.as_str() {
         "h" => Distribute::Horizontal,
         "v" => Distribute::Vertical,
-        _ => return Scene::from_state(&s),
+        _ => return scene_with(&s, &data),
     };
     s.distribute_selection(k);
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Spiegelt die Auswahl an der Mittelachse ihrer gemeinsamen BBox.
@@ -220,24 +257,24 @@ fn mirror(data: State<AppData>, axis: String) -> Scene {
     let a = match axis.as_str() {
         "h" => Axis::Vertical,
         "v" => Axis::Horizontal,
-        _ => return Scene::from_state(&s),
+        _ => return scene_with(&s, &data),
     };
     s.mirror_selection(a);
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
 fn clear_selection(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.selected.clear();
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
 fn delete_selected(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.delete_selected();
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Vom Frontend gelieferte Layer-Parameter (Doppelklick-Dialog).
@@ -276,7 +313,7 @@ fn set_layer_params(data: State<AppData>, index: usize, p: LayerParams) -> Scene
         l.line_step_mm = p.line_step_mm;
         l.dpi = p.dpi;
     }
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Schalter eines Layers umschalten (Anzeige, Brennen, Luft, Sperre).
@@ -292,7 +329,7 @@ fn toggle_layer(data: State<AppData>, index: usize, field: String) -> Scene {
             _ => {}
         }
     }
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 /// Erzeugt aus dem aktuellen Zustand einen G-Code-Job (GRBL-Treiber).
@@ -354,18 +391,282 @@ fn reset_ui_tab(tab: Tab) -> Result<UiSettings, String> {
     Ok(settings)
 }
 
+// ---- Projektverwaltung (ADR 0003) -----------------------------------------
+
+/// Volle Detailansicht eines Projekts (rechte Seite im Browser).
+#[derive(Serialize)]
+struct ProjectDetail {
+    name: String,
+    description: String,
+    tags: Vec<String>,
+    created_at: String,
+    modified_at: String,
+    versions: Vec<VersionInfo>,
+    asset_refs: Vec<String>,
+}
+
+/// Neues, leeres Projekt: Zeichenfläche leeren, Projektkontext zurücksetzen.
+#[tauri::command]
+fn new_project(data: State<AppData>) -> Scene {
+    {
+        let mut s = data.state.lock().unwrap();
+        *s = AppState::new();
+    }
+    {
+        let mut cur = data.current.lock().unwrap();
+        cur.file = None;
+    }
+    scene(&data)
+}
+
+/// Speichert das Projekt. Ist noch keins offen (namenlos), wird mit den
+/// gelieferten Metadaten ein neues angelegt; sonst wird der Arbeitsstand des
+/// offenen Projekts überschrieben. `thumb_png` sind fertige PNG-Bytes (Frontend).
+#[tauri::command]
+fn save_project(
+    data: State<AppData>,
+    name: String,
+    description: String,
+    tags: Vec<String>,
+    thumb_png: Vec<u8>,
+) -> Result<Scene, String> {
+    let dir = projects_dir();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Projektname darf nicht leer sein.".into());
+    }
+    let mut s = data.state.lock().unwrap();
+    let mut cur = data.current.lock().unwrap();
+
+    // Bestehendes Projekt aktualisieren oder neues anlegen.
+    let pf = match cur.file.take() {
+        Some(mut existing) => {
+            existing.name = name.clone();
+            existing.description = description;
+            existing.tags = tags;
+            existing.update_from_state(&s);
+            existing
+        }
+        None => {
+            let mut pf = ProjectFile::from_state(&s, &name, tags);
+            pf.description = description;
+            pf
+        }
+    };
+    pf.save_to_dir(&dir)?;
+    // Thumbnail des aktuellen Stands neben die Projektdatei legen (für die Liste).
+    if !thumb_png.is_empty() {
+        let _ = std::fs::write(dir.join(&name).join("thumbnail.png"), &thumb_png);
+    }
+    s.mark_saved();
+    cur.file = Some(pf);
+    remember_last_project(&name);
+    Ok(Scene::build(&s, &cur))
+}
+
+/// Hält den aktuellen Stand als **neue Version** fest (Shift+Strg+S). Verlangt
+/// ein bereits gespeichertes (benanntes) Projekt.
+#[tauri::command]
+fn save_version(data: State<AppData>, note: String, thumb_png: Vec<u8>) -> Result<Scene, String> {
+    let dir = projects_dir();
+    let mut s = data.state.lock().unwrap();
+    let mut cur = data.current.lock().unwrap();
+    let Some(pf) = cur.file.as_mut() else {
+        return Err("Bitte zuerst das Projekt speichern (Strg+S).".into());
+    };
+    // Arbeitsstand ins ProjectFile übernehmen, dann Version anlegen.
+    pf.update_from_state(&s);
+    let name = pf.name.clone();
+    pf.add_version(&dir, note, &thumb_png)?;
+    // Hauptvorschau (Arbeitsstand) mit aktualisieren: „Hauptversion = letzter
+    // Stand", egal ob per Strg+S oder Shift+Strg+S gespeichert.
+    if !thumb_png.is_empty() {
+        let _ = std::fs::write(dir.join(&name).join("thumbnail.png"), &thumb_png);
+    }
+    s.mark_saved();
+    Ok(Scene::build(&s, &cur))
+}
+
+/// Öffnet ein Projekt (lädt den aktuellen Arbeitsstand in den AppState).
+#[tauri::command]
+fn open_project(data: State<AppData>, name: String) -> Result<Scene, String> {
+    let dir = projects_dir();
+    let pf = ProjectFile::load_by_name(&dir, &name)?;
+    {
+        let mut s = data.state.lock().unwrap();
+        *s = pf.clone().into_state();
+    }
+    {
+        let mut cur = data.current.lock().unwrap();
+        cur.file = Some(pf);
+    }
+    remember_last_project(&name);
+    Ok(scene(&data))
+}
+
+/// Lädt einen Versions-Snapshot und **befördert ihn zum aktuellen Stand**:
+/// Die Version wird der neue Arbeitsstand UND der neue gespeicherte Hauptstand
+/// (`projekt.luxi` + `thumbnail.png`). So bleiben Vorschau (= letzter Speicher-
+/// stand) und tatsächlich geladener Stand immer synchron (ADR 0003 Regel:
+/// „Hauptversion = letzter gespeicherter Stand"). Die Versionshistorie bleibt.
+#[tauri::command]
+fn open_version(data: State<AppData>, name: String, version_id: String) -> Result<Scene, String> {
+    let dir = projects_dir();
+    let snap = ProjectFile::load_version(&dir, &name, &version_id)?;
+    // Aktuelle Metadaten (Name/Beschreibung/Tags/Historie) behalten, nur die
+    // Geometrie durch den Snapshot ersetzen.
+    let mut current = ProjectFile::load_by_name(&dir, &name)?;
+    current.bed_w_mm = snap.bed_w_mm;
+    current.bed_h_mm = snap.bed_h_mm;
+    current.layers = snap.layers.clone();
+    current.shapes = snap.shapes.clone();
+    current.modified_at = luxifer_core::project::now_iso8601();
+    // Als neuen Hauptstand schreiben und das Versions-Thumbnail als Hauptvorschau
+    // übernehmen, damit die grosse Vorschau exakt diesen Stand zeigt.
+    current.save_to_dir(&dir)?;
+    if let Some(vpng) = luxifer_core::version_thumb_path(&dir, &name, &version_id) {
+        let _ = std::fs::copy(&vpng, dir.join(&name).join("thumbnail.png"));
+    }
+    {
+        let mut s = data.state.lock().unwrap();
+        *s = snap.into_state();
+    }
+    {
+        let mut cur = data.current.lock().unwrap();
+        cur.file = Some(current);
+    }
+    remember_last_project(&name);
+    Ok(scene(&data))
+}
+
+/// Liste aller Projekte (linke Seite im Browser).
+#[tauri::command]
+fn project_list() -> Vec<ProjectInfo> {
+    list_projects(&projects_dir())
+}
+
+/// Volle Details eines Projekts (rechte Seite im Browser).
+#[tauri::command]
+fn project_detail(name: String) -> Result<ProjectDetail, String> {
+    let pf = ProjectFile::load_by_name(&projects_dir(), &name)?;
+    Ok(ProjectDetail {
+        name: pf.name,
+        description: pf.description,
+        tags: pf.tags,
+        created_at: pf.created_at,
+        modified_at: pf.modified_at,
+        versions: pf.versions,
+        asset_refs: pf.asset_refs,
+    })
+}
+
+/// Liefert das Thumbnail des Projekts (aktueller Stand, `thumbnail.png`) als
+/// Data-URL, oder `None`, wenn keins existiert.
+#[tauri::command]
+fn project_thumb(name: String) -> Option<String> {
+    let path = projects_dir().join(&name).join("thumbnail.png");
+    read_png_data_url(&path)
+}
+
+/// Liefert das Thumbnail einer bestimmten Version als Data-URL (oder `None`).
+#[tauri::command]
+fn version_thumb(name: String, version_id: String) -> Option<String> {
+    let p = luxifer_core::version_thumb_path(&projects_dir(), &name, &version_id)?;
+    read_png_data_url(&p)
+}
+
+/// Liest eine PNG-Datei und kodiert sie als `data:image/png;base64,…`-URL.
+fn read_png_data_url(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(format!("data:image/png;base64,{}", base64_encode(&bytes)))
+}
+
+/// Minimale Base64-Kodierung (Standard-Alphabet, mit Padding), ohne Fremd-Crate.
+fn base64_encode(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(A[((n >> 18) & 63) as usize] as char);
+        out.push(A[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            A[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            A[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// Löscht ein Projekt samt Versionen. War es das offene Projekt, wird der
+/// Projektkontext zurückgesetzt (der Arbeitsstand bleibt zum Weiterarbeiten).
+#[tauri::command]
+fn project_delete(data: State<AppData>, name: String) -> Result<(), String> {
+    delete_project(&projects_dir(), &name)?;
+    let mut cur = data.current.lock().unwrap();
+    if cur.file.as_ref().is_some_and(|f| f.name == name) {
+        cur.file = None;
+    }
+    Ok(())
+}
+
+/// Benennt ein Projekt um (Identität/`id` bleibt). Aktualisiert den offenen
+/// Projektkontext, falls es das offene Projekt war.
+#[tauri::command]
+fn project_rename(data: State<AppData>, old_name: String, new_name: String) -> Result<(), String> {
+    let dir = projects_dir();
+    rename_project(&dir, &old_name, &new_name)?;
+    let mut cur = data.current.lock().unwrap();
+    if let Some(f) = cur.file.as_mut() {
+        if f.name == old_name {
+            f.name = new_name.clone();
+            remember_last_project(&new_name);
+        }
+    }
+    Ok(())
+}
+
+/// Exportiert die Projektdatei nach `ziel` (einfacher Datei-Export der
+/// `projekt.luxi`). Ordner-/ZIP-Export kann später folgen.
+#[tauri::command]
+fn project_export(name: String, ziel: String) -> Result<(), String> {
+    let src = projects_dir().join(&name).join("projekt.luxi");
+    std::fs::copy(&src, &ziel).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Merkt sich das zuletzt geöffnete/gespeicherte Projekt in den GUI-Settings
+/// (für den Start-Toast). Fehler werden geschluckt — rein kosmetisch.
+fn remember_last_project(name: &str) {
+    let mut settings = UiSettings::load();
+    if settings.last_project != name {
+        settings.last_project = name.to_string();
+        let _ = settings.save();
+    }
+}
+
 #[tauri::command]
 fn undo(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.undo();
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[tauri::command]
 fn redo(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.redo();
-    Scene::from_state(&s)
+    scene_with(&s, &data)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -374,6 +675,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppData {
                 state: Mutex::new(AppState::new()),
+                current: Mutex::new(CurrentProject::default()),
             });
             // Fenster-/Taskleisten-Icon zur Laufzeit setzen (greift auch im
             // Dev-Modus, wo das gebündelte Icon sonst nicht verwendet wird).
@@ -411,6 +713,18 @@ pub fn run() {
             get_ui_settings,
             save_ui_settings,
             reset_ui_tab,
+            new_project,
+            save_project,
+            save_version,
+            open_project,
+            open_version,
+            project_list,
+            project_detail,
+            project_thumb,
+            version_thumb,
+            project_delete,
+            project_rename,
+            project_export,
             undo,
             redo,
         ])

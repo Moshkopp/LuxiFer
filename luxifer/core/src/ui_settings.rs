@@ -176,6 +176,10 @@ pub struct UiSettings {
     pub theme: Theme,
     /// Ein Layout je Reiter.
     pub layouts: Vec<TabLayout>,
+    /// Zuletzt geöffnetes Projekt (Ordnername) für den Start-Toast (ADR 0003).
+    /// Leer = kein zuletzt-Projekt. `#[serde(default)]` für alte Settings.
+    #[serde(default)]
+    pub last_project: String,
 }
 
 impl Default for UiSettings {
@@ -185,6 +189,7 @@ impl Default for UiSettings {
             workplace: "Arbeitsplatz".into(),
             theme: Theme::default(),
             layouts: Tab::ALL.iter().map(|&t| default_layout(t)).collect(),
+            last_project: String::new(),
         }
     }
 }
