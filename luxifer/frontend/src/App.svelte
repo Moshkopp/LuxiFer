@@ -22,7 +22,7 @@
   } from "./lib/core";
   import { applyTheme } from "./lib/theme";
 
-  type Tool = "select" | "rect" | "ellipse";
+  type Tool = "select" | "rect" | "ellipse" | "line";
 
   let scene = $state<Scene | null>(null);
   let tool = $state<Tool>("rect");
@@ -113,6 +113,9 @@
   async function ondrawellipse(cx: number, cy: number, rx: number, ry: number) {
     scene = await core.addEllipse(cx, cy, rx, ry);
   }
+  async function ondrawline(x1: number, y1: number, x2: number, y2: number) {
+    scene = await core.addLine(x1, y1, x2, y2);
+  }
   async function onselectat(x: number, y: number, additive: boolean) {
     scene = await core.selectAt(x, y, 2, additive);
   }
@@ -137,6 +140,10 @@
   }
   async function doDistribute(kind: core.DistributeKind) {
     scene = await core.distribute(kind);
+  }
+  // Sofort-Befehle aus der Werkzeugleiste (Spiegeln). Wirken auf die Auswahl.
+  async function doToolAction(a: "mirror_h" | "mirror_v") {
+    scene = await core.mirror(a === "mirror_h" ? "h" : "v");
   }
   async function saveLayer(p: LayerParams) {
     if (editLayer !== null) {
@@ -235,6 +242,7 @@
       {tool}
       {ondrawrect}
       {ondrawellipse}
+      {ondrawline}
       {onselectat}
       {onselectrect}
       {onmove}
@@ -286,7 +294,7 @@
     <PanelHost {panels} {editing} onchange={changeRect}>
       {#snippet panel(p: PanelPlacement)}
         {#if p.kind === "Werkzeuge"}
-          <ToolsPanel {tool} onpick={(t) => (tool = t)} />
+          <ToolsPanel {tool} onpick={(t) => (tool = t)} onaction={doToolAction} />
         {:else if p.kind === "Ebenen"}
           <LayersPanel layers={sceneLayers} onedit={(i) => (editLayer = i)} ontoggle={toggleLayer} />
         {:else if p.kind === "Farbpalette"}

@@ -1,13 +1,14 @@
 <script lang="ts">
   import { rgb, type Scene, type Shape } from "./core";
 
-  type Tool = "select" | "rect" | "ellipse";
+  type Tool = "select" | "rect" | "ellipse" | "line";
 
   let {
     scene,
     tool,
     ondrawrect,
     ondrawellipse,
+    ondrawline,
     onselectat,
     onselectrect,
     onmove,
@@ -17,6 +18,7 @@
     tool: Tool;
     ondrawrect: (x: number, y: number, w: number, h: number) => void;
     ondrawellipse: (cx: number, cy: number, rx: number, ry: number) => void;
+    ondrawline: (x1: number, y1: number, x2: number, y2: number) => void;
     onselectat: (x: number, y: number, additive: boolean) => void;
     onselectrect: (x1: number, y1: number, x2: number, y2: number) => void;
     onmove: (dx: number, dy: number) => void;
@@ -269,18 +271,27 @@
 
   function drawGesturePreview(ctx: CanvasRenderingContext2D) {
     if (drag?.kind === "draw") {
-      const x = Math.min(drag.sx, drag.cx), y = Math.min(drag.sy, drag.cy);
-      const w = Math.abs(drag.cx - drag.sx), h = Math.abs(drag.cy - drag.sy);
-      const [px, py] = toScreen(x, y);
       ctx.strokeStyle = "rgba(255,255,255,0.6)";
       ctx.setLineDash([5, 4]);
       ctx.lineWidth = 1.2;
-      if (tool === "ellipse") {
+      if (tool === "line") {
+        const [ax, ay] = toScreen(drag.sx, drag.sy);
+        const [bx, by] = toScreen(drag.cx, drag.cy);
         ctx.beginPath();
-        ctx.ellipse(px + (w * zoom) / 2, py + (h * zoom) / 2, (w * zoom) / 2, (h * zoom) / 2, 0, 0, Math.PI * 2);
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
         ctx.stroke();
       } else {
-        ctx.strokeRect(px, py, w * zoom, h * zoom);
+        const x = Math.min(drag.sx, drag.cx), y = Math.min(drag.sy, drag.cy);
+        const w = Math.abs(drag.cx - drag.sx), h = Math.abs(drag.cy - drag.sy);
+        const [px, py] = toScreen(x, y);
+        if (tool === "ellipse") {
+          ctx.beginPath();
+          ctx.ellipse(px + (w * zoom) / 2, py + (h * zoom) / 2, (w * zoom) / 2, (h * zoom) / 2, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.strokeRect(px, py, w * zoom, h * zoom);
+        }
       }
       ctx.setLineDash([]);
     } else if (drag?.kind === "marquee") {
@@ -313,7 +324,7 @@
     if (ev.button !== 0) return;
     const [mx, my] = toMm(px, py);
 
-    if (tool === "rect" || tool === "ellipse") {
+    if (tool === "rect" || tool === "ellipse" || tool === "line") {
       drag = { kind: "draw", sx: mx, sy: my, cx: mx, cy: my };
       return;
     }
@@ -377,11 +388,17 @@
     const g = drag;
     drag = null;
     if (g.kind === "draw") {
-      const x = Math.min(g.sx, g.cx), y = Math.min(g.sy, g.cy);
-      const w = Math.abs(g.cx - g.sx), h = Math.abs(g.cy - g.sy);
-      if (w > 1 && h > 1) {
-        if (tool === "ellipse") ondrawellipse(x + w / 2, y + h / 2, w / 2, h / 2);
-        else ondrawrect(x, y, w, h);
+      if (tool === "line") {
+        // Echte Endpunkte A→B, Mindestlänge 1 mm.
+        const len = Math.hypot(g.cx - g.sx, g.cy - g.sy);
+        if (len > 1) ondrawline(g.sx, g.sy, g.cx, g.cy);
+      } else {
+        const x = Math.min(g.sx, g.cx), y = Math.min(g.sy, g.cy);
+        const w = Math.abs(g.cx - g.sx), h = Math.abs(g.cy - g.sy);
+        if (w > 1 && h > 1) {
+          if (tool === "ellipse") ondrawellipse(x + w / 2, y + h / 2, w / 2, h / 2);
+          else ondrawrect(x, y, w, h);
+        }
       }
     } else if (g.kind === "marquee") {
       const w = Math.abs(g.cx - g.sx), h = Math.abs(g.cy - g.sy);

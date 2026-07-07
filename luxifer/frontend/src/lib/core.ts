@@ -58,6 +58,9 @@ export const addRect = (x: number, y: number, w: number, h: number) =>
 export const addEllipse = (cx: number, cy: number, rx: number, ry: number) =>
   invoke<Scene>("add_ellipse", { cx, cy, rx, ry });
 
+export const addLine = (x1: number, y1: number, x2: number, y2: number) =>
+  invoke<Scene>("add_line", { x1, y1, x2, y2 });
+
 export const activateColor = (color: [number, number, number]) =>
   invoke<Scene>("activate_color", { color });
 
@@ -83,6 +86,10 @@ export type AlignKind = "left" | "hcenter" | "right" | "top" | "vcenter" | "bott
 export type DistributeKind = "h" | "v";
 export const align = (kind: AlignKind) => invoke<Scene>("align", { kind });
 export const distribute = (kind: DistributeKind) => invoke<Scene>("distribute", { kind });
+
+// "h" = horizontal spiegeln (links↔rechts), "v" = vertikal (oben↔unten).
+export type MirrorAxis = "h" | "v";
+export const mirror = (axis: MirrorAxis) => invoke<Scene>("mirror", { axis });
 
 export const clearSelection = () => invoke<Scene>("clear_selection");
 

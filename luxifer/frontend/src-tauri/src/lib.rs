@@ -64,6 +64,17 @@ fn add_ellipse(data: State<AppData>, cx: f64, cy: f64, rx: f64, ry: f64) -> Scen
     Scene::from_state(&s)
 }
 
+/// Fügt eine offene 2-Punkt-Linie als Polyline hinzu.
+#[tauri::command]
+fn add_line(data: State<AppData>, x1: f64, y1: f64, x2: f64, y2: f64) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.add_shape(Geo::Polyline {
+        pts: vec![(x1, y1), (x2, y2)],
+        closed: false,
+    });
+    Scene::from_state(&s)
+}
+
 #[tauri::command]
 fn activate_color(data: State<AppData>, color: [u8; 3]) -> Scene {
     let mut s = data.state.lock().unwrap();
@@ -166,6 +177,22 @@ fn distribute(data: State<AppData>, kind: String) -> Scene {
     Scene::from_state(&s)
 }
 
+/// Spiegelt die Auswahl an der Mittelachse ihrer gemeinsamen BBox.
+/// `axis`: "h" = horizontal spiegeln (links↔rechts, vertikale Achse),
+/// "v" = vertikal spiegeln (oben↔unten, horizontale Achse).
+#[tauri::command]
+fn mirror(data: State<AppData>, axis: String) -> Scene {
+    use luxifer_core::Axis;
+    let mut s = data.state.lock().unwrap();
+    let a = match axis.as_str() {
+        "h" => Axis::Vertical,
+        "v" => Axis::Horizontal,
+        _ => return Scene::from_state(&s),
+    };
+    s.mirror_selection(a);
+    Scene::from_state(&s)
+}
+
 #[tauri::command]
 fn clear_selection(data: State<AppData>) -> Scene {
     let mut s = data.state.lock().unwrap();
@@ -225,10 +252,10 @@ fn toggle_layer(data: State<AppData>, index: usize, field: String) -> Scene {
     let mut s = data.state.lock().unwrap();
     if let Some(l) = s.layers.get_mut(index) {
         match field.as_str() {
-            "visible" => l.visible = !l.visible,   // Objekte anzeigen
-            "enabled" => l.enabled = !l.enabled,   // im Job mitbrennen
+            "visible" => l.visible = !l.visible,          // Objekte anzeigen
+            "enabled" => l.enabled = !l.enabled,          // im Job mitbrennen
             "air_assist" => l.air_assist = !l.air_assist, // Luftunterstützung
-            "locked" => l.locked = !l.locked,      // Editiersperre
+            "locked" => l.locked = !l.locked,             // Editiersperre
             _ => {}
         }
     }
@@ -329,6 +356,7 @@ pub fn run() {
             swatch_colors,
             add_rect,
             add_ellipse,
+            add_line,
             activate_color,
             select_at,
             select_rect,
@@ -336,6 +364,7 @@ pub fn run() {
             scale_selected,
             align,
             distribute,
+            mirror,
             set_layer_params,
             toggle_layer,
             generate_gcode,

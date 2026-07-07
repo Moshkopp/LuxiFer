@@ -18,7 +18,8 @@ Aktiv: `select`, `rect`, `ellipse`. Der Rest ist **(Stub)** und muss verdrahtet
 werden — Fachlogik jeweils in `luxifer-core`, das Frontend zeichnet nur.
 
 ### Zeichnen & Formen
-- [ ] `line` — Linie (Core hat `Geo::Polyline`; als offene 2-Punkt-Linie)
+- [x] `line` — Linie (offene 2-Punkt-`Geo::Polyline`; Command `add_line`,
+      Canvas zeichnet A→B mit Vorschau)
 - [ ] `polyline` — Polylinie (mehrere Punkte, Enter/Doppelklick schließt ab)
 - [ ] `spline` — Spline
 - [ ] `bezier` — Bézier-Feder *(war in ThorBurn schon nur Vorschau)*
@@ -37,8 +38,9 @@ werden — Fachlogik jeweils in `luxifer-core`, das Frontend zeichnet nur.
 - [ ] `pattern-fill` — Muster füllen *(ThorBurn-Vorschau)*
 
 ### Spiegeln
-- [ ] `mirror_h` — horizontal spiegeln (reine Geometrie im Core, gut machbar)
-- [ ] `mirror_v` — vertikal spiegeln
+- [x] `mirror_h` — horizontal spiegeln (Sofort-Befehl auf der Auswahl, um die
+      Mittelachse der Auswahl-BBox; `Geo::mirror` + `AppState::mirror_selection`)
+- [x] `mirror_v` — vertikal spiegeln
 
 ### Untersetzer-Schnelleinfügung
 - [ ] `coaster_rect` — 4×2 eckige Untersetzer einfügen

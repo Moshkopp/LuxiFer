@@ -6,22 +6,29 @@
   // hier — die liegen im Header bzw. auf der Entf-Taste.
   import Icon, { type IconName } from "./Icon.svelte";
 
-  type Tool = "select" | "rect" | "ellipse";
+  type Tool = "select" | "rect" | "ellipse" | "line";
+  // Sofort-Befehle auf der Auswahl (kein Zeichenmodus), z. B. Spiegeln.
+  type Action = "mirror_h" | "mirror_v";
   let {
     tool,
     onpick,
+    onaction,
   }: {
     tool: Tool;
     // Nur die real funktionierenden Werkzeuge werden nach oben gemeldet.
     onpick: (t: Tool) => void;
+    // Sofort-Befehle (Spiegeln etc.) werden getrennt gemeldet.
+    onaction: (a: Action) => void;
   } = $props();
 
-  // Ein Werkzeug: Name, Icon, Tooltip. `active` = funktioniert bereits.
+  // Ein Werkzeug: Name, Icon, Tooltip. `active` = funktioniert als Werkzeug
+  // (Zeichenmodus). `action` = Sofort-Befehl auf der Auswahl (funktioniert auch).
   type ToolDef = {
     name: string;
     icon: IconName;
     tip: string;
     active?: boolean;
+    action?: boolean;
     wide?: boolean;
   };
 
@@ -34,7 +41,7 @@
       { name: "rect", icon: "rect", tip: "Rechteck", active: true },
       { name: "ellipse", icon: "ellipse", tip: "Ellipse", active: true },
       { name: "polygon", icon: "polygon", tip: "Polygon (Form wählen)" },
-      { name: "line", icon: "line", tip: "Linie" },
+      { name: "line", icon: "line", tip: "Linie", active: true },
       { name: "polyline", icon: "polyline", tip: "Polylinie" },
       { name: "spline", icon: "spline", tip: "Spline" },
       { name: "bezier", icon: "bezier", tip: "Bézier-Feder" },
@@ -51,10 +58,10 @@
       { name: "offset", icon: "offset", tip: "Offset / Versatz" },
       { name: "measure", icon: "measure", tip: "Messen" },
     ],
-    // 4: Spiegeln
+    // 4: Spiegeln (Sofort-Befehle auf der Auswahl)
     [
-      { name: "mirror_h", icon: "mirror-h", tip: "Horizontal spiegeln" },
-      { name: "mirror_v", icon: "mirror-v", tip: "Vertikal spiegeln" },
+      { name: "mirror_h", icon: "mirror-h", tip: "Horizontal spiegeln", action: true },
+      { name: "mirror_v", icon: "mirror-v", tip: "Vertikal spiegeln", action: true },
     ],
     // 5: Untersetzer-Schnelleinfügung
     [
@@ -65,6 +72,7 @@
 
   function click(t: ToolDef) {
     if (t.active) onpick(t.name as Tool);
+    else if (t.action) onaction(t.name as Action);
     // Stubs tun (noch) nichts.
   }
 </script>
@@ -77,8 +85,8 @@
           class="gbtn tool"
           class:wide={t.wide}
           class:active={t.active && tool === t.name}
-          class:stub={!t.active}
-          title={t.tip + (t.active ? "" : " (Vorschau)")}
+          class:stub={!t.active && !t.action}
+          title={t.tip + (t.active || t.action ? "" : " (Vorschau)")}
           aria-label={t.tip}
           onclick={() => click(t)}
         >
