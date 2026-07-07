@@ -56,6 +56,31 @@
   const panels = $derived<PanelPlacement[]>(layout?.panels ?? []);
   const visibleKinds = $derived<PanelKind[]>(panels.map((p) => p.kind));
 
+  // Fenstergroesse (reaktiv), damit sich die Bett-Einpassung an Resize anpasst.
+  let winW = $state(0);
+  let winH = $state(0);
+
+  // Freie Raender (px) fuer die Bett-Einpassung im Canvas: Header oben fest,
+  // seitlich/unten aus den Panel-Rects grob geschaetzt. Ein Panel zaehlt fuer
+  // eine Kante, wenn es dort klebt (z. B. x≈0 -> linker Rand). So landet das
+  // Bett im tatsaechlich freien Bereich, ohne dass Canvas die Panel-Logik kennt.
+  const HEADER_PX = 56;
+  const insets = $derived.by(() => {
+    const ins = { top: HEADER_PX, right: 0, bottom: 0, left: 0 };
+    if (!winW || !winH) return ins;
+    for (const p of panels) {
+      const { x, y, w, h } = p.rect;
+      // Panel-Rects sind Bruchteile: Breite gegen Fensterbreite, Hoehe gegen
+      // Fensterhoehe (PanelHost rendert prozentual pro Achse).
+      const wpx = w * winW, hpx = h * winH;
+      if (x <= 0.02) ins.left = Math.max(ins.left, x * winW + wpx);
+      if (x + w >= 0.98) ins.right = Math.max(ins.right, wpx);
+      if (y <= 0.02) ins.top = Math.max(ins.top, HEADER_PX, y * winH + hpx);
+      if (y + h >= 0.98) ins.bottom = Math.max(ins.bottom, hpx);
+    }
+    return ins;
+  });
+
   // Settings speichern (debounced ueber ein Microtask reicht hier nicht — wir
   // speichern direkt, das ist eine kleine lokale JSON).
   async function persist(next: UiSettings) {
@@ -229,7 +254,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} bind:innerWidth={winW} bind:innerHeight={winH} />
 
 <main>
   {#if error}
@@ -240,6 +265,7 @@
     <Canvas
       {scene}
       {tool}
+      {insets}
       {ondrawrect}
       {ondrawellipse}
       {ondrawline}

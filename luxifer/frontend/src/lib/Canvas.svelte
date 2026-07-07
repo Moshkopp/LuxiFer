@@ -6,6 +6,7 @@
   let {
     scene,
     tool,
+    insets,
     ondrawrect,
     ondrawellipse,
     ondrawline,
@@ -16,6 +17,9 @@
   }: {
     scene: Scene;
     tool: Tool;
+    // Freie Raender in Pixeln, in die das Bett beim Start eingepasst wird
+    // (verdeckt von Header/Panels). Optional; Default 0.
+    insets?: { top: number; right: number; bottom: number; left: number };
     ondrawrect: (x: number, y: number, w: number, h: number) => void;
     ondrawellipse: (cx: number, cy: number, rx: number, ry: number) => void;
     ondrawline: (x1: number, y1: number, x2: number, y2: number) => void;
@@ -35,6 +39,27 @@
   let zoom = $state(1.2);
   let panX = $state(40);
   let panY = $state(40);
+  // Solange der Nutzer die Ansicht noch nicht selbst bewegt hat (Pan/Zoom),
+  // passt sich das Bett automatisch in den freien Bereich ein.
+  let viewTouched = false;
+
+  // Passt das Bett zentriert in den freien Bereich (Canvas minus Insets) ein.
+  function fitBed() {
+    if (!canvasEl) return;
+    const cw = canvasEl.width, ch = canvasEl.height;
+    const ins = insets ?? { top: 0, right: 0, bottom: 0, left: 0 };
+    const availW = Math.max(50, cw - ins.left - ins.right);
+    const availH = Math.max(50, ch - ins.top - ins.bottom);
+    const bw = scene.bed_w_mm, bh = scene.bed_h_mm;
+    if (bw <= 0 || bh <= 0) return;
+    const margin = 0.9; // etwas Luft rundherum
+    zoom = Math.min(availW / bw, availH / bh) * margin;
+    // Bett-Mitte auf die Mitte des freien Bereichs legen.
+    const freeCx = ins.left + availW / 2;
+    const freeCy = ins.top + availH / 2;
+    panX = freeCx - (bw / 2) * zoom;
+    panY = freeCy - (bh / 2) * zoom;
+  }
 
   const HANDLE_PX = 8;
 
@@ -357,6 +382,7 @@
     const [mx, my] = toMm(px, py);
     if (!drag) return;
     if (drag.kind === "pan") {
+      viewTouched = true;
       panX = drag.ox + (px - drag.px);
       panY = drag.oy + (py - drag.py);
     } else if (drag.kind === "draw" || drag.kind === "marquee") {
@@ -412,6 +438,7 @@
 
   function onWheel(ev: WheelEvent) {
     ev.preventDefault();
+    viewTouched = true;
     const [px, py] = localXY(ev);
     const [wx, wy] = toMm(px, py);
     zoom = Math.max(0.05, Math.min(40, zoom * (ev.deltaY < 0 ? 1.15 : 0.85)));
@@ -424,10 +451,18 @@
     if (!wrapEl || !canvasEl) return;
     canvasEl.width = wrapEl.clientWidth;
     canvasEl.height = wrapEl.clientHeight;
+    // Solange der Nutzer die Ansicht nicht selbst bewegt hat, Bett einpassen.
+    if (!viewTouched) fitBed();
     draw();
   }
 
   $effect(() => { scene; zoom; panX; panY; drag; draw(); });
+  // Aendern sich die freien Raender (Reiterwechsel, Panel verschoben) und der
+  // Nutzer hat die Ansicht noch nicht selbst bewegt, das Bett neu einpassen.
+  $effect(() => {
+    insets;
+    if (!viewTouched) { fitBed(); draw(); }
+  });
   $effect(() => {
     resize();
     const ro = new ResizeObserver(resize);
