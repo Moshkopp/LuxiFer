@@ -264,8 +264,6 @@
   function drawBed(ctx: CanvasRenderingContext2D) {
     const [x0, y0] = toScreen(0, 0);
     const bw = scene.bed_w_mm * zoom, bh = scene.bed_h_mm * zoom;
-    ctx.fillStyle = "rgba(90,150,220,0.10)";
-    ctx.fillRect(x0, y0, bw, bh);
     ctx.strokeStyle = "rgba(90,150,220,0.9)";
     ctx.lineWidth = 1.5;
     ctx.strokeRect(x0, y0, bw, bh);
@@ -280,6 +278,13 @@
   function layerColor(s: Shape): string {
     const l = scene.layers[s.layer_id];
     return l ? rgb(l.color) : "#ff5c62";
+  }
+  // Füllfarbe der Layer-Farbe mit Alpha (echtes rgba — an rgb() darf kein
+  // Hex-Alpha angehaengt werden, das ergaebe einen ungueltigen fillStyle).
+  function layerFillColor(s: Shape, alpha: number): string {
+    const l = scene.layers[s.layer_id];
+    const [r, g, b] = l ? l.color : [255, 92, 98];
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
   function layerFilled(s: Shape): boolean {
     const l = scene.layers[s.layer_id];
@@ -331,7 +336,7 @@
     } else {
       ctx.rect(sx, sy, bw * zoom, bh * zoom);
     }
-    if (layerFilled(s)) { ctx.fillStyle = color + "48"; ctx.fill(); }
+    if (layerFilled(s)) { ctx.fillStyle = layerFillColor(s, 0.32); ctx.fill(); }
     ctx.stroke();
     ctx.restore();
   }
