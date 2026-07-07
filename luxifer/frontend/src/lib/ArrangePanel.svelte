@@ -26,20 +26,32 @@
 </div>
 
 <style>
+  /* Einreihig; die Buttons teilen sich die Panelbreite und passen sich ihr an
+     (kein Umbruch, kein Stauchen). So bleibt die Reihe intakt, egal wie schmal
+     das Panel gezogen wird. */
   .arrange {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: 3px;
+    width: 100%;
+    container-type: inline-size;
   }
   button {
-    flex: 0 0 auto;
-    width: 34px;
-    height: 34px;
-    font-size: 16px;
+    flex: 1 1 0;
+    min-width: 0;
+    /* Quadratisch: Hoehe folgt der (mit dem Panel schrumpfenden) Breite,
+       gedeckelt, damit die Buttons in breiten Panels nicht riesig werden. */
+    aspect-ratio: 1;
+    max-width: 34px;
+    /* Icon-/Glyphgroesse skaliert mit der Buttonbreite. */
+    font-size: clamp(10px, 2.6cqw, 16px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
   }
   .vsep {
-    width: 1px;
+    flex: 0 0 1px;
     align-self: stretch;
     background: var(--border);
     margin: 3px 4px;

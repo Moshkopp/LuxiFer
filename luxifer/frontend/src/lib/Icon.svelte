@@ -81,15 +81,20 @@
   let {
     name,
     size = 18,
+    // `fill`: Icon skaliert mit der Schriftgroesse (1em) des Buttons statt
+    // fixer Pixel — fuer Werkzeug-/Anordnen-Buttons, die sich dem Panel anpassen.
+    fill = false,
   }: {
     name: IconName;
     size?: number;
+    fill?: boolean;
   } = $props();
 </script>
 
 <svg
-  width={size}
-  height={size}
+  class:fill
+  width={fill ? undefined : size}
+  height={fill ? undefined : size}
   viewBox="0 0 24 24"
   fill="none"
   stroke="currentColor"
@@ -105,5 +110,10 @@
   svg {
     display: block;
     flex-shrink: 0;
+  }
+  /* Skaliert mit der Schriftgroesse des umgebenden Buttons. */
+  svg.fill {
+    width: 1.2em;
+    height: 1.2em;
   }
 </style>

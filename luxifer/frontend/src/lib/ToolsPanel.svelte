@@ -90,7 +90,7 @@
           aria-label={t.tip}
           onclick={() => click(t)}
         >
-          <Icon name={t.icon} />
+          <Icon name={t.icon} fill />
         </button>
       {/each}
     </div>
@@ -101,31 +101,44 @@
 </div>
 
 <style>
+  /* Die Werkzeugleiste passt sich der Panelbreite an: Buttons fuellen die zwei
+     Spalten und werden mit dem Panel groesser/kleiner (quadratisch), Icons
+     skalieren mit. Kein fixes 34px mehr -> kein Stauchen bei schmalem Panel. */
   .tools {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 6px;
+    width: 100%;
+    container-type: inline-size;
   }
   .group {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 4px;
     width: 100%;
-    justify-items: center;
+    justify-items: stretch;
   }
   .tool {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    aspect-ratio: 1;
+    width: 100%;
+    /* In breiten Panels nicht ins Riesige wachsen. */
+    max-width: 40px;
+    justify-self: center;
     color: var(--text);
+    /* Icon-Groesse folgt der Panelbreite. */
+    font-size: clamp(12px, 7cqw, 18px);
   }
   /* Breiter Auswahl-Button ueber beide Spalten. */
   .tool.wide {
     grid-column: 1 / -1;
     width: 100%;
+    max-width: none;
+    aspect-ratio: auto;
+    height: clamp(28px, 9cqw, 40px);
   }
   /* Stubs dezenter, damit klar ist, was schon geht. */
   .tool.stub {
