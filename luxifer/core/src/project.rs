@@ -154,7 +154,7 @@ impl ProjectFile {
             note: String::new(),
         };
         let current = v1.id.clone();
-        Self {
+        let mut pf = Self {
             version: FORMAT_VERSION,
             id: gen_id(),
             name: name.into(),
@@ -169,7 +169,9 @@ impl ProjectFile {
             bed_h_mm: state.bed_h_mm,
             layers: state.layers.clone(),
             shapes: state.shapes.clone(),
-        }
+        };
+        pf.sync_asset_refs();
+        pf
     }
 
     /// Übernimmt den aktuellen Arbeitsstand (Geometrie + Bett) in eine bereits
@@ -181,7 +183,24 @@ impl ProjectFile {
         self.bed_h_mm = state.bed_h_mm;
         self.layers = state.layers.clone();
         self.shapes = state.shapes.clone();
+        self.sync_asset_refs();
         self.modified_at = now_iso8601();
+    }
+
+    /// Leitet `asset_refs` aus den aktuellen Shapes ab (ADR 0004 §1): sammelt die
+    /// Asset-IDs aller `Geo::Image`-Shapes (dedupliziert, in Reihenfolge des
+    /// ersten Auftretens). So kennt das Projekt seine Assets explizit — Grundlage
+    /// für Anzeige, Aufräumen verwaister Assets und späteren Charon-Sync.
+    pub fn sync_asset_refs(&mut self) {
+        let mut refs: Vec<String> = Vec::new();
+        for s in &self.shapes {
+            if let crate::geometry::Geo::Image { asset, .. } = &s.geo {
+                if !refs.contains(asset) {
+                    refs.push(asset.clone());
+                }
+            }
+        }
+        self.asset_refs = refs;
     }
 
     /// Nächstes freies Versions-Label („V1", „V2", …). Zählt anhand der bereits
@@ -852,6 +871,31 @@ mod tests {
         delete_project(&dir, "Weg").unwrap();
         assert_eq!(list_projects(&dir).len(), 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn asset_refs_werden_aus_bild_shapes_abgeleitet() {
+        use crate::geometry::{Geo, ImageParams};
+        let mut s = AppState::new();
+        s.add_image("asset-1".into(), 0.0, 0.0, 10.0, 10.0);
+        s.add_image("asset-2".into(), 0.0, 0.0, 10.0, 10.0);
+        // Dasselbe Asset ein zweites Mal → darf nicht doppelt in asset_refs.
+        s.shapes.push(crate::model::Shape::new(
+            0,
+            Geo::Image {
+                asset: "asset-1".into(),
+                x: 5.0,
+                y: 5.0,
+                w: 4.0,
+                h: 4.0,
+                params: ImageParams::default(),
+            },
+        ));
+        let pf = ProjectFile::from_state(&s, "P", vec![]);
+        assert_eq!(
+            pf.asset_refs,
+            vec!["asset-1".to_string(), "asset-2".to_string()]
+        );
     }
 
     #[test]

@@ -2,11 +2,35 @@
 // Wahrheits-Zustand — es holt den Zustand hier und zeichnet ihn nur.
 import { invoke } from "@tauri-apps/api/core";
 
+// Bildverarbeitungs-Modus (ADR 0004).
+export type ImageMode = "Grayscale" | "Threshold";
+
+// Nicht-destruktive Bild-Parameter (spiegelt luxifer-core::ImageParams).
+export interface ImageParams {
+  mode: ImageMode;
+  threshold: number;
+  brightness: number;
+  contrast: number;
+  gamma: number;
+  invert_editor: boolean;
+  invert_laser: boolean;
+}
+
 // Spiegelt luxifer-core::Geo (serde-Enum, extern getaggt).
 export type Geo =
   | { Rect: { x: number; y: number; w: number; h: number } }
   | { Ellipse: { cx: number; cy: number; rx: number; ry: number } }
-  | { Polyline: { pts: [number, number][]; closed: boolean } };
+  | { Polyline: { pts: [number, number][]; closed: boolean } }
+  | {
+      Image: {
+        asset: string;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        params: ImageParams;
+      };
+    };
 
 export interface Layer {
   name: string;
@@ -15,7 +39,7 @@ export interface Layer {
   enabled: boolean;
   active: boolean;
   locked: boolean;
-  mode: "Cut" | "Fill" | "Raster";
+  mode: "Cut" | "Fill" | "Raster" | "Image";
   speed_mm_s: number;
   power_pct: number;
   min_power_pct: number;
@@ -23,6 +47,7 @@ export interface Layer {
   line_step_mm: number;
   passes: number;
   dpi: number;
+  bidirectional: boolean;
 }
 
 export interface Shape {
@@ -74,6 +99,33 @@ export const addLine = (x1: number, y1: number, x2: number, y2: number) =>
 
 export const addPolyline = (pts: [number, number][], closed: boolean) =>
   invoke<Scene>("add_polyline", { pts, closed });
+
+// ---- Bild-Import & -Bearbeitung (ADR 0004) --------------------------------
+
+// Importiert ein Bild aus rohen Datei-Bytes (Frontend liest sie per <input file>).
+export const importImageFile = (bytes: number[], name: string) =>
+  invoke<Scene>("import_image_file", { bytes, name });
+
+// Rendert ein Asset mit Parametern als PNG-Data-URL (Canvas/Editor-Vorschau).
+export const imageRender = (asset: string, params: ImageParams, invert: boolean) =>
+  invoke<string | null>("image_render", { asset, params, invert });
+
+// Setzt die Bild-Parameter eines Bild-Shapes (Editor).
+export const setImageParams = (index: number, params: ImageParams) =>
+  invoke<Scene>("set_image_params", { index, params });
+
+// Ein Asset eines Projekts (Anzeige im Browser).
+export interface ProjectAsset {
+  id: string;
+  original_name: string;
+  width: number;
+  height: number;
+  thumb: string | null;
+}
+
+// Assets eines Projekts (aus asset_refs) mit Metadaten + Vorschau.
+export const projectAssets = (name: string) =>
+  invoke<ProjectAsset[]>("project_assets", { name });
 
 // Ein Eintrag des Formen-Katalogs (datengetriebene Galerie im Werkzeug-Panel).
 // Spiegelt luxifer-core::ShapeInfo.
@@ -198,7 +250,7 @@ export const deleteSelected = () => invoke<Scene>("delete_selected");
 
 export interface LayerParams {
   name: string;
-  mode: "Cut" | "Fill" | "Raster";
+  mode: "Cut" | "Fill" | "Raster" | "Image";
   speed_mm_s: number;
   power_pct: number;
   min_power_pct: number;

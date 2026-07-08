@@ -31,6 +31,47 @@ pub const SWATCH_COLORS: &[[u8; 3]] = &[
     [0x6B, 0x72, 0x80], // grau
 ];
 
+/// Deterministische, **katalogfremde** Farbe für einen Bild-Layer (ADR 0004 §4):
+/// jedes Bild bekommt eine eigene Kennfarbe, die garantiert nicht in
+/// `SWATCH_COLORS` vorkommt und sich zwischen Bildern unterscheidet.
+///
+/// Verfahren: Farbton per Golden-Angle-Rotation (137.508°) über `seed`
+/// gestreut, feste Sättigung/Helligkeit. Kollidiert die Farbe mit dem Katalog
+/// (nach Rundung auf u8), wird der nächste Golden-Angle-Schritt genommen. So
+/// bleibt die Vergabe reproduzierbar und kollisionsfrei.
+pub fn image_layer_color(seed: u32) -> [u8; 3] {
+    for step in 0..64u32 {
+        let hue = (((seed + step) as f64) * 137.508) % 360.0;
+        let rgb = hsl_to_rgb(hue, 0.55, 0.60);
+        if !SWATCH_COLORS.contains(&rgb) {
+            return rgb;
+        }
+    }
+    // Praktisch unerreichbar (Katalog hat 14 Farben, wir haben 64 Versuche).
+    hsl_to_rgb((seed as f64 * 137.508) % 360.0, 0.55, 0.60)
+}
+
+/// HSL (h in Grad 0..360, s/l 0..1) → RGB u8. Kleiner Helfer für [`image_layer_color`].
+fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [u8; 3] {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = h / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    [
+        ((r1 + m) * 255.0).round() as u8,
+        ((g1 + m) * 255.0).round() as u8,
+        ((b1 + m) * 255.0).round() as u8,
+    ]
+}
+
 /// Bearbeitungsmodus eines Layers — bestimmt, WIE gelasert wird.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LayerMode {
@@ -38,12 +79,15 @@ pub enum LayerMode {
     Cut,
     Fill,
     Raster,
+    /// Bild-Layer (ADR 0004): trägt genau ein importiertes Bild + dessen
+    /// Verarbeitungsparameter. Wird beim Job gerastert.
+    Image,
 }
 
 impl LayerMode {
-    /// Fill/Raster füllen Flächen; Cut nur Kontur. Für die Fill-Vorschau.
+    /// Fill/Raster/Image füllen Flächen; Cut nur Kontur. Für die Fill-Vorschau.
     pub fn is_filled(&self) -> bool {
-        matches!(self, LayerMode::Fill | LayerMode::Raster)
+        matches!(self, LayerMode::Fill | LayerMode::Raster | LayerMode::Image)
     }
 }
 
@@ -73,6 +117,10 @@ pub struct Layer {
     pub passes: u32,
     /// Auflösung für Raster-Layer.
     pub dpi: f64,
+    /// Bidirektionales Rastern (Scan hin und zurück) für Image-/Raster-Layer.
+    /// Alte Dateien ohne das Feld gelten als bidirektional.
+    #[serde(default = "default_true")]
+    pub bidirectional: bool,
 }
 
 impl Layer {
@@ -98,6 +146,7 @@ impl Layer {
             line_step_mm: 0.1,
             passes: 1,
             dpi: 254.0,
+            bidirectional: true,
         }
     }
 
@@ -181,6 +230,23 @@ mod tests {
         assert!(!LayerMode::Cut.is_filled());
         assert!(LayerMode::Fill.is_filled());
         assert!(LayerMode::Raster.is_filled());
+        assert!(LayerMode::Image.is_filled());
+    }
+
+    #[test]
+    fn image_layer_farbe_katalogfremd_und_verschieden() {
+        // Keine der vergebenen Farben liegt im Katalog; benachbarte seeds
+        // liefern unterschiedliche Farben.
+        let mut seen = std::collections::HashSet::new();
+        for seed in 0..20u32 {
+            let c = image_layer_color(seed);
+            assert!(
+                !SWATCH_COLORS.contains(&c),
+                "seed {seed} kollidiert mit Katalog"
+            );
+            seen.insert(c);
+        }
+        assert!(seen.len() >= 18, "Farben streuen ausreichend");
     }
 
     #[test]

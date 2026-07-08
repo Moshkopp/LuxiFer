@@ -17,7 +17,7 @@
   /* svelte-ignore state_referenced_locally */
   let name = $state(layer.name);
   /* svelte-ignore state_referenced_locally */
-  let mode = $state<"Cut" | "Fill" | "Raster">(layer.mode);
+  let mode = $state<"Cut" | "Fill" | "Raster" | "Image">(layer.mode);
   /* svelte-ignore state_referenced_locally */
   let speed = $state(layer.speed_mm_s);
   /* svelte-ignore state_referenced_locally */

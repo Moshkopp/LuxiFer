@@ -160,7 +160,9 @@ fn shape_to_path(s: &Shape) -> Path {
 /// Rohe Punkte einer Geometrie (ohne Rotation) + ob geschlossen.
 fn raw_points(geo: &Geo) -> (Vec<Pt>, bool) {
     match geo {
-        Geo::Rect { x, y, w, h } => (
+        // Bild wie Rechteck: die Box-Ecken sind die Kontur. Die eigentliche
+        // Rasterung des Bildinhalts folgt im Job-Teil (ADR 0004 §5, später).
+        Geo::Rect { x, y, w, h } | Geo::Image { x, y, w, h, .. } => (
             vec![(*x, *y), (*x + *w, *y), (*x + *w, *y + *h), (*x, *y + *h)],
             true,
         ),

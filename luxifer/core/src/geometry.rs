@@ -61,7 +61,50 @@ pub enum Axis {
     Horizontal,
 }
 
-/// Die vier Geometrie-Typen einer Form. Maße in mm.
+/// Wie ein farbiges Bild in Graustufe umgesetzt wird (ADR 0004 §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ImageMode {
+    /// Reine Graustufe (kein Schwellwert).
+    #[default]
+    Grayscale,
+    /// Harte Schwelle: Pixel ≥ `threshold` → hell, sonst dunkel.
+    Threshold,
+}
+
+/// Nicht-destruktive Bildverarbeitungs-Parameter (ADR 0004 §3). Wirken erst bei
+/// Vorschau/Rastern; das Store-Asset bleibt unverändert.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ImageParams {
+    pub mode: ImageMode,
+    /// Schwellwert 0..255 (nur bei `Threshold`).
+    pub threshold: u8,
+    /// Helligkeit −100..+100.
+    pub brightness: i32,
+    /// Kontrast −100..+100.
+    pub contrast: i32,
+    /// Gamma 0.1..3.0.
+    pub gamma: f64,
+    /// Invertiert die Canvas-Darstellung.
+    pub invert_editor: bool,
+    /// Invertiert nur die Laser-/Rastervorschau (nicht das Canvas).
+    pub invert_laser: bool,
+}
+
+impl Default for ImageParams {
+    fn default() -> Self {
+        Self {
+            mode: ImageMode::Grayscale,
+            threshold: 128,
+            brightness: 0,
+            contrast: 0,
+            gamma: 1.0,
+            invert_editor: false,
+            invert_laser: false,
+        }
+    }
+}
+
+/// Die Geometrie-Typen einer Form. Maße in mm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Geo {
     /// Linke obere Ecke + Breite/Höhe.
@@ -70,6 +113,17 @@ pub enum Geo {
     Ellipse { cx: f64, cy: f64, rx: f64, ry: f64 },
     /// Offene oder geschlossene Punktfolge.
     Polyline { pts: Vec<Pt>, closed: bool },
+    /// Importiertes Bild: Verweis auf ein Store-Asset (ID = Content-Hash) plus
+    /// achsenparallele Box (linke obere Ecke + Größe) und Verarbeitungsparameter.
+    /// Verhält sich geometrisch wie ein `Rect` (Box); die Pixel liegen im Store.
+    Image {
+        asset: String,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        params: ImageParams,
+    },
 }
 
 impl Geo {
@@ -77,6 +131,7 @@ impl Geo {
     pub fn bbox(&self) -> BBox {
         match self {
             Geo::Rect { x, y, w, h } => BBox::new(*x, *y, *w, *h),
+            Geo::Image { x, y, w, h, .. } => BBox::new(*x, *y, *w, *h),
             Geo::Ellipse { cx, cy, rx, ry } => BBox::new(cx - rx, cy - ry, rx * 2.0, ry * 2.0),
             Geo::Polyline { pts, .. } => {
                 if pts.is_empty() {
@@ -101,7 +156,7 @@ impl Geo {
     /// Nur so eine Form wird auf Fill-/Raster-Layern flächig dargestellt.
     pub fn is_fillable(&self) -> bool {
         match self {
-            Geo::Rect { .. } | Geo::Ellipse { .. } => true,
+            Geo::Rect { .. } | Geo::Ellipse { .. } | Geo::Image { .. } => true,
             Geo::Polyline { closed, .. } => *closed,
         }
     }
@@ -111,7 +166,7 @@ impl Geo {
     /// Polyline: Abstand zu einem Segment ≤ Toleranz (geschlossen inkl. Schlusskante).
     pub fn hit_test(&self, px: f64, py: f64, tol: f64) -> bool {
         match self {
-            Geo::Rect { .. } => self.bbox().contains(px, py, tol),
+            Geo::Rect { .. } | Geo::Image { .. } => self.bbox().contains(px, py, tol),
             Geo::Ellipse { cx, cy, rx, ry } => {
                 let rx = rx + tol;
                 let ry = ry + tol;
@@ -146,7 +201,7 @@ impl Geo {
     /// Verschiebt die Form um (dx, dy) in mm.
     pub fn translate(&mut self, dx: f64, dy: f64) {
         match self {
-            Geo::Rect { x, y, .. } => {
+            Geo::Rect { x, y, .. } | Geo::Image { x, y, .. } => {
                 *x += dx;
                 *y += dy;
             }
@@ -171,11 +226,11 @@ impl Geo {
         // Spiegelt einen Skalarwert v an der Achsenposition c: v' = 2c - v.
         let flip = |v: f64| 2.0 * coord - v;
         match (axis, self) {
-            (Axis::Vertical, Geo::Rect { x, w, .. }) => {
+            (Axis::Vertical, Geo::Rect { x, w, .. } | Geo::Image { x, w, .. }) => {
                 // Rechte Kante wird zur neuen linken: x' = flip(x + w).
                 *x = flip(*x + *w);
             }
-            (Axis::Horizontal, Geo::Rect { y, h, .. }) => {
+            (Axis::Horizontal, Geo::Rect { y, h, .. } | Geo::Image { y, h, .. }) => {
                 *y = flip(*y + *h);
             }
             (Axis::Vertical, Geo::Ellipse { cx, .. }) => *cx = flip(*cx),
@@ -199,7 +254,7 @@ impl Geo {
         let nw = nw.max(MIN_SIZE);
         let nh = nh.max(MIN_SIZE);
         match self {
-            Geo::Rect { x, y, w, h } => {
+            Geo::Rect { x, y, w, h } | Geo::Image { x, y, w, h, .. } => {
                 *x = nx;
                 *y = ny;
                 *w = nw;

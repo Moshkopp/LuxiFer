@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { rgb, polygonPreview, type Scene, type Shape } from "./core";
+  import { rgb, polygonPreview, imageRender, type Scene, type Shape, type ImageParams } from "./core";
 
   type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon";
 
@@ -17,6 +17,7 @@
     onselectrect,
     onmove,
     onscale,
+    oneditimage,
   }: {
     scene: Scene;
     tool: Tool;
@@ -40,10 +41,61 @@
       start: [number, number, number, number],
       target: [number, number, number, number],
     ) => void | Promise<void>;
+    // Doppelklick auf ein Bild-Shape: Editor oeffnen (Shape-Index).
+    oneditimage?: (index: number) => void;
   } = $props();
 
   let canvasEl: HTMLCanvasElement;
   let wrapEl: HTMLDivElement;
+
+  // ---- Bild-Cache (ADR 0004 §3a) --------------------------------------------
+  // Gerenderte Bild-Bitmaps (asset+params → HTMLImageElement). Move/Resize
+  // zeichnen nur `drawImage` mit neuen Koordinaten neu — KEIN Neurendern. Ein
+  // Eintrag wird nur einmal erzeugt (bzw. wenn sich die Editor-Parameter aendern).
+  const imgCache = new Map<string, HTMLImageElement>();
+  // Welche Keys werden gerade geladen (verhindert Doppel-Requests pro Frame).
+  const imgLoading = new Set<string>();
+
+  // WICHTIG (ADR 0004 §3, Invariante): Das Canvas zeigt das Bild UNVERAENDERT —
+  // die einzige Ausnahme ist `invert_editor`. Schwelle/Helligkeit/Kontrast/Gamma
+  // wirken NUR in der Editor-Vorschau und beim spaeteren Rastern, NICHT im Canvas.
+  // Deshalb rendert das Canvas immer neutral (Graustufe, keine Tonwertaenderung)
+  // und wendet nur invert_editor an. Cache-Key = asset + invert_editor.
+  function imgKey(asset: string, p: ImageParams): string {
+    return `${asset}|${p.invert_editor ? 1 : 0}`;
+  }
+
+  // Liefert das gecachte Bitmap oder startet asynchron das Rendern und loest
+  // danach genau einen Redraw aus. Gibt `null`, solange noch nicht geladen.
+  function cachedImage(asset: string, p: ImageParams): HTMLImageElement | null {
+    const key = imgKey(asset, p);
+    const hit = imgCache.get(key);
+    if (hit) return hit;
+    if (!imgLoading.has(key)) {
+      imgLoading.add(key);
+      // Neutrale Params: rohes Graustufen-Asset, nur invert_editor greift.
+      const neutral: ImageParams = {
+        mode: "Grayscale",
+        threshold: 128,
+        brightness: 0,
+        contrast: 0,
+        gamma: 1.0,
+        invert_editor: p.invert_editor,
+        invert_laser: false,
+      };
+      imageRender(asset, neutral, p.invert_editor).then((url) => {
+        imgLoading.delete(key);
+        if (!url) return;
+        const el = new Image();
+        el.onload = () => {
+          imgCache.set(key, el);
+          draw();
+        };
+        el.src = url;
+      });
+    }
+    return null;
+  }
 
   // Ansicht.
   let zoom = $state(1.2);
@@ -127,6 +179,10 @@
   function shapeBBox(s: Shape): [number, number, number, number] {
     if ("Rect" in s.geo) {
       const { x, y, w, h } = s.geo.Rect;
+      return [x, y, w, h];
+    }
+    if ("Image" in s.geo) {
+      const { x, y, w, h } = s.geo.Image;
       return [x, y, w, h];
     }
     if ("Ellipse" in s.geo) {
@@ -337,6 +393,7 @@
   }
   function layerFilled(s: Shape): boolean {
     const l = scene.layers[s.layer_id];
+    // Image-Layer nicht flaechig einfaerben — das Bild wird selbst gezeichnet.
     return !!l && (l.mode === "Fill" || l.mode === "Raster");
   }
 
@@ -376,10 +433,29 @@
       ctx.rotate((s.rotation * Math.PI) / 180);
       ctx.translate(-scx, -scy);
     }
+    const [sx, sy] = toScreen(bx, by);
+    // Bild: gecachtes Bitmap in die Box zeichnen (volle Aufloesung, ADR 0004).
+    // Move/Resize aendern nur die Box — kein Neurendern. Duenner Layer-Rahmen
+    // als Kennung; die Auswahl-Handles kommen aus drawSelection.
+    if ("Image" in s.geo) {
+      const { asset, params } = s.geo.Image;
+      const img = cachedImage(asset, params);
+      if (img) {
+        ctx.drawImage(img, sx, sy, bw * zoom, bh * zoom);
+      } else {
+        // Noch nicht geladen: Platzhalterflaeche in Layer-Farbe.
+        ctx.fillStyle = layerFillColor(s, 0.15);
+        ctx.fillRect(sx, sy, bw * zoom, bh * zoom);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx, sy, bw * zoom, bh * zoom);
+      ctx.restore();
+      return;
+    }
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    const [sx, sy] = toScreen(bx, by);
     if ("Ellipse" in s.geo) {
       ctx.ellipse(sx + (bw * zoom) / 2, sy + (bh * zoom) / 2, (bw * zoom) / 2, (bh * zoom) / 2, 0, 0, Math.PI * 2);
     } else if ("Polyline" in s.geo) {
@@ -652,13 +728,29 @@
   // Doppelklick schliesst die Polylinie ab. Der Doppelklick hat ueber
   // pointerdown schon einen (nahezu deckungsgleichen) Extrapunkt gesetzt — den
   // entfernen wir, wenn er auf dem vorherigen liegt.
-  function onDblClick() {
-    if (tool !== "polyline" || polyPts.length < 2) return;
-    const n = polyPts.length;
-    const [ax, ay] = polyPts[n - 1];
-    const [bx, by] = polyPts[n - 2];
-    if (Math.hypot(ax - bx, ay - by) < 0.5) polyPts = polyPts.slice(0, n - 1);
-    polyCommit(false);
+  function onDblClick(ev: MouseEvent) {
+    // Im Polyline-Modus: Kontur abschliessen (wie bisher).
+    if (tool === "polyline" && polyPts.length >= 2) {
+      const n = polyPts.length;
+      const [ax, ay] = polyPts[n - 1];
+      const [bx, by] = polyPts[n - 2];
+      if (Math.hypot(ax - bx, ay - by) < 0.5) polyPts = polyPts.slice(0, n - 1);
+      polyCommit(false);
+      return;
+    }
+    // Sonst: Doppelklick auf ein Bild-Shape oeffnet den Bild-Editor.
+    const [px, py] = localXY(ev);
+    const [mx, my] = toMm(px, py);
+    // Oberstes getroffenes Bild-Shape (spaetere liegen oben).
+    for (let i = scene.shapes.length - 1; i >= 0; i--) {
+      const s = scene.shapes[i];
+      if (!("Image" in s.geo)) continue;
+      const [bx, by, bw, bh] = shapeBBox(s);
+      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+        oneditimage?.(i);
+        return;
+      }
+    }
   }
 
   function onKeydown(ev: KeyboardEvent) {

@@ -13,6 +13,7 @@
 //!   Arbeitsplatz-Settings (ADR 0002); von der GUI genutzt, aber UI-frei.
 
 pub mod arrange;
+pub mod assets;
 pub mod geometry;
 pub mod interact;
 pub mod job;
@@ -24,7 +25,11 @@ pub mod state;
 pub mod ui_settings;
 
 pub use arrange::{Align, Distribute};
-pub use geometry::{Axis, BBox, Geo, Pt};
+pub use assets::{
+    apply_params, asset_meta, asset_path, assets_dir, import_image, load_asset, rendered_png,
+    AssetId, AssetMeta,
+};
+pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
 pub use interact::Handle;
 pub use job::{JobLayer, JobPlan, LayerWork, MachineDriver, Path};
 pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};

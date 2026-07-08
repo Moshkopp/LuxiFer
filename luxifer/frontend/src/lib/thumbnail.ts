@@ -4,7 +4,7 @@
 // Offscreen-Canvas und liefert PNG-Bytes. Die echte Geometrie bleibt im Core;
 // hier wird nur gezeichnet (konform mit CLAUDE.md Regel 2). Bewusst schlanker
 // als Canvas.svelte (kein Grid, keine Auswahl/Handles) — nur Bett + Formen.
-import { rgb, type Scene, type Shape } from "./core";
+import { rgb, imageRender, type Scene, type Shape, type ImageParams } from "./core";
 
 const W = 240;
 const H = 180;
@@ -13,6 +13,10 @@ const H = 180;
 function shapeBBox(s: Shape): [number, number, number, number] {
   if ("Rect" in s.geo) {
     const { x, y, w, h } = s.geo.Rect;
+    return [x, y, w, h];
+  }
+  if ("Image" in s.geo) {
+    const { x, y, w, h } = s.geo.Image;
     return [x, y, w, h];
   }
   if ("Ellipse" in s.geo) {
@@ -27,8 +31,39 @@ function shapeBBox(s: Shape): [number, number, number, number] {
   return [a, b, c - a, d - b];
 }
 
+// Lädt die (Graustufen-)Bitmaps aller Bild-Shapes vorab als HTMLImageElement.
+// invert_editor wird berücksichtigt, damit das Thumbnail den Canvas-Stand zeigt.
+async function loadImages(scene: Scene): Promise<Map<string, HTMLImageElement>> {
+  const out = new Map<string, HTMLImageElement>();
+  for (const s of scene.shapes) {
+    if (!("Image" in s.geo)) continue;
+    const { asset, params } = s.geo.Image;
+    if (out.has(asset)) continue;
+    // Neutral rendern (roh, nur invert_editor) — wie das Canvas (ADR 0004 §3).
+    const neutral: ImageParams = {
+      mode: "Grayscale",
+      threshold: 128,
+      brightness: 0,
+      contrast: 0,
+      gamma: 1.0,
+      invert_editor: params.invert_editor,
+      invert_laser: false,
+    };
+    const url = await imageRender(asset, neutral, params.invert_editor);
+    if (!url) continue;
+    const el = await new Promise<HTMLImageElement | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+    if (el) out.set(asset, el);
+  }
+  return out;
+}
+
 // Zeichnet die Szene ins gegebene 2D-Context, eingepasst in W×H.
-function render(ctx: CanvasRenderingContext2D, scene: Scene) {
+function render(ctx: CanvasRenderingContext2D, scene: Scene, images: Map<string, HTMLImageElement>) {
   ctx.fillStyle = "#141518";
   ctx.fillRect(0, 0, W, H);
 
@@ -51,7 +86,23 @@ function render(ctx: CanvasRenderingContext2D, scene: Scene) {
   for (const s of scene.shapes) {
     const l = scene.layers[s.layer_id];
     const color = l ? rgb(l.color) : "#ff5c62";
-    const filled = !!l && (l.mode === "Fill" || l.mode === "Raster");
+    // Bild: echtes Bitmap zeichnen (falls geladen), sonst Box in Layer-Farbe.
+    if ("Image" in s.geo) {
+      const [bx, by, w, h] = shapeBBox(s);
+      const img = images.get(s.geo.Image.asset);
+      if (img) {
+        ctx.drawImage(img, sx(bx), sy(by), w * zoom, h * zoom);
+      } else {
+        const [r, g, b] = l ? l.color : [255, 92, 98];
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+        ctx.fillRect(sx(bx), sy(by), w * zoom, h * zoom);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx(bx), sy(by), w * zoom, h * zoom);
+      continue;
+    }
+    const filled = !!l && (l.mode === "Fill" || l.mode === "Raster" || l.mode === "Image");
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.2;
     ctx.beginPath();
@@ -86,7 +137,8 @@ export async function renderThumbnail(scene: Scene): Promise<number[]> {
   canvas.height = H;
   const ctx = canvas.getContext("2d");
   if (!ctx) return [];
-  render(ctx, scene);
+  const images = await loadImages(scene);
+  render(ctx, scene, images);
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/png"),
   );

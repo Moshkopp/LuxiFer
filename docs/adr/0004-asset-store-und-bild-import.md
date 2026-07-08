@@ -60,9 +60,10 @@ bewusst **vertagt** (siehe „Nicht Teil dieser Entscheidung").
   So wird **einmal** beim Import entsättigt statt bei jedem Öffnen jedes Projekts.
   Wird das Bild je farbig gebraucht, importiert man die Plattendatei neu (sie ist
   unberührt) — es geht nichts verloren.
-- **Graustufen-Methode:** vorerst fix **Luminanz** (0.299 R + 0.587 G + 0.114 B),
-  kein Import-Dialog. Eine spätere Methodenwahl (Kanal/Gewichtung, für getönte
-  Vorlagen) ist im Design vorgesehen, aber nicht jetzt.
+- **Graustufen-Methode:** vorerst fix **Luminanz** (gamma-korrekt, sRGB-
+  linearisiert — `image::to_luma8`, fotografisch korrekt statt naiver
+  Rec.601-Gewichtung), kein Import-Dialog. Eine spätere Methodenwahl (Kanal/
+  Gewichtung, für getönte Vorlagen) ist im Design vorgesehen, aber nicht jetzt.
 - **Identität = Content-Hash** der Asset-Bytes (z. B. FNV/SHA-artig, ohne
   Fremd-Crate — analog `gen_id`). Gleiches Bild zweimal importiert → **ein**
   Asset.

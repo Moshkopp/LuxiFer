@@ -43,6 +43,8 @@
   let error = $state<string | null>(null);
   // Thumbnail-Data-URLs je Version (id → url).
   let verThumbs = $state<Record<string, string>>({});
+  // Assets des gewählten Projekts (ADR 0004).
+  let assets = $state<core.ProjectAsset[]>([]);
 
   // Versionen neueste-zuerst für die Anzeige (Grid + große Vorschau).
   const versionsNewestFirst = $derived([...(detail?.versions ?? [])].reverse());
@@ -107,6 +109,7 @@
     if (saveMode) onclosesavemode();
     selected = name;
     verThumbs = {};
+    assets = [];
     try {
       detail = await core.projectDetail(name);
       fName = detail.name;
@@ -119,6 +122,8 @@
         if (t) thumbs[v.id] = t;
       }
       verThumbs = thumbs;
+      // Assets des Projekts laden (aus asset_refs).
+      assets = await core.projectAssets(name);
     } catch (e) {
       error = String(e);
     }
@@ -329,7 +334,27 @@
       </div>
 
       <div class="section-head"><h3>Assets</h3></div>
-      <div class="assets-box">Keine – Bilder/Fonts/DXF/SVG folgen mit dem Import.</div>
+      {#if assets.length}
+        <div class="agrid">
+          {#each assets as a (a.id)}
+            <div class="acard" title={a.original_name}>
+              <div class="athumb">
+                {#if a.thumb}
+                  <img src={a.thumb} alt={a.original_name} />
+                {:else}
+                  <span class="no-thumb small">—</span>
+                {/if}
+              </div>
+              <div class="ameta">
+                <span class="aname">{a.original_name || a.id}</span>
+                <span class="adim">{a.width}×{a.height}</span>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="assets-box">Keine – Bilder/Fonts/DXF/SVG folgen mit dem Import.</div>
+      {/if}
     {:else}
       <div class="placeholder">
         <p>Wähle links ein Projekt, um Details zu sehen.</p>
@@ -563,6 +588,35 @@
     border-radius: 12px;
     background: rgba(0, 0, 0, 0.15);
   }
+  /* Asset-Grid (importierte Bilder). */
+  .agrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+  }
+  .acard {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #16171b;
+  }
+  .athumb {
+    aspect-ratio: 4 / 3;
+    background: #141518;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .athumb img { width: 100%; height: 100%; object-fit: contain; }
+  .ameta { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; }
+  .aname {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .adim { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .empty { color: var(--muted); font-size: 13px; padding: 10px; text-align: center; }
   .placeholder { color: var(--muted); display: flex; flex-direction: column; gap: 8px; margin-top: 40px; align-items: center; }
   .hint { font-size: 12px; }

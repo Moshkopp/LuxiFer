@@ -4,8 +4,9 @@
 use std::sync::Mutex;
 
 use luxifer_core::{
-    delete_project, list_projects, projects_dir, rename_project, AppState, Geo, Layer, ProjectFile,
-    ProjectInfo, PolyShape, Shape, ShapeInfo, Tab, UiSettings, VersionInfo,
+    asset_meta, assets_dir, delete_project, import_image, list_projects, projects_dir,
+    rename_project, rendered_png, AppState, Geo, ImageParams, Layer, PolyShape, ProjectFile,
+    ProjectInfo, Shape, ShapeInfo, Tab, UiSettings, VersionInfo,
 };
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -122,6 +123,60 @@ fn add_polyline(data: State<AppData>, pts: Vec<(f64, f64)>, closed: bool) -> Sce
     let mut s = data.state.lock().unwrap();
     if pts.len() >= 2 {
         s.add_shape(Geo::Polyline { pts, closed });
+    }
+    scene_with(&s, &data)
+}
+
+/// Importiert ein Bild (ADR 0004): legt die (Graustufen-)Kopie im Asset-Store ab
+/// und fügt ein Bild-Objekt auf einem eigenen Image-Layer ein. `bytes` sind die
+/// rohen Bytes der vom Nutzer gewählten Datei (das Frontend liest sie über einen
+/// `<input type=file>` — kein Tauri-Dialog nötig), `name` der Anzeigename.
+///
+/// Die Zielgröße in mm ergibt sich aus den Pixelmaßen bei 96 DPI, begrenzt auf
+/// 80 % der Bettgröße (ein 4K-Bild soll nicht riesig platziert werden), und wird
+/// mittig aufs Bett gesetzt. Seitenverhältnis bleibt erhalten.
+#[tauri::command]
+fn import_image_file(data: State<AppData>, bytes: Vec<u8>, name: String) -> Result<Scene, String> {
+    let meta = import_image(&assets_dir(), &bytes, &name).map_err(|e| e.to_string())?;
+
+    let mut s = data.state.lock().unwrap();
+    // px → mm bei 96 DPI.
+    const PX_TO_MM: f64 = 25.4 / 96.0;
+    let mut w = meta.width as f64 * PX_TO_MM;
+    let mut h = meta.height as f64 * PX_TO_MM;
+    // Auf 80 % der Bettgröße begrenzen, Seitenverhältnis wahren.
+    let max_w = s.bed_w_mm * 0.8;
+    let max_h = s.bed_h_mm * 0.8;
+    if w > max_w || h > max_h {
+        let scale = (max_w / w).min(max_h / h);
+        w *= scale;
+        h *= scale;
+    }
+    // Mittig aufs Bett.
+    let x = (s.bed_w_mm - w) / 2.0;
+    let y = (s.bed_h_mm - h) / 2.0;
+    s.add_image(meta.id, x, y, w, h);
+    Ok(scene_with(&s, &data))
+}
+
+/// Rendert ein Asset mit den gegebenen Parametern und gibt es als PNG-Data-URL
+/// zurück (Canvas-Darstellung bzw. Editor-Vorschau). `invert` = Editor- oder
+/// Laser-Invert (der Aufrufer wählt); für die Canvas-Anzeige `invert_editor`.
+#[tauri::command]
+fn image_render(asset: String, params: ImageParams, invert: bool) -> Option<String> {
+    let png = rendered_png(&assets_dir(), &asset, &params, invert).ok()?;
+    Some(format!("data:image/png;base64,{}", base64_encode(&png)))
+}
+
+/// Setzt die Bild-Parameter eines Bild-Shapes (Editor). `index` ist der
+/// Shape-Index; nicht-Bild-Shapes werden ignoriert.
+#[tauri::command]
+fn set_image_params(data: State<AppData>, index: usize, params: ImageParams) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    if let Some(shape) = s.shapes.get_mut(index) {
+        if let Geo::Image { params: p, .. } = &mut shape.geo {
+            *p = params;
+        }
     }
     scene_with(&s, &data)
 }
@@ -587,6 +642,44 @@ fn project_detail(name: String) -> Result<ProjectDetail, String> {
     })
 }
 
+/// Ein Asset eines Projekts für die Anzeige im Browser (ADR 0004).
+#[derive(Serialize)]
+struct ProjectAsset {
+    id: String,
+    original_name: String,
+    width: u32,
+    height: u32,
+    /// Kleine Vorschau als PNG-Data-URL (rohes Graustufen-Asset).
+    thumb: Option<String>,
+}
+
+/// Liefert die Assets eines Projekts (aus `asset_refs`) mit Metadaten und einer
+/// Vorschau-Data-URL — für den Assets-Bereich im Projekt-Browser.
+#[tauri::command]
+fn project_assets(name: String) -> Result<Vec<ProjectAsset>, String> {
+    let dir = assets_dir();
+    let pf = ProjectFile::load_by_name(&projects_dir(), &name)?;
+    let mut out = Vec::new();
+    for id in &pf.asset_refs {
+        let meta = match asset_meta(&dir, id) {
+            Ok(m) => m,
+            Err(_) => continue, // fehlendes Asset überspringen, nicht scheitern
+        };
+        // Rohe Graustufen-Vorschau (neutrale Parameter).
+        let thumb = rendered_png(&dir, id, &ImageParams::default(), false)
+            .ok()
+            .map(|png| format!("data:image/png;base64,{}", base64_encode(&png)));
+        out.push(ProjectAsset {
+            id: meta.id,
+            original_name: meta.original_name,
+            width: meta.width,
+            height: meta.height,
+            thumb,
+        });
+    }
+    Ok(out)
+}
+
 /// Liefert das Thumbnail des Projekts (= Thumbnail der **aktuellen Version**) als
 /// Data-URL, oder `None`, wenn keins existiert. Kein separates `thumbnail.png`
 /// mehr — die große Vorschau zeigt immer die aktuelle Version (ADR 0003).
@@ -746,11 +839,15 @@ pub fn run() {
             new_project,
             save_project,
             save_version,
+            import_image_file,
+            image_render,
+            set_image_params,
             open_project,
             open_version,
             delete_version,
             project_list,
             project_detail,
+            project_assets,
             project_thumb,
             version_thumb,
             project_delete,

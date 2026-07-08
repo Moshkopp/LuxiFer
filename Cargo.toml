@@ -24,3 +24,11 @@ authors = ["moshy"]
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Bild-Dekodierung/Graustufe (ADR 0004). Nur die benoetigten Formate, um die
+# Dependency schlank zu halten (kein GIF/TIFF/… und keine Default-Features).
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "webp",
+] }

@@ -10,6 +10,7 @@
   import ArrangePanel from "./lib/ArrangePanel.svelte";
   import EditFlyout from "./lib/EditFlyout.svelte";
   import ProjectBrowser from "./lib/ProjectBrowser.svelte";
+  import ImageEditor from "./lib/ImageEditor.svelte";
   import Icon from "./lib/Icon.svelte";
   import logoUrl from "./assets/logo.png";
   import * as core from "./lib/core";
@@ -28,13 +29,17 @@
   type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon";
 
   let scene = $state<Scene | null>(null);
-  let tool = $state<Tool>("rect");
+  let tool = $state<Tool>("select");
   let swatches = $state<[number, number, number][]>([]);
   // Formen-Katalog (datengetrieben aus dem Core) + aktuell gewaehlte Form.
   let shapes = $state<core.ShapeInfo[]>([]);
   let activeShape = $state("hex");
   let error = $state<string | null>(null);
   let editLayer = $state<number | null>(null);
+  // Bild-Editor (ADR 0004): Index des Bild-Shapes, das gerade bearbeitet wird.
+  let editImage = $state<number | null>(null);
+  // Versteckter Datei-Input fuer den Bild-Import (per Button ausgeloest).
+  let fileInput = $state<HTMLInputElement | null>(null);
   let gcode = $state<string | null>(null);
   let status = $state<string | null>(null);
 
@@ -206,6 +211,37 @@
     target: [number, number, number, number],
   ) {
     scene = await core.scaleSelected(start, target);
+  }
+
+  // Bild importieren (ADR 0004): Datei-Bytes aus dem <input> lesen und an den
+  // Core geben. Der Core legt die Graustufen-Kopie im Store ab und fuegt das
+  // Bild-Objekt auf einem eigenen Image-Layer ein.
+  async function onImportFile(ev: Event) {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ""; // erlaubt erneutes Waehlen derselben Datei
+    if (!file) return;
+    try {
+      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+      scene = await core.importImageFile(bytes, file.name);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // Das aktuell im Editor bearbeitete Bild-Shape (oder null). Liefert Asset-ID
+  // und Parameter für den Dialog.
+  const editImageShape = $derived.by(() => {
+    if (editImage === null || !scene) return null;
+    const s = scene.shapes[editImage];
+    if (s && "Image" in s.geo) return s.geo.Image;
+    return null;
+  });
+
+  // Live-Übernahme der Bild-Parameter aus dem Editor in den Core.
+  async function applyImageParams(pp: core.ImageParams) {
+    if (editImage === null) return;
+    scene = await core.setImageParams(editImage, pp);
   }
 
   async function pickColor(c: [number, number, number]) {
@@ -466,6 +502,7 @@
       {onselectrect}
       {onmove}
       {onscale}
+      oneditimage={(i) => (editImage = i)}
     />
   {/if}
 
@@ -485,6 +522,21 @@
           <button class="gbtn hbtn" onclick={doRedo} title="Wiederholen (Strg+Y)" aria-label="Wiederholen">
             <Icon name="redo" />
           </button>
+          <button
+            class="gbtn hbtn"
+            onclick={() => fileInput?.click()}
+            title="Bild importieren (PNG, JPG, BMP, WebP)"
+            aria-label="Bild importieren"
+          >
+            <Icon name="contour" />
+          </button>
+          <input
+            bind:this={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/bmp,image/webp"
+            style="display:none"
+            onchange={onImportFile}
+          />
         </div>
       </div>
 
@@ -564,6 +616,20 @@
       onsave={saveLayer}
       oncancel={() => (editLayer = null)}
     />
+  {/if}
+
+  <!-- Bild-Editor (ADR 0004): Doppelklick auf ein Bild öffnet ihn. Die Bedingung
+       hängt am stabilen Shape-Index (nicht am abgeleiteten Objekt), damit der
+       Dialog beim Live-Update der Parameter nicht neu montiert wird. -->
+  {#if editImage !== null && editImageShape}
+    {#key editImage}
+      <ImageEditor
+        asset={editImageShape.asset}
+        params={editImageShape.params}
+        onapply={applyImageParams}
+        onclose={() => (editImage = null)}
+      />
+    {/key}
   {/if}
 
   <!-- Verstecktes Schloss unten links (Editier-Modus, ADR 0002 §5) -->

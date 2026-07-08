@@ -5,8 +5,8 @@
 //! manuell einen Layer an. Er klickt Farben; das System verwaltet Layer
 //! automatisch (`activate_color`) und räumt leere Layer weg (`remove_empty_layers`).
 
-use crate::geometry::Geo;
-use crate::model::{Layer, Shape};
+use crate::geometry::{Geo, ImageParams};
+use crate::model::{image_layer_color, Layer, LayerMode, Shape};
 
 /// Standard-Bettgröße in mm.
 pub const DEFAULT_BED_W: f64 = 600.0;
@@ -177,19 +177,22 @@ impl AppState {
     }
 
     /// Entfernt Layer ohne zugehörige Shapes und remappt alle `layer_id` sowie
-    /// `active_layer`. Mindestens ein Layer bleibt erhalten.
+    /// `active_layer`.
+    ///
+    /// Bleibt danach **kein** Layer übrig (alle Objekte gelöscht), bleibt die
+    /// Layerliste leer — genau wie bei einem frisch gestarteten Projekt. Der
+    /// nächste gezeichnete/importierte Shape legt über `layer_for_new_shape` bzw.
+    /// `add_image` wieder einen an. So bleibt nie ein leerer Layer zurück (auch
+    /// kein leerer Image-Layer, ADR 0004).
     pub fn remove_empty_layers(&mut self) {
-        if self.layers.len() <= 1 {
-            return;
-        }
         let used: std::collections::HashSet<usize> =
             self.shapes.iter().map(|s| s.layer_id).collect();
 
         let keep: Vec<usize> = (0..self.layers.len())
             .filter(|i| used.contains(i))
             .collect();
-        if keep.is_empty() || keep.len() == self.layers.len() {
-            return; // nichts zu tun (oder alle leer → behalten wie es ist)
+        if keep.len() == self.layers.len() {
+            return; // alle Layer sind belegt — nichts zu tun
         }
 
         let mut remap = vec![0usize; self.layers.len()];
@@ -200,6 +203,7 @@ impl AppState {
         for shape in &mut self.shapes {
             shape.layer_id = remap[shape.layer_id];
         }
+        // active_layer auf einen gültigen Index klemmen (0 bei leerer Liste).
         self.active_layer = if used.contains(&self.active_layer) {
             remap[self.active_layer]
         } else {
@@ -224,18 +228,67 @@ impl AppState {
         idx
     }
 
-    /// Bestimmt den Layer für eine neu gezeichnete Form:
-    /// pending_color → passenden Layer finden/anlegen; sonst aktiver Layer;
-    /// existiert gar kein Layer → Layer 0 anlegen.
+    /// Fügt ein importiertes Bild ein (ADR 0004): legt **immer einen eigenen
+    /// Image-Layer** mit katalogfremder Kennfarbe an (jedes Bild = eigener Layer,
+    /// nie den aktiven wiederverwenden) und platziert das Bild-Shape darauf. Gibt
+    /// den Shape-Index zurück. `asset` ist die Store-ID, `w`/`h` die Zielgröße in
+    /// mm, `x`/`y` die linke obere Ecke.
+    pub fn add_image(&mut self, asset: String, x: f64, y: f64, w: f64, h: f64) -> usize {
+        self.push_undo();
+        // Eigener Layer mit garantiert katalogfremder Farbe. seed = Anzahl der
+        // bereits vorhandenen Image-Layer, damit sich die Farben streuen.
+        let seed = self
+            .layers
+            .iter()
+            .filter(|l| l.mode == LayerMode::Image)
+            .count() as u32;
+        let layer_id = self.layers.len();
+        let mut layer = Layer::with_color(layer_id, image_layer_color(seed));
+        layer.mode = LayerMode::Image;
+        layer.name = format!("Bild {}", seed + 1);
+        self.layers.push(layer);
+
+        let geo = Geo::Image {
+            asset,
+            x,
+            y,
+            w,
+            h,
+            params: ImageParams::default(),
+        };
+        self.shapes.push(Shape::new(layer_id, geo));
+        let idx = self.shapes.len() - 1;
+        self.selected = vec![idx];
+        self.active_layer = layer_id;
+        self.pending_color = None;
+        idx
+    }
+
+    /// Bestimmt den Layer für eine neu **gezeichnete** (Vektor-)Form:
+    /// pending_color → passenden Layer finden/anlegen; sonst der aktive Layer.
+    ///
+    /// Ein **Image-Layer ist nie Ziel** einer gezeichneten Form (ADR 0004: ein
+    /// Image-Layer trägt genau ein Bild). Ist der aktive Layer ein Image-Layer
+    /// (z. B. weil gerade ein Bild markiert war), wird der erste normale Layer
+    /// genutzt bzw. ein frischer angelegt.
     fn layer_for_new_shape(&mut self) -> usize {
         if let Some(color) = self.pending_color {
             return self.find_or_create_layer(color);
         }
-        if self.layers.is_empty() {
-            self.layers.push(Layer::new(0));
-            return 0;
+        // Aktiver Layer, falls er ein normaler (Nicht-Image-)Layer ist.
+        if let Some(l) = self.layers.get(self.active_layer) {
+            if l.mode != LayerMode::Image {
+                return self.active_layer;
+            }
         }
-        self.active_layer.min(self.layers.len() - 1)
+        // Sonst: ersten normalen Layer suchen …
+        if let Some(idx) = self.layers.iter().position(|l| l.mode != LayerMode::Image) {
+            return idx;
+        }
+        // … oder einen neuen anlegen (nur Image-Layer bzw. gar keine vorhanden).
+        let idx = self.layers.len();
+        self.layers.push(Layer::new(idx));
+        idx
     }
 
     // ---- Auswahl / Verschieben --------------------------------------------
@@ -389,8 +442,12 @@ mod tests {
         s.add_shape(rect());
         s.delete_selected();
         assert_eq!(s.shapes.len(), 0);
-        // Mindestens ein Layer bleibt (remove_empty_layers behält bei <=1 bzw. alle-leer).
-        assert!(!s.layers.is_empty());
+        // Kein Objekt mehr → keine Layer (wie frisches Projekt). Der nächste
+        // gezeichnete Shape legt wieder einen an.
+        assert!(s.layers.is_empty(), "leeres Projekt hat keine Layer");
+        // Weiterzeichnen funktioniert trotzdem: neuer Shape → neuer Layer.
+        s.add_shape(rect());
+        assert_eq!(s.layers.len(), 1);
     }
 
     #[test]
@@ -400,5 +457,96 @@ mod tests {
         assert_eq!(s.hit_test(5.0, 5.0, 0.0), Some(0));
         s.layers[0].locked = true;
         assert_eq!(s.hit_test(5.0, 5.0, 0.0), None);
+    }
+
+    #[test]
+    fn add_image_legt_eigenen_image_layer_an() {
+        let mut s = AppState::new();
+        // Erst eine normale Form (belegt Layer 0).
+        s.add_shape(rect());
+        let n_layers_vorher = s.layers.len();
+
+        let idx = s.add_image("asset-abc".into(), 10.0, 20.0, 100.0, 80.0);
+        // Neuer, eigener Layer im Image-Modus.
+        assert_eq!(s.layers.len(), n_layers_vorher + 1);
+        let li = s.shapes[idx].layer_id;
+        assert_eq!(s.layers[li].mode, LayerMode::Image);
+        // Katalogfremde Farbe.
+        assert!(!crate::model::SWATCH_COLORS.contains(&s.layers[li].color));
+        // Geometrie stimmt.
+        if let Geo::Image {
+            asset, x, y, w, h, ..
+        } = &s.shapes[idx].geo
+        {
+            assert_eq!(asset, "asset-abc");
+            assert_eq!((*x, *y, *w, *h), (10.0, 20.0, 100.0, 80.0));
+        } else {
+            panic!("erwarte Geo::Image");
+        }
+
+        // Zweites Bild → wieder eigener Layer, andere Farbe.
+        let idx2 = s.add_image("asset-def".into(), 0.0, 0.0, 50.0, 50.0);
+        let li2 = s.shapes[idx2].layer_id;
+        assert_ne!(li, li2, "jedes Bild eigener Layer");
+        assert_ne!(s.layers[li].color, s.layers[li2].color);
+    }
+
+    #[test]
+    fn rect_nach_bild_landet_nicht_auf_image_layer() {
+        // Bild importieren (Image-Layer wird aktiv + selektiert), dann ein Rect
+        // zeichnen. Das Rect darf NICHT auf dem Image-Layer landen und die
+        // Auswahl muss auf das neue Rect wechseln (nicht das Bild behalten).
+        let mut s = AppState::new();
+        let img_idx = s.add_image("asset-y".into(), 0.0, 0.0, 10.0, 10.0);
+        let img_layer = s.shapes[img_idx].layer_id;
+        assert_eq!(s.selected, vec![img_idx]);
+
+        let rect_idx = s.add_shape(rect());
+        let rect_layer = s.shapes[rect_idx].layer_id;
+        assert_ne!(rect_layer, img_layer, "Rect nicht auf dem Image-Layer");
+        assert_ne!(s.layers[rect_layer].mode, LayerMode::Image);
+        // Auswahl nur noch das neue Rect.
+        assert_eq!(s.selected, vec![rect_idx]);
+    }
+
+    #[test]
+    fn einziges_bild_loeschen_entfernt_image_layer() {
+        // Nur ein Bild, sonst nichts. Nach dem Löschen darf KEIN (leerer)
+        // Image-Layer zurückbleiben.
+        let mut s = AppState::new();
+        let img_idx = s.add_image("asset-solo".into(), 0.0, 0.0, 10.0, 10.0);
+        assert_eq!(s.layers.len(), 1);
+        assert_eq!(s.layers[0].mode, LayerMode::Image);
+
+        s.selected = vec![img_idx];
+        s.delete_selected();
+
+        assert_eq!(s.shapes.len(), 0, "kein Shape mehr");
+        // Kein zurückgebliebener Image-Layer.
+        assert!(
+            !s.layers.iter().any(|l| l.mode == LayerMode::Image),
+            "leerer Image-Layer muss entfernt sein"
+        );
+    }
+
+    #[test]
+    fn bild_loeschen_entfernt_leeren_image_layer() {
+        let mut s = AppState::new();
+        s.add_shape(rect()); // Layer 0 (normale Form)
+        let img_idx = s.add_image("asset-x".into(), 0.0, 0.0, 10.0, 10.0); // Layer 1 (Bild)
+        assert_eq!(s.layers.len(), 2);
+
+        // Bild selektieren und löschen.
+        s.selected = vec![img_idx];
+        s.delete_selected();
+
+        // Der leere Bild-Layer muss weg sein; der Form-Layer bleibt.
+        assert_eq!(s.shapes.len(), 1, "nur die Form bleibt");
+        assert_eq!(s.layers.len(), 1, "leerer Bild-Layer entfernt");
+        assert_ne!(
+            s.layers[0].mode,
+            LayerMode::Image,
+            "verbleibender Layer ist der Form-Layer"
+        );
     }
 }
