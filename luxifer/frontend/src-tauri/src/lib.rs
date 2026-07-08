@@ -347,6 +347,12 @@ struct LayerParams {
     air_assist: bool,
     line_step_mm: f64,
     dpi: f64,
+    #[serde(default = "default_bidirectional")]
+    bidirectional: bool,
+}
+
+fn default_bidirectional() -> bool {
+    true
 }
 
 /// Setzt die Parameter eines Layers (ein Undo-Punkt).
@@ -361,6 +367,7 @@ fn set_layer_params(data: State<AppData>, index: usize, p: LayerParams) -> Scene
         l.mode = match p.mode.as_str() {
             "Fill" => LayerMode::Fill,
             "Raster" => LayerMode::Raster,
+            "Image" => LayerMode::Image,
             _ => LayerMode::Cut,
         };
         l.speed_mm_s = p.speed_mm_s;
@@ -370,6 +377,7 @@ fn set_layer_params(data: State<AppData>, index: usize, p: LayerParams) -> Scene
         l.air_assist = p.air_assist;
         l.line_step_mm = p.line_step_mm;
         l.dpi = p.dpi;
+        l.bidirectional = p.bidirectional;
     }
     scene_with(&s, &data)
 }

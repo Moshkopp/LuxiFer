@@ -258,6 +258,7 @@ export interface LayerParams {
   air_assist: boolean;
   line_step_mm: number;
   dpi: number;
+  bidirectional: boolean;
 }
 
 export const setLayerParams = (index: number, p: LayerParams) =>
