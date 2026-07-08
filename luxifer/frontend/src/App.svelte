@@ -360,6 +360,12 @@
       error = String(e);
     }
   }
+  // Version löschen: der Core liefert die neue Scene zurück (bei gelöschter
+  // aktueller Version wird die vorherige geladen). Kein Tab-Wechsel — der Nutzer
+  // bleibt im Browser und sieht die aktualisierte Versionsliste.
+  async function deleteVersion(name: string, versionId: string) {
+    scene = await core.deleteVersion(name, versionId);
+  }
 
   // Unsaved-Guard aufgelöst.
   async function guardDiscard() {
@@ -533,6 +539,7 @@
       onsave={saveWithMeta}
       onopen={requestOpen}
       onopenversion={openVersion}
+      ondeleteversion={deleteVersion}
       onnew={requestNew}
       ondeleted={() => { scene && (scene.project = null); }}
       onclosesavemode={() => (saveMode = false)}

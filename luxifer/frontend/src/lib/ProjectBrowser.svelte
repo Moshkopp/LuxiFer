@@ -17,6 +17,7 @@
     onsave,
     onopen,
     onopenversion,
+    ondeleteversion,
     onnew,
     ondeleted,
     onclosesavemode,
@@ -29,6 +30,7 @@
     onsave: (name: string, description: string, tags: string[]) => Promise<void>;
     onopen: (name: string) => Promise<void>;
     onopenversion: (name: string, versionId: string) => Promise<void>;
+    ondeleteversion: (name: string, versionId: string) => Promise<void>;
     onnew: () => Promise<void>;
     ondeleted: () => void;
     onclosesavemode: () => void;
@@ -39,23 +41,18 @@
   let selected = $state<string | null>(null);
   let detail = $state<ProjectDetail | null>(null);
   let error = $state<string | null>(null);
-  // Thumbnail-Data-URLs: Hauptprojekt + je Version (id → url).
-  let mainThumb = $state<string | null>(null);
+  // Thumbnail-Data-URLs je Version (id → url).
   let verThumbs = $state<Record<string, string>>({});
-  // Welche Version ist in der grossen Vorschau angepinnt (Klick)? null = Haupt.
-  let pinnedVer = $state<string | null>(null);
-  // Welche Version wird gerade gehovert? null = keine.
-  let hoverVer = $state<string | null>(null);
 
-  // Die aktuell in der grossen Vorschau gezeigte Bild-URL und ihre Beschriftung.
-  // Prioritaet: Hover > angepinnt > Hauptvorschau (aktueller Stand).
-  const previewId = $derived(hoverVer ?? pinnedVer);
-  const previewThumb = $derived(previewId ? (verThumbs[previewId] ?? null) : mainThumb);
-  const previewLabel = $derived.by(() => {
-    if (!previewId) return "Aktueller Stand";
-    const v = detail?.versions.find((x) => x.id === previewId);
-    return v ? `Version · ${ago(v.created_at)}` : "Version";
-  });
+  // Versionen neueste-zuerst für die Anzeige (Grid + große Vorschau).
+  const versionsNewestFirst = $derived([...(detail?.versions ?? [])].reverse());
+  // ID der aktuellen Version (= was im Canvas ist). Kommt aus dem Detail bzw.,
+  // wenn es das offene Projekt ist, aus dessen Scene-Meta.
+  const currentId = $derived(detail?.current_version ?? "");
+  // Große Vorschau zeigt IMMER die aktuelle Version (kein Hover/Pin mehr —
+  // ADR 0003: die aktuelle Version ist der Canvas).
+  const currentVer = $derived(detail?.versions.find((v) => v.id === currentId) ?? null);
+  const previewThumb = $derived(currentId ? (verThumbs[currentId] ?? null) : null);
 
   // Formularfelder (Speichern / Details bearbeiten).
   let fName = $state("");
@@ -96,31 +93,32 @@
     }
   });
 
+  // Ist ein Projekt aktiv geladen und noch nichts ausgewaehlt, zeige direkt seine
+  // Details (statt des Platzhalters). Manuelle Auswahl eines anderen Projekts
+  // gewinnt; nur bei leerer Auswahl greift die Automatik.
+  $effect(() => {
+    const activeName = project?.name;
+    if (activeName && !saveMode && selected === null) {
+      selectProject(activeName);
+    }
+  });
+
   async function selectProject(name: string) {
     if (saveMode) onclosesavemode();
     selected = name;
-    mainThumb = null;
     verThumbs = {};
-    pinnedVer = null;
-    hoverVer = null;
     try {
       detail = await core.projectDetail(name);
       fName = detail.name;
       fDesc = detail.description;
       fTags = detail.tags.join(", ");
-      // Versions-Thumbnails laden.
+      // Thumbnail je Version laden (jede Version hat genau eins).
       const thumbs: Record<string, string> = {};
       for (const v of detail.versions) {
         const t = await core.versionThumb(name, v.id);
         if (t) thumbs[v.id] = t;
       }
       verThumbs = thumbs;
-      // „Aktueller Stand" = neueste Version (= letzter gespeicherter Stand, der
-      // auch beim Laden erscheint). Nur wenn es KEINE Version gibt, das
-      // Projekt-Thumbnail des Arbeitsstands. Das haelt Vorschau und geladenen
-      // Stand deckungsgleich (keine Drift durch veraltetes thumbnail.png).
-      const newest = detail.versions[detail.versions.length - 1];
-      mainThumb = (newest && thumbs[newest.id]) || (await core.projectThumb(name));
     } catch (e) {
       error = String(e);
     }
@@ -163,6 +161,18 @@
       selected = null;
       detail = null;
       await refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function doDeleteVersion(v: { id: string; label: string }) {
+    if (!selected) return;
+    if (!confirm(`Version ${v.label} wirklich löschen?`)) return;
+    try {
+      await ondeleteversion(selected, v.id);
+      // Detail neu laden, damit Liste + aktuelle Version stimmen.
+      await selectProject(selected);
     } catch (e) {
       error = String(e);
     }
@@ -249,21 +259,20 @@
         </div>
       </div>
     {:else if detail}
-      <div class="detail-head">
-        <h2>{detail.name}</h2>
-        <span class="charon" title="Charon-Sync ist noch nicht angebunden">● offline – nicht verbunden</span>
-      </div>
-
-      <!-- Zwei Spalten: links Infos + Versionsliste, rechts grosse Vorschau. -->
-      <div class="detail-grid">
-        <div class="info-col">
+      <!-- Kopf: Detailleiste (links) + große Vorschau der aktuellen Version. -->
+      <div class="head-grid">
+        <div class="detail-panel">
+          <div class="detail-head">
+            <h2>{detail.name}</h2>
+            <span class="charon" title="Charon-Sync ist noch nicht angebunden">● offline – nicht verbunden</span>
+          </div>
           <dl class="meta">
             <div><dt>Erstellt</dt><dd>{ago(detail.created_at)}</dd></div>
             <div><dt>Geändert</dt><dd>{ago(detail.modified_at)}</dd></div>
+            <div><dt>Versionen</dt><dd>{detail.versions.length}</dd></div>
           </dl>
-          <label class="edit">Beschreibung<textarea bind:value={fDesc} rows="3"></textarea></label>
+          <label class="edit">Beschreibung<textarea bind:value={fDesc} rows="2"></textarea></label>
           <label class="edit">Tags<input bind:value={fTags} /></label>
-
           <div class="actions">
             <button class="primary" onclick={doOpen}>Laden</button>
             <button onclick={() => onsave(fName, fDesc, parseTags(fTags)).then(refresh)}>Speichern</button>
@@ -271,50 +280,56 @@
             <button onclick={doExport}>Export</button>
             <button class="danger" onclick={doDelete}>Löschen</button>
           </div>
-
-          <h3>Versionen</h3>
-          {#if detail.versions.length}
-            <div class="versions">
-              {#each [...detail.versions].reverse() as v}
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="ver"
-                  class:active={previewId === v.id}
-                  role="button"
-                  tabindex="0"
-                  onmouseenter={() => (hoverVer = v.id)}
-                  onmouseleave={() => (hoverVer = null)}
-                  onclick={() => (pinnedVer = pinnedVer === v.id ? null : v.id)}
-                  onkeydown={(e) => e.key === "Enter" && (pinnedVer = pinnedVer === v.id ? null : v.id)}
-                >
-                  <div class="ver-info">
-                    <span class="ver-time">{ago(v.created_at)}</span>
-                    {#if v.note}<span class="ver-note">{v.note}</span>{/if}
-                  </div>
-                  <button class="ver-load" onclick={(e) => { e.stopPropagation(); onopenversion(detail!.name, v.id); }}>laden</button>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div class="empty small">Noch keine Versionen. Shift+Strg+S hält eine fest.</div>
-          {/if}
-
-          <h3>Assets</h3>
-          <div class="empty small">Keine – Bilder/Fonts/DXF/SVG folgen mit dem Import.</div>
         </div>
 
-        <!-- Rechte Vorschau: Hauptversion (aktueller Stand) oder gewaehlte Version. -->
+        <!-- Große Vorschau: immer die aktuelle Version (= der Canvas). -->
         <div class="preview-col">
           <div class="thumb main">
             {#if previewThumb}
-              <img src={previewThumb} alt="Projektvorschau" />
+              <img src={previewThumb} alt="Vorschau der aktuellen Version" />
             {:else}
               <span class="no-thumb">Keine Vorschau – einmal speichern.</span>
             {/if}
+            {#if currentVer}<span class="cur-badge">Aktuell · {currentVer.label}</span>{/if}
           </div>
-          <div class="preview-label">{previewLabel}</div>
+          <div class="preview-label">Aktueller Stand{currentVer ? ` (${currentVer.label})` : ""}</div>
         </div>
       </div>
+
+      <!-- Versions-Grid: jede Version eine Card, die aktuelle hervorgehoben. -->
+      <div class="section-head">
+        <h3>Versionen</h3>
+        <span class="section-hint">Shift+Strg+S legt eine neue Version an · Laden setzt sie als aktuell</span>
+      </div>
+      <div class="vgrid">
+        {#each versionsNewestFirst as v (v.id)}
+          <div class="vcard" class:current={v.id === currentId}>
+            <div class="vthumb">
+              {#if verThumbs[v.id]}
+                <img src={verThumbs[v.id]} alt={`Vorschau ${v.label}`} />
+              {:else}
+                <span class="no-thumb small">—</span>
+              {/if}
+              <span class="vlabel-badge">{v.label}</span>
+              {#if v.id === currentId}<span class="vcur-tag">aktuell</span>{/if}
+            </div>
+            <div class="vmeta">
+              <span class="vtime">{ago(v.created_at)}{v.note ? ` · ${v.note}` : ""}</span>
+              <div class="vacts">
+                {#if v.id !== currentId}
+                  <button class="ver-load" onclick={() => onopenversion(detail!.name, v.id)}>Laden</button>
+                {/if}
+                {#if detail.versions.length > 1}
+                  <button class="danger sm" onclick={() => doDeleteVersion(v)}>Löschen</button>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      <div class="section-head"><h3>Assets</h3></div>
+      <div class="assets-box">Keine – Bilder/Fonts/DXF/SVG folgen mit dem Import.</div>
     {:else}
       <div class="placeholder">
         <p>Wähle links ein Projekt, um Details zu sehen.</p>
@@ -398,25 +413,28 @@
     padding: 1px 6px;
     color: var(--muted);
   }
-  .detail-col { padding: 16px 18px; overflow-y: auto; }
-  .detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-  /* Zwei Spalten im Detail: Infos links (flexibel), Vorschau rechts (fest). */
-  .detail-grid {
+  .detail-col { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+  .detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  /* Kopf: Detailleiste links (flexibel), große Vorschau rechts (fest). */
+  .head-grid {
     display: grid;
-    grid-template-columns: 1fr minmax(240px, 360px);
+    grid-template-columns: 1fr minmax(240px, 320px);
     gap: 20px;
     align-items: start;
   }
-  .info-col { min-width: 0; }
-  .preview-col { position: sticky; top: 0; display: flex; flex-direction: column; gap: 6px; }
+  .detail-panel { min-width: 0; display: flex; flex-direction: column; }
+  .preview-col { display: flex; flex-direction: column; gap: 6px; }
   .preview-label { font-size: 12px; color: var(--muted); text-align: center; }
-  h2 { margin: 0 0 8px; font-size: 18px; }
-  h3 { margin: 16px 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  h2 { margin: 0; font-size: 18px; }
+  h3 { margin: 0; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
   .charon { font-size: 11px; color: #c98b3f; }
-  .meta { display: flex; gap: 24px; margin: 6px 0 12px; }
+  .meta { display: flex; gap: 24px; margin: 0 0 12px; }
   .meta div { display: flex; flex-direction: column; }
   .meta dt { font-size: 10px; color: var(--muted); text-transform: uppercase; }
   .meta dd { margin: 0; font-size: 13px; }
+  /* Abschnittsköpfe (Versionen, Assets). */
+  .section-head { display: flex; align-items: baseline; gap: 12px; }
+  .section-hint { font-size: 12px; color: var(--muted); }
   .form, .edit { display: flex; flex-direction: column; gap: 8px; }
   label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
   input, textarea {
@@ -444,8 +462,9 @@
   button:disabled { opacity: 0.5; cursor: default; }
   .primary { background: var(--accent); color: white; }
   .danger { background: #6b2b2b; color: #ffb4b4; }
-  /* Grosse Vorschau rechts (Hauptversion oder gewaehlte Version). */
+  /* Grosse Vorschau rechts: immer die aktuelle Version (= der Canvas). */
   .thumb.main {
+    position: relative;
     width: 100%;
     aspect-ratio: 4 / 3;
     background: #141518;
@@ -458,26 +477,93 @@
   }
   .thumb.main img { width: 100%; height: 100%; object-fit: contain; }
   .no-thumb { color: var(--muted); font-size: 12px; padding: 0 12px; text-align: center; }
-  /* Kompakte Versionsliste (Thumbnail erscheint rechts in der grossen Vorschau). */
-  .versions { display: flex; flex-direction: column; gap: 4px; }
-  .ver {
+  .no-thumb.small { font-size: 18px; }
+  .cur-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    padding: 3px 9px;
+    border-radius: 20px;
+  }
+
+  /* Versions-Grid: jede Version eine Card, die aktuelle hervorgehoben. */
+  .vgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+  }
+  .vcard {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #16171b;
+    transition: transform 0.1s ease, border-color 0.16s ease;
+  }
+  .vcard:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .vcard.current {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 18px -6px var(--accent);
+  }
+  .vthumb {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    background: #141518;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 10px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid transparent;
-    border-radius: 6px;
-    cursor: pointer;
+    justify-content: center;
+    border-bottom: 1px solid var(--border);
   }
-  .ver:hover { background: rgba(255, 255, 255, 0.07); }
-  .ver.active { border-color: var(--accent); background: rgba(255, 255, 255, 0.08); }
-  .ver-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-  .ver-time { font-size: 12px; }
-  .ver-note { font-size: 11px; color: var(--muted); }
-  .ver-load { padding: 3px 10px; font-size: 12px; }
+  .vthumb img { width: 100%; height: 100%; object-fit: contain; }
+  .vlabel-badge {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    background: rgba(0, 0, 0, 0.6);
+    color: var(--text);
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+  .vcard.current .vlabel-badge { background: var(--accent); color: #fff; }
+  .vcur-tag {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 600;
+    background: var(--accent);
+    color: #fff;
+    padding: 2px 7px;
+    border-radius: 20px;
+  }
+  .vmeta { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+  .vtime { flex: 1; font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vacts { display: flex; gap: 6px; }
+  .ver-load { padding: 4px 10px; font-size: 12px; }
+  .danger.sm { padding: 4px 9px; font-size: 12px; }
+  /* Assets-Platzhalter. */
+  .assets-box {
+    padding: 18px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.15);
+  }
   .empty { color: var(--muted); font-size: 13px; padding: 10px; text-align: center; }
-  .empty.small { padding: 6px 0; text-align: left; }
   .placeholder { color: var(--muted); display: flex; flex-direction: column; gap: 8px; margin-top: 40px; align-items: center; }
   .hint { font-size: 12px; }
   .err { background: #331e1e; color: #e5645d; padding: 6px 10px; border-radius: 6px; margin-bottom: 10px; font-size: 13px; }

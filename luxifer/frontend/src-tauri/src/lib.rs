@@ -29,6 +29,8 @@ struct ProjectMeta {
     name: String,
     description: String,
     tags: Vec<String>,
+    /// ID der aktuellen Version (= was im Canvas ist), für die Markierung im Browser.
+    current_version: String,
 }
 
 /// Schlanke Sicht auf den Zustand fürs Frontend (ohne Undo-Stacks).
@@ -58,6 +60,7 @@ impl Scene {
                 name: f.name.clone(),
                 description: f.description.clone(),
                 tags: f.tags.clone(),
+                current_version: f.current_version.clone(),
             }),
         }
     }
@@ -402,6 +405,7 @@ struct ProjectDetail {
     created_at: String,
     modified_at: String,
     versions: Vec<VersionInfo>,
+    current_version: String,
     asset_refs: Vec<String>,
 }
 
@@ -438,8 +442,10 @@ fn save_project(
     let mut s = data.state.lock().unwrap();
     let mut cur = data.current.lock().unwrap();
 
-    // Bestehendes Projekt aktualisieren oder neues anlegen.
-    let pf = match cur.file.take() {
+    // Bestehendes Projekt aktualisieren oder neues anlegen. save_current schreibt
+    // Projektdatei + Snapshot + Thumbnail der aktuellen Version (kein separates,
+    // driftendes thumbnail.png mehr — das Thumbnail hängt an der Version).
+    let mut pf = match cur.file.take() {
         Some(mut existing) => {
             existing.name = name.clone();
             existing.description = description;
@@ -453,11 +459,7 @@ fn save_project(
             pf
         }
     };
-    pf.save_to_dir(&dir)?;
-    // Thumbnail des aktuellen Stands neben die Projektdatei legen (für die Liste).
-    if !thumb_png.is_empty() {
-        let _ = std::fs::write(dir.join(&name).join("thumbnail.png"), &thumb_png);
-    }
+    pf.save_current(&dir, &thumb_png)?;
     s.mark_saved();
     cur.file = Some(pf);
     remember_last_project(&name);
@@ -474,15 +476,11 @@ fn save_version(data: State<AppData>, note: String, thumb_png: Vec<u8>) -> Resul
     let Some(pf) = cur.file.as_mut() else {
         return Err("Bitte zuerst das Projekt speichern (Strg+S).".into());
     };
-    // Arbeitsstand ins ProjectFile übernehmen, dann Version anlegen.
+    // Arbeitsstand ins ProjectFile übernehmen, dann als neue Version festhalten.
+    // add_version schreibt Snapshot + Thumbnail der neuen Version und macht sie
+    // zur aktuellen; ein separates thumbnail.png gibt es nicht mehr.
     pf.update_from_state(&s);
-    let name = pf.name.clone();
     pf.add_version(&dir, note, &thumb_png)?;
-    // Hauptvorschau (Arbeitsstand) mit aktualisieren: „Hauptversion = letzter
-    // Stand", egal ob per Strg+S oder Shift+Strg+S gespeichert.
-    if !thumb_png.is_empty() {
-        let _ = std::fs::write(dir.join(&name).join("thumbnail.png"), &thumb_png);
-    }
     s.mark_saved();
     Ok(Scene::build(&s, &cur))
 }
@@ -504,29 +502,30 @@ fn open_project(data: State<AppData>, name: String) -> Result<Scene, String> {
     Ok(scene(&data))
 }
 
-/// Lädt einen Versions-Snapshot und **befördert ihn zum aktuellen Stand**:
-/// Die Version wird der neue Arbeitsstand UND der neue gespeicherte Hauptstand
-/// (`projekt.luxi` + `thumbnail.png`). So bleiben Vorschau (= letzter Speicher-
-/// stand) und tatsächlich geladener Stand immer synchron (ADR 0003 Regel:
-/// „Hauptversion = letzter gespeicherter Stand"). Die Versionshistorie bleibt.
+/// Lädt eine Version in den Canvas und macht sie zur **aktuellen Version**
+/// (ADR 0003, 2026-07-08): Die Geometrie des Snapshots wird der Canvas, und
+/// `current_version` zeigt darauf. `projekt.luxi` wird **nicht** umgeschrieben —
+/// die Version bleibt unverändert Historie. Wird eine *ältere* Version geladen
+/// und danach mit Strg+S bearbeitet, verzweigt der Core beim Speichern
+/// automatisch in eine neue Version (kein Überschreiben der alten).
 #[tauri::command]
 fn open_version(data: State<AppData>, name: String, version_id: String) -> Result<Scene, String> {
     let dir = projects_dir();
     let snap = ProjectFile::load_version(&dir, &name, &version_id)?;
-    // Aktuelle Metadaten (Name/Beschreibung/Tags/Historie) behalten, nur die
-    // Geometrie durch den Snapshot ersetzen.
+    // Projektdatei laden, nur den Zeiger auf die aktuelle Version umsetzen.
     let mut current = ProjectFile::load_by_name(&dir, &name)?;
+    if !current.versions.iter().any(|v| v.id == version_id) {
+        return Err("Version nicht in der Historie gefunden.".into());
+    }
+    current.current_version = version_id.clone();
+    // Geometrie in projekt.luxi an die geladene Version angleichen (damit ein
+    // späterer Reload denselben Stand sieht), aber ohne modified_at zu berühren
+    // und ohne die Version selbst zu ändern.
     current.bed_w_mm = snap.bed_w_mm;
     current.bed_h_mm = snap.bed_h_mm;
     current.layers = snap.layers.clone();
     current.shapes = snap.shapes.clone();
-    current.modified_at = luxifer_core::project::now_iso8601();
-    // Als neuen Hauptstand schreiben und das Versions-Thumbnail als Hauptvorschau
-    // übernehmen, damit die grosse Vorschau exakt diesen Stand zeigt.
     current.save_to_dir(&dir)?;
-    if let Some(vpng) = luxifer_core::version_thumb_path(&dir, &name, &version_id) {
-        let _ = std::fs::copy(&vpng, dir.join(&name).join("thumbnail.png"));
-    }
     {
         let mut s = data.state.lock().unwrap();
         *s = snap.into_state();
@@ -536,6 +535,33 @@ fn open_version(data: State<AppData>, name: String, version_id: String) -> Resul
         cur.file = Some(current);
     }
     remember_last_project(&name);
+    Ok(scene(&data))
+}
+
+/// Löscht eine einzelne Version (ADR 0003). Die letzte verbliebene Version ist
+/// geschützt (Core lehnt ab). War es die aktuelle Version, wird die vorherige
+/// zur aktuellen und ihr Stand in den Canvas geladen.
+#[tauri::command]
+fn delete_version(data: State<AppData>, name: String, version_id: String) -> Result<Scene, String> {
+    let dir = projects_dir();
+    let mut cur = data.current.lock().unwrap();
+    // Auf dem offenen Projekt arbeiten, falls es dasselbe ist; sonst frisch laden.
+    let mut pf = match cur.file.take() {
+        Some(f) if f.name == name => f,
+        other => {
+            // anderes/kein offenes Projekt: zurücklegen und frisch laden.
+            cur.file = other;
+            ProjectFile::load_by_name(&dir, &name)?
+        }
+    };
+    let promoted = pf.delete_version(&dir, &version_id)?;
+    // Wurde die aktuelle Version gelöscht, den beförderten Stand in den Canvas.
+    if let Some(snap) = promoted {
+        let mut s = data.state.lock().unwrap();
+        *s = snap.into_state();
+    }
+    cur.file = Some(pf);
+    drop(cur);
     Ok(scene(&data))
 }
 
@@ -555,17 +581,21 @@ fn project_detail(name: String) -> Result<ProjectDetail, String> {
         tags: pf.tags,
         created_at: pf.created_at,
         modified_at: pf.modified_at,
+        current_version: pf.current_version,
         versions: pf.versions,
         asset_refs: pf.asset_refs,
     })
 }
 
-/// Liefert das Thumbnail des Projekts (aktueller Stand, `thumbnail.png`) als
-/// Data-URL, oder `None`, wenn keins existiert.
+/// Liefert das Thumbnail des Projekts (= Thumbnail der **aktuellen Version**) als
+/// Data-URL, oder `None`, wenn keins existiert. Kein separates `thumbnail.png`
+/// mehr — die große Vorschau zeigt immer die aktuelle Version (ADR 0003).
 #[tauri::command]
 fn project_thumb(name: String) -> Option<String> {
-    let path = projects_dir().join(&name).join("thumbnail.png");
-    read_png_data_url(&path)
+    let dir = projects_dir();
+    let pf = ProjectFile::load_by_name(&dir, &name).ok()?;
+    let p = luxifer_core::version_thumb_path(&dir, &name, &pf.current_version)?;
+    read_png_data_url(&p)
 }
 
 /// Liefert das Thumbnail einer bestimmten Version als Data-URL (oder `None`).
@@ -718,6 +748,7 @@ pub fn run() {
             save_version,
             open_project,
             open_version,
+            delete_version,
             project_list,
             project_detail,
             project_thumb,

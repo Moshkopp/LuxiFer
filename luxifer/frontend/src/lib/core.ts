@@ -39,6 +39,8 @@ export interface ProjectMeta {
   name: string;
   description: string;
   tags: string[];
+  // ID der aktuellen Version (= was im Canvas ist).
+  current_version: string;
 }
 
 // Was der Core dem Frontend zum Zeichnen gibt.
@@ -223,9 +225,11 @@ export const redo = () => invoke<Scene>("redo");
 
 // ---- Projektverwaltung (ADR 0003) ------------------------------------------
 
-// Eine festgehaltene Version (spiegelt luxifer-core::VersionInfo).
+// Eine Version (spiegelt luxifer-core::VersionInfo). Die aktuelle Version IST
+// der Canvas (ADR 0003, 2026-07-08).
 export interface VersionInfo {
   id: string;
+  label: string; // Anzeigbare Nummer, z. B. „V3".
   created_at: string;
   note: string;
 }
@@ -246,6 +250,7 @@ export interface ProjectDetail {
   created_at: string;
   modified_at: string;
   versions: VersionInfo[];
+  current_version: string;
   asset_refs: string[];
 }
 
@@ -267,6 +272,11 @@ export const openProject = (name: string) =>
 
 export const openVersion = (name: string, versionId: string) =>
   invoke<Scene>("open_version", { name, versionId });
+
+// Löscht eine einzelne Version (letzte ist geschützt). Gibt die neue Scene
+// zurück (bei gelöschter aktueller Version wird die vorherige geladen).
+export const deleteVersion = (name: string, versionId: string) =>
+  invoke<Scene>("delete_version", { name, versionId });
 
 export const projectList = () => invoke<ProjectInfo[]>("project_list");
 
