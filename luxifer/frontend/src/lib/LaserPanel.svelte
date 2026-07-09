@@ -1,81 +1,138 @@
 <script lang="ts">
-  // Laser-Control-Panel (nach ThorBurn-Vorbild).
-  // "Start" erzeugt G-Code-Vorschau (GRBL). Verbindung/Senden nutzen Ruida-UDP.
+  // Laser-Control-Panel (ADR 0007). Gerätespezifisch: das Panel rendert NUR die
+  // Aktionen, die der aktive Treiber meldet — kein fixer G-Code/Send-Knopf mehr.
+  // Der aktive Laser wird hier per Dropdown gewählt; Anlegen/Verwalten in Settings.
+  import type { LaserRegistry, JobParamsDto } from "./core";
+
   let {
-    ongenerate,
-    onping,
-    onsend,
+    registry,
+    actions,
+    connected,
+    onselect,
+    onaction,
+    onexport,
+    onjog,
+    onhome,
+    onreadposition,
+    onopensettings,
   }: {
-    ongenerate: () => void;
-    onping: (ip: string) => Promise<boolean>;
-    onsend: (ip: string) => void;
+    registry: LaserRegistry | null;
+    /** Aktions-Schlüssel des aktiven Treibers (z. B. "send_job", "frame"). */
+    actions: string[];
+    /** Verbindungsstatus für die LED. */
+    connected: boolean;
+    onselect: (id: string) => void;
+    onaction: (action: string, params: JobParamsDto) => void;
+    onexport: (params: JobParamsDto) => void;
+    onjog: (dx: number, dy: number, speed: number) => void;
+    onhome: (speed: number) => void;
+    onreadposition: () => void;
+    onopensettings: () => void;
   } = $props();
 
-  let ip = $state("192.168.1.100");
-  let connected = $state(false);
   let startFrom = $state<"absolut" | "aktuell" | "ursprung">("absolut");
   // Job-Nullpunkt-Anker: 3×3-Raster (Index 0..8), 4 = Mitte.
   let anchor = $state(4);
+  // Jog-Parameter.
   let jogStep = $state(10);
   let jogSpeed = $state(100);
 
-  // Platzhalter-Position (bis Status-Abfrage existiert).
-  const posX = $state(0);
-  const posY = $state(0);
+  const profiles = $derived(registry?.profiles ?? []);
+  const activeId = $derived(registry?.active_id ?? "");
+  const hasLaser = $derived(profiles.length > 0);
 
-  async function toggleConnect() {
-    if (connected) {
-      connected = false;
-      return;
-    }
-    connected = await onping(ip);
+  // Label + Glyph je Aktions-Schlüssel (neutral, treiberunabhängig).
+  const ACTION_META: Record<string, { label: string; glyph: string; primary?: boolean }> = {
+    send_job: { label: "An Laser senden", glyph: "⭑", primary: true },
+    stream_gcode: { label: "G-Code streamen", glyph: "⭑", primary: true },
+    export_file: { label: "Exportieren", glyph: "▤" },
+    frame: { label: "Rahmen", glyph: "⧉" },
+    home: { label: "Home 0/0", glyph: "⌂" },
+    go_origin: { label: "Ursprung", glyph: "◎" },
+    stop: { label: "Stopp", glyph: "■" },
+  };
+  const meta = (a: string) => ACTION_META[a] ?? { label: a, glyph: "▸" };
+
+  // Primäre Aktion (Senden/Streamen) getrennt als breiter Knopf hervorheben.
+  const primaryActions = $derived(actions.filter((a) => meta(a).primary));
+  // Kachel-Aktionen: alles außer primär, Export und Home (die haben eigene UI).
+  const tileActions = $derived(
+    actions.filter((a) => !meta(a).primary && a !== "export_file" && a !== "home"),
+  );
+  const canExport = $derived(actions.includes("export_file"));
+
+  function params(): JobParamsDto {
+    return { start_mode: startFrom, anchor };
   }
-
-  function todo() {
-    /* Platzhalter — Jog/Rahmen folgen mit der Live-Steuerung. */
+  // Eine Aktion auslösen — Export läuft über den Datei-Download-Callback.
+  function trigger(a: string) {
+    if (a === "export_file") onexport(params());
+    else onaction(a, params());
   }
 </script>
 
 <div class="laser">
-  <!-- Verbindung -->
+  <!-- Laser-Auswahl (Dropdown) + Verbindungs-LED -->
   <section>
-    <div class="head">
-      <span class="dot" class:on={connected}></span>
-      <span class="title">{connected ? "Online" : "Getrennt"}</span>
+    <div class="laser-head">
+      <span class="label">Laser</span>
+      <span class="conn" title={connected ? "Verbunden" : "Getrennt"}>
+        <span class="led" class:on={connected}></span>
+        {connected ? "verbunden" : "getrennt"}
+      </span>
     </div>
-    <input bind:value={ip} placeholder="IP der Maschine" />
-    <button class="wide" onclick={toggleConnect}>
-      {connected ? "Verbindung trennen" : "Verbindung aufbauen"}
+    {#if hasLaser}
+      <select
+        value={activeId}
+        onchange={(e) => onselect((e.currentTarget as HTMLSelectElement).value)}
+      >
+        {#each profiles as p (p.id)}
+          <option value={p.id}>{p.name} · {p.kind}</option>
+        {/each}
+      </select>
+    {:else}
+      <button class="wide ghost" onclick={onopensettings}>
+        Kein Laser — in Einstellungen anlegen
+      </button>
+    {/if}
+    <button class="settings-link" onclick={onopensettings} title="Laser verwalten">
+      ⚙ Einstellungen
     </button>
-    <div class="pos">
-      <span>X {posX.toFixed(2)} mm</span>
-      <span>Y {posY.toFixed(2)} mm</span>
-    </div>
   </section>
 
   <div class="sep"></div>
 
-  <!-- Job-Aktionen -->
+  <!-- Job-Aktionen (vom aktiven Treiber gemeldet) -->
   <section>
     <span class="label">Job</span>
-    <button class="wide send" onclick={() => onsend(ip)} title="Job an Ruida-Maschine senden">
-      ⭑ An Laser senden
-    </button>
-    <div class="grid3">
-      <button class="tile start" onclick={ongenerate} title="G-Code-Vorschau erzeugen">
-        <span class="glyph">▤</span><span>G-Code</span>
-      </button>
-      <button class="tile" onclick={todo}><span class="glyph">⏸</span><span>Pause</span></button>
-      <button class="tile" onclick={todo}><span class="glyph">■</span><span>Stopp</span></button>
-      <button class="tile" onclick={todo}><span class="glyph">⌂</span><span>Ursprung</span></button>
-      <button class="tile" onclick={todo}><span class="glyph">⧉</span><span>Rahmen</span></button>
-      <button class="tile" onclick={todo}><span class="glyph">◇</span><span>Kontur</span></button>
-    </div>
+    {#if !hasLaser}
+      <p class="hint">Lege zuerst einen Laser an, um Jobs zu senden.</p>
+    {:else if actions.length === 0}
+      <p class="hint">Dieser Treiber meldet keine Aktionen.</p>
+    {:else}
+      {#each primaryActions as a (a)}
+        <button class="wide send" onclick={() => trigger(a)}>
+          {meta(a).glyph} {meta(a).label}
+        </button>
+      {/each}
+      {#if tileActions.length}
+        <div class="grid3">
+          {#each tileActions as a (a)}
+            <button class="tile" onclick={() => trigger(a)}>
+              <span class="glyph">{meta(a).glyph}</span><span>{meta(a).label}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if canExport}
+        <button class="wide" onclick={() => onexport(params())}>▤ Als Datei exportieren</button>
+      {/if}
+    {/if}
   </section>
 
   <div class="sep"></div>
 
-  <!-- Job-Parameter -->
+  <!-- Job-Parameter (geräteneutral) -->
   <section>
     <span class="label">Parameter</span>
     <label class="field">
@@ -101,27 +158,29 @@
     </div>
   </section>
 
-  <div class="sep"></div>
+  {#if hasLaser}
+    <div class="sep"></div>
 
-  <!-- Kopf-Steuerung (Jog) -->
-  <section>
-    <span class="label">Kopf (Jog)</span>
-    <div class="jog">
-      <button style="grid-area: up" onclick={todo}>↑</button>
-      <button style="grid-area: left" onclick={todo}>←</button>
-      <button style="grid-area: home" onclick={todo} title="Home">⌂</button>
-      <button style="grid-area: right" onclick={todo}>→</button>
-      <button style="grid-area: down" onclick={todo}>↓</button>
-    </div>
-    <div class="jogparams">
-      <label>Schritt mm<input type="number" bind:value={jogStep} min="0.1" step="0.1" /></label>
-      <label>Speed mm/s<input type="number" bind:value={jogSpeed} min="1" /></label>
-    </div>
-  </section>
+    <!-- Kopf-Steuerung (Jog) -->
+    <section>
+      <span class="label">Kopf (Jog)</span>
+      <div class="jog">
+        <button style="grid-area: up" onclick={() => onjog(0, -jogStep, jogSpeed)} aria-label="hoch">↑</button>
+        <button style="grid-area: left" onclick={() => onjog(-jogStep, 0, jogSpeed)} aria-label="links">←</button>
+        <button style="grid-area: home" onclick={() => onhome(jogSpeed)} title="Referenzfahrt (0/0)">⌂</button>
+        <button style="grid-area: right" onclick={() => onjog(jogStep, 0, jogSpeed)} aria-label="rechts">→</button>
+        <button style="grid-area: down" onclick={() => onjog(0, jogStep, jogSpeed)} aria-label="runter">↓</button>
+      </div>
+      <div class="jogparams">
+        <label>Schritt mm<input type="number" bind:value={jogStep} min="0.1" step="0.1" /></label>
+        <label>Speed mm/s<input type="number" bind:value={jogSpeed} min="1" /></label>
+      </div>
+      <button class="wide" onclick={onreadposition}>⊹ Position lesen</button>
+    </section>
+  {/if}
 </div>
 
 <style>
-  /* Im Grid-Slot: fuellt die zugewiesene Flaeche, kein eigenes Positionieren. */
   .laser {
     display: flex;
     flex-direction: column;
@@ -136,41 +195,89 @@
     height: 1px;
     background: var(--border);
   }
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 5px;
-    background: var(--muted);
-  }
-  .dot.on {
-    background: #3fb27f;
-    box-shadow: 0 0 8px #3fb27f88;
-  }
-  .title {
-    font-weight: 500;
-  }
   .label {
     font-size: 11px;
     letter-spacing: 1px;
     text-transform: uppercase;
     color: var(--muted);
   }
+  .laser-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .conn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .led {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--muted);
+    box-shadow: none;
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+  .led.on {
+    background: #3fb27f;
+    box-shadow: 0 0 8px #3fb27f88;
+  }
+  .jog {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 38px);
+    gap: 4px;
+    grid-template-areas:
+      ". up ."
+      "left home right"
+      ". down .";
+  }
+  .jog button {
+    font-size: 16px;
+  }
+  .jogparams {
+    display: flex;
+    gap: 8px;
+  }
+  .jogparams label {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .jogparams input {
+    width: 100%;
+  }
   .sublabel {
     font-size: 11px;
     color: var(--muted);
   }
+  .hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0;
+  }
   .wide {
     width: 100%;
   }
-  .pos {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
+  .settings-link {
+    align-self: flex-start;
+    font-size: 11px;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    padding: 2px 0;
+    cursor: pointer;
+  }
+  .settings-link:hover {
+    color: var(--text);
+  }
+  .ghost {
     color: var(--muted);
   }
   .grid3 {
@@ -189,19 +296,6 @@
   .tile .glyph {
     font-size: 16px;
   }
-  .tile.start {
-    background: linear-gradient(
-      180deg,
-      hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 8%)),
-      var(--accent)
-    );
-    color: white;
-    border-color: hsl(var(--accent-h) var(--accent-s) 80% / 0.6);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.3),
-      0 0 16px -3px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.55);
-  }
-  /* Sende-Knopf bleibt als Signalfarbe gruen, aber mit Glow-Tiefe. */
   .send {
     background: linear-gradient(180deg, #48c78e, #37a877);
     color: white;
@@ -244,32 +338,6 @@
     background: var(--accent);
     border-color: var(--accent);
   }
-  .jog {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: repeat(3, 40px);
-    gap: 4px;
-    grid-template-areas:
-      ". up ."
-      "left home right"
-      ". down .";
-  }
-  .jog button {
-    font-size: 16px;
-  }
-  .jogparams {
-    display: flex;
-    gap: 8px;
-  }
-  .jogparams label {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 11px;
-    color: var(--muted);
-  }
-  input,
   select {
     background: rgba(0, 0, 0, 0.22);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -278,12 +346,10 @@
     padding: 6px 8px;
     font-size: 13px;
   }
-  input:focus,
   select:focus {
     outline: none;
     border-color: var(--accent);
   }
-  /* Frosted-Depth-Buttons passend zum globalen .gbtn (app.css). */
   button {
     background: linear-gradient(
       180deg,

@@ -8,14 +8,24 @@
 //! schlank und der Kodier-/Paketteil ist im [`crate::protocol`] getestet.
 
 use std::net::UdpSocket;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::protocol::{unswizzle_byte, ACK, MAGIC, NAK};
+use crate::protocol::{unswizzle_byte, ACK, ERR, MAGIC, NAK};
 
 const SEND_PORT: u16 = 50200;
 const RECV_PORT: u16 = 40200;
 const TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_RETRIES: usize = 3;
+
+/// Ergebnis des Wartens auf ein Chunk-ACK.
+enum AckResult {
+    /// Chunk bestätigt.
+    Ack,
+    /// NAK/ERR — Chunk neu senden.
+    Resend,
+    /// Keine Antwort bis zur Deadline — Chunk neu senden.
+    Timeout,
+}
 
 #[derive(Debug)]
 pub enum TransportError {
@@ -41,6 +51,7 @@ impl From<std::io::Error> for TransportError {
 }
 
 /// Verbindung zu einer Ruida-Maschine über UDP.
+#[derive(Debug)]
 pub struct RuidaTransport {
     socket: UdpSocket,
     target: String,
@@ -61,40 +72,108 @@ impl RuidaTransport {
         })
     }
 
-    /// Sendet ein bereits fertiges Paket (geswizzelt + Checksum) in ≤1024-Byte-
-    /// Chunks; jeder Chunk wird per ACK bestätigt.
-    pub fn send(&self, packet: &[u8]) -> Result<(), TransportError> {
+    /// Die IP-Adresse des verbundenen Ziels (ohne Port).
+    pub fn target_ip(&self) -> &str {
+        self.target.split(':').next().unwrap_or(&self.target)
+    }
+
+    /// Sendet einen ROHEN Payload (ungeswizzelt, ohne Checksum) in ≤1024-Byte-
+    /// Chunks. **Jeder Chunk wird einzeln geswizzelt + mit eigener Checksum
+    /// paketiert** (`build_packet`) und per ACK bestätigt — der Controller
+    /// erwartet in jedem UDP-Paket `[2-Byte-Checksum][geswizzelte Nutzdaten]`.
+    pub fn send(&self, payload: &[u8]) -> Result<(), TransportError> {
         const CHUNK: usize = 1024;
-        for chunk in packet.chunks(CHUNK) {
+        if payload.is_empty() {
+            return Ok(());
+        }
+        for chunk in payload.chunks(CHUNK) {
             self.send_chunk(chunk)?;
         }
         Ok(())
     }
 
     fn send_chunk(&self, chunk: &[u8]) -> Result<(), TransportError> {
-        for attempt in 0..MAX_RETRIES {
-            self.socket.send_to(chunk, &self.target)?;
-            match self.recv_ack() {
-                Ok(()) => return Ok(()),
-                Err(TransportError::Nak) if attempt + 1 < MAX_RETRIES => continue,
-                Err(e) => return Err(e),
+        let packet = crate::protocol::build_packet(chunk, MAGIC);
+        for _ in 0..MAX_RETRIES {
+            self.socket.send_to(&packet, &self.target)?;
+            match self.await_ack() {
+                AckResult::Ack => return Ok(()),
+                // NAK/ERR/Timeout → neuer Sendeversuch.
+                AckResult::Resend => continue,
+                AckResult::Timeout => continue,
             }
         }
-        Err(TransportError::Nak)
+        Err(TransportError::Timeout)
     }
 
-    fn recv_ack(&self) -> Result<(), TransportError> {
+    /// Wartet bis zu `TIMEOUT` (Gesamt-Deadline) auf das echte ACK dieses Chunks.
+    /// Verwaiste/verspätete Pakete (z. B. ein Statuspaket aus einem vorigen Query)
+    /// werden überlesen — NICHT als „kein ACK" gewertet und NICHT neu gesendet,
+    /// sonst ginge der Job-Stream doppelt raus und der Controller verwürfe ihn
+    /// (HW-verifizierte Referenz-Logik). Nur NAK/ERR lösen einen Resend aus.
+    fn await_ack(&self) -> AckResult {
+        let deadline = Instant::now() + TIMEOUT;
         let mut buf = [0u8; 64];
         loop {
-            self.socket
-                .recv_from(&mut buf)
-                .map_err(|_| TransportError::Timeout)?;
-            match unswizzle_byte(buf[0], MAGIC) {
-                ACK => return Ok(()),
-                NAK => return Err(TransportError::Nak),
-                _ => continue, // verwaiste Antwort überlesen
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return AckResult::Timeout;
+            };
+            if self
+                .socket
+                .set_read_timeout(Some(remaining.max(Duration::from_millis(1))))
+                .is_err()
+            {
+                return AckResult::Timeout;
+            }
+            match self.socket.recv_from(&mut buf) {
+                Ok((len, _)) if len > 0 => match unswizzle_byte(buf[0], MAGIC) {
+                    ACK => return AckResult::Ack,
+                    NAK | ERR => return AckResult::Resend,
+                    _ => continue, // verwaiste Antwort überlesen, weiter warten
+                },
+                Ok(_) => continue,
+                Err(_) => return AckResult::Timeout,
             }
         }
+    }
+
+    /// Register-Abfrage senden und die passende Antwort lesen. `payload` ist die
+    /// rohe (ungeswizzelte) `DA 00 …`-Anfrage; das Ergebnis ist die entswizzelte
+    /// `DA 01 …`-Antwort. Versetzte Pakete werden übersprungen.
+    pub fn query(&self, payload: &[u8]) -> Result<Vec<u8>, TransportError> {
+        let expected_hi = payload.get(2).copied().unwrap_or(0xFF);
+        let expected_lo = payload.get(3).copied().unwrap_or(0xFF);
+        self.drain();
+        self.send(payload)?; // send() paketiert selbst (swizzle + Checksum)
+
+        let mut buf = [0u8; 1024];
+        for _ in 0..8 {
+            let (len, _) = self
+                .socket
+                .recv_from(&mut buf)
+                .map_err(|_| TransportError::Timeout)?;
+            let resp = crate::protocol::unswizzle(&buf[..len], MAGIC);
+            if resp.len() >= 4
+                && resp[0] == 0xDA
+                && resp[1] == 0x01
+                && resp[2] == expected_hi
+                && resp[3] == expected_lo
+            {
+                return Ok(resp);
+            }
+        }
+        Err(TransportError::Timeout)
+    }
+
+    /// Empfangspuffer leeren (verhindert, dass versetzte Antworten spätere Lesungen
+    /// verfälschen).
+    pub fn drain(&self) {
+        let mut buf = [0u8; 1024];
+        let _ = self
+            .socket
+            .set_read_timeout(Some(Duration::from_millis(50)));
+        while self.socket.recv_from(&mut buf).is_ok() {}
+        let _ = self.socket.set_read_timeout(Some(TIMEOUT));
     }
 
     /// Schneller Erreichbarkeits-Ping (300 ms). WICHTIG: Der Controller antwortet

@@ -18,6 +18,8 @@
     onmove,
     onscale,
     oneditimage,
+    laserHead,
+    laserOrigin,
   }: {
     scene: Scene;
     tool: Tool;
@@ -43,6 +45,9 @@
     ) => void | Promise<void>;
     // Doppelklick auf ein Bild-Shape: Editor oeffnen (Shape-Index).
     oneditimage?: (index: number) => void;
+    // Laser-Positionen (mm) fuer Marker: Kopf und Benutzerursprung. Optional.
+    laserHead?: [number, number] | null;
+    laserOrigin?: [number, number] | null;
   } = $props();
 
   let canvasEl: HTMLCanvasElement;
@@ -295,6 +300,39 @@
     drawSelection(ctx);
     drawGesturePreview(ctx);
     drawPolyPreview(ctx);
+    drawLaserMarkers(ctx);
+  }
+
+  // Marker fuer die zuletzt gelesene Laser-Position: Kopf (Fadenkreuz) und
+  // Benutzerursprung (Ring). Beide in mm, via toScreen positioniert.
+  function drawLaserMarkers(ctx: CanvasRenderingContext2D) {
+    if (laserOrigin) {
+      const [x, y] = toScreen(laserOrigin[0], laserOrigin[1]);
+      ctx.strokeStyle = "#f0a500";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fillStyle = "#f0a500";
+      ctx.fill();
+    }
+    if (laserHead) {
+      const [x, y] = toScreen(laserHead[0], laserHead[1]);
+      ctx.strokeStyle = "#3fb27f";
+      ctx.lineWidth = 1.5;
+      const r = 8;
+      ctx.beginPath();
+      ctx.moveTo(x - r, y);
+      ctx.lineTo(x + r, y);
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x, y + r);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   // Vorschau des laufenden Polylinien-Zugs: gesetzte Segmente, Gummiband zur
@@ -784,6 +822,7 @@
   $effect(() => {
     scene; zoom; panX; panY; drag;
     polyPts; polyCursor; polyNearStart;
+    laserHead; laserOrigin;
     draw();
   });
   // Aendern sich die freien Raender (Reiterwechsel, Panel verschoben) und der

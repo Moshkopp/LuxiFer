@@ -6,11 +6,31 @@ use std::sync::Mutex;
 use luxifer_core::preview::{JobPreview, MoveKind};
 use luxifer_core::{
     asset_meta, assets_dir, delete_project, import_image, list_projects, projects_dir,
-    rename_project, rendered_png, AppState, Geo, ImageParams, Layer, PolyShape, ProjectFile,
-    ProjectInfo, Shape, ShapeInfo, Tab, UiSettings, VersionInfo,
+    rename_project, rendered_png, Anchor, AppState, Connection, DriverKind, Geo, ImageParams,
+    JobAction, JobParams, JobPlan, Layer, LaserProfile, LaserRegistry, MachineDriver, PolyShape,
+    ProjectFile, ProjectInfo, Shape, ShapeInfo, StartMode, Tab, UiSettings, VersionInfo,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
+
+/// Baut den passenden Treiber zu einem Laser-Profil (ADR 0006/0007). Der Treiber
+/// trägt die Profil-Kalibrierung; er wird bei jedem Profilwechsel neu erzeugt.
+fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
+    match profile.kind {
+        DriverKind::Ruida => Box::new(luxifer_driver_ruida::RuidaDriver::from_profile(profile)),
+        DriverKind::Grbl | DriverKind::MiniGrbl => {
+            Box::new(luxifer_driver_grbl::GrblDriver::default())
+        }
+    }
+}
+
+/// Der aktive Treiber (aus dem aktiven Profil erzeugt) + dessen Profil-ID, um zu
+/// erkennen, wann er neu gebaut werden muss.
+#[derive(Default)]
+struct ActiveDriver {
+    id: Option<String>,
+    driver: Option<Box<dyn MachineDriver + Send>>,
+}
 
 /// Das aktuell geöffnete Projekt (Metadaten, ohne die Geometrie — die lebt im
 /// `AppState`). `None`, solange das Projekt noch namenlos ist.
@@ -23,6 +43,35 @@ struct CurrentProject {
 struct AppData {
     state: Mutex<AppState>,
     current: Mutex<CurrentProject>,
+    /// App-globale Laser-Registry (ADR 0007), beim Start geladen.
+    lasers: Mutex<LaserRegistry>,
+    /// Der aktive Treiber (lazy erzeugt/neu gebaut beim Profilwechsel).
+    active: Mutex<ActiveDriver>,
+}
+
+impl AppData {
+    /// Stellt sicher, dass der aktive Treiber zum aktuell aktiven Profil passt,
+    /// und ruft `f` damit auf. Fehlt ein aktives Profil → Fehlertext.
+    fn with_active_driver<T>(
+        &self,
+        f: impl FnOnce(&mut Box<dyn MachineDriver + Send>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let lasers = self.lasers.lock().unwrap();
+        let profile = lasers
+            .active()
+            .ok_or_else(|| "Kein Laser aktiv — bitte in den Einstellungen anlegen.".to_string())?
+            .clone();
+        drop(lasers);
+
+        let mut active = self.active.lock().unwrap();
+        // Treiber neu bauen, wenn Profil gewechselt hat oder noch keiner da ist.
+        if active.id.as_deref() != Some(profile.id.as_str()) || active.driver.is_none() {
+            active.driver = Some(driver_for(&profile));
+            active.id = Some(profile.id.clone());
+        }
+        let driver = active.driver.as_mut().unwrap();
+        f(driver)
+    }
 }
 
 /// Metadaten des offenen Projekts fürs Frontend (Kopf im Designer/Toast).
@@ -469,37 +518,229 @@ fn job_preview(data: State<AppData>) -> PreviewDto {
     PreviewDto::from_preview(&preview)
 }
 
-/// Erzeugt aus dem aktuellen Zustand einen G-Code-Job (GRBL-Treiber).
-/// Gibt den G-Code als Text zurück (oder einen Fehler bei leerem Job).
-#[tauri::command]
-fn generate_gcode(data: State<AppData>) -> Result<String, String> {
-    use luxifer_core::{JobPlan, MachineDriver};
-    use luxifer_driver_grbl::GrblDriver;
-    let s = data.state.lock().unwrap();
-    let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
-    let bytes = GrblDriver::default().compile(&plan, &s.layers)?;
-    String::from_utf8(bytes).map_err(|e| e.to_string())
+// --- Laser-Profile & gerätespezifische Aktionen (ADR 0007) ------------------
+
+/// Job-Parameter aus dem Frontend („Starten von" + 3×3-Anker-Index).
+#[derive(Deserialize, Default)]
+struct JobParamsDto {
+    /// "absolut" | "aktuell" | "ursprung".
+    start_mode: String,
+    /// 3×3-Index 0..8 (4 = Mitte).
+    anchor: usize,
 }
 
-/// Prüft per UDP-Ping, ob eine Ruida-Maschine unter `ip` antwortet.
-#[tauri::command]
-fn ruida_ping(ip: String) -> bool {
-    luxifer_driver_ruida::RuidaTransport::ping(&ip)
+impl JobParamsDto {
+    fn to_params(&self) -> JobParams {
+        let start_mode = match self.start_mode.as_str() {
+            "aktuell" => StartMode::AktuellePosition,
+            "ursprung" => StartMode::Benutzerursprung,
+            _ => StartMode::Absolut,
+        };
+        JobParams {
+            start_mode,
+            anchor: Anchor::from_index(self.anchor),
+        }
+    }
 }
 
-/// Kompiliert den aktuellen Zustand als Ruida-Job und sendet ihn per UDP.
+/// Kompilierter Job für den Datei-Download (Frontend bietet ihn als Datei an).
+#[derive(Serialize)]
+struct ExportDto {
+    bytes: Vec<u8>,
+    filename: String,
+}
+
+/// Kopf- und Ursprungsposition (mm) fürs Canvas. `origin` fehlt, wenn der
+/// Controller keinen Benutzerursprung meldet.
+#[derive(Serialize)]
+struct PositionDto {
+    head: [f64; 2],
+    origin: Option<[f64; 2]>,
+}
+
+/// Gibt die gesamte Laser-Registry ans Frontend (Dropdown + Settings-Liste).
 #[tauri::command]
-fn ruida_send(data: State<AppData>, ip: String) -> Result<String, String> {
-    use luxifer_core::{JobPlan, MachineDriver};
-    use luxifer_driver_ruida::{RuidaDriver, RuidaTransport};
-    let plan = {
+fn laser_list(data: State<AppData>) -> LaserRegistry {
+    data.lasers.lock().unwrap().clone()
+}
+
+/// Legt ein Profil an oder ersetzt ein bestehendes (gleiche ID). Ohne ID wird
+/// eine neue vergeben. Speichert und gibt die aktualisierte Registry zurück.
+#[tauri::command]
+fn laser_save(data: State<AppData>, mut profile: LaserProfile) -> Result<LaserRegistry, String> {
+    let mut lasers = data.lasers.lock().unwrap();
+    if profile.id.is_empty() {
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        profile.id = format!("laser-{millis}");
+        lasers.add(profile);
+    } else if !lasers.update(profile.clone()) {
+        lasers.add(profile);
+    }
+    lasers.save()?;
+    Ok(lasers.clone())
+}
+
+/// Löscht ein Profil, speichert und gibt die Registry zurück.
+#[tauri::command]
+fn laser_delete(data: State<AppData>, id: String) -> Result<LaserRegistry, String> {
+    let mut lasers = data.lasers.lock().unwrap();
+    lasers.remove(&id);
+    lasers.save()?;
+    Ok(lasers.clone())
+}
+
+/// Setzt den aktiven Laser (Panel-Dropdown), speichert und gibt die Registry
+/// zurück. Der Treiber wird beim nächsten Aktions-Aufruf passend neu gebaut.
+#[tauri::command]
+fn laser_set_active(data: State<AppData>, id: String) -> Result<LaserRegistry, String> {
+    let mut lasers = data.lasers.lock().unwrap();
+    if !lasers.set_active(&id) {
+        return Err("Unbekannter Laser.".into());
+    }
+    lasers.save()?;
+    Ok(lasers.clone())
+}
+
+/// Die Job-Aktionen, die der aktive Treiber anbietet (als String-Schlüssel).
+/// Leer, wenn kein Laser aktiv ist.
+#[tauri::command]
+fn laser_actions(data: State<AppData>) -> Vec<String> {
+    data.with_active_driver(|d| Ok(d.actions().iter().map(|a| a.as_key().to_string()).collect()))
+        .unwrap_or_default()
+}
+
+/// Führt eine gemeldete Job-Aktion aus (Senden/Rahmen/Home/Stop/Export). Der
+/// Treiber entscheidet, was intern passiert (ADR 0007). Gibt eine Meldung zurück.
+#[tauri::command]
+fn laser_run_action(
+    data: State<AppData>,
+    action: String,
+    params: JobParamsDto,
+) -> Result<String, String> {
+    let job_action = action_from_key(&action)?;
+    let (plan, layers) = {
         let s = data.state.lock().unwrap();
-        JobPlan::from_shapes(&s.shapes, &s.layers)
+        (JobPlan::from_shapes(&s.shapes, &s.layers), s.layers.clone())
     };
-    let packet = RuidaDriver.compile(&plan, &[])?;
-    let t = RuidaTransport::connect(&ip).map_err(|e| e.to_string())?;
-    t.send(&packet).map_err(|e| e.to_string())?;
-    Ok(format!("Job gesendet ({} Byte).", packet.len()))
+    let jp = params.to_params();
+    // Aktion, die eine Verbindung braucht, verbindet vorher automatisch.
+    data.with_active_driver(|d| {
+        if needs_connection(job_action) {
+            connect_active(d, &data)?;
+        }
+        d.run_action(job_action, &plan, &layers, &jp)
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// Kompiliert den aktuellen Job für den aktiven Treiber und gibt die Bytes samt
+/// Vorschlags-Dateinamen zurück (Frontend bietet sie als Datei-Download an). Für
+/// Ruida sind das .rd-Bytes, für GRBL G-Code. Braucht KEINE Verbindung.
+#[tauri::command]
+fn laser_export(data: State<AppData>, params: JobParamsDto) -> Result<ExportDto, String> {
+    let (plan, layers) = {
+        let s = data.state.lock().unwrap();
+        (JobPlan::from_shapes(&s.shapes, &s.layers), s.layers.clone())
+    };
+    let jp = params.to_params();
+    data.with_active_driver(|d| {
+        let ext = match d.name() {
+            "Ruida" => "rd",
+            _ => "gcode",
+        };
+        let bytes = d.compile_with(&plan, &layers, &jp)?;
+        Ok(ExportDto {
+            bytes,
+            filename: format!("job.{ext}"),
+        })
+    })
+}
+
+/// Kopf per Jog um (dx, dy) mm mit `speed` mm/s fahren. Verbindet automatisch.
+#[tauri::command]
+fn laser_jog(data: State<AppData>, dx: f64, dy: f64, speed: f64) -> Result<(), String> {
+    data.with_active_driver(|d| {
+        connect_active(d, &data)?;
+        d.jog(dx, dy, speed).map_err(|e| e.to_string())
+    })
+}
+
+/// Referenzfahrt (Home). Verbindet automatisch.
+#[tauri::command]
+fn laser_home(data: State<AppData>, speed: f64) -> Result<(), String> {
+    data.with_active_driver(|d| {
+        connect_active(d, &data)?;
+        d.home(speed).map_err(|e| e.to_string())
+    })
+}
+
+/// Liest Kopf- und Ursprungsposition (mm) für die Canvas-Anzeige (auf Knopfdruck).
+/// Verbindet automatisch.
+#[tauri::command]
+fn laser_position(data: State<AppData>) -> Result<PositionDto, String> {
+    data.with_active_driver(|d| {
+        connect_active(d, &data)?;
+        let st = d.status().map_err(|e| e.to_string())?;
+        // Ursprung ist optional — nicht jeder Controller/Zustand liefert ihn.
+        let origin = d.read_origin().ok().map(|(x, y)| [x, y]);
+        Ok(PositionDto {
+            head: [st.pos_x_mm, st.pos_y_mm],
+            origin,
+        })
+    })
+}
+
+/// Prüft, ob der aktive Laser erreichbar ist (nur Netz/Ruida-Ping).
+#[tauri::command]
+fn laser_ping(data: State<AppData>) -> bool {
+    let lasers = data.lasers.lock().unwrap();
+    match lasers.active().map(|p| p.connection.clone()) {
+        Some(Connection::Netz { ip, .. }) => luxifer_driver_ruida::RuidaTransport::ping(&ip),
+        _ => false,
+    }
+}
+
+fn action_from_key(key: &str) -> Result<JobAction, String> {
+    Ok(match key {
+        "send_job" => JobAction::SendJob,
+        "stream_gcode" => JobAction::StreamGcode,
+        "export_file" => JobAction::ExportFile,
+        "frame" => JobAction::Frame,
+        "home" => JobAction::Home,
+        "go_origin" => JobAction::GoOrigin,
+        "stop" => JobAction::Stop,
+        other => return Err(format!("Unbekannte Aktion: {other}")),
+    })
+}
+
+fn needs_connection(a: JobAction) -> bool {
+    matches!(
+        a,
+        JobAction::SendJob
+            | JobAction::StreamGcode
+            | JobAction::Frame
+            | JobAction::Home
+            | JobAction::GoOrigin
+            | JobAction::Stop
+    )
+}
+
+/// Verbindet den aktiven Treiber mit der Adresse seines Profils.
+fn connect_active(
+    driver: &mut Box<dyn MachineDriver + Send>,
+    data: &State<AppData>,
+) -> Result<(), String> {
+    let lasers = data.lasers.lock().unwrap();
+    let profile = lasers.active().ok_or("Kein Laser aktiv.")?;
+    let target = match &profile.connection {
+        Connection::Netz { ip, .. } => ip.clone(),
+        Connection::Seriell { port, .. } => port.clone(),
+    };
+    drop(lasers);
+    driver.connect(&target).map_err(|e| e.to_string())
 }
 
 /// Lädt die GUI-Settings (Panel-Layouts, Theming, Arbeitsplatz) — ADR 0002.
@@ -878,6 +1119,8 @@ pub fn run() {
             app.manage(AppData {
                 state: Mutex::new(AppState::new()),
                 current: Mutex::new(CurrentProject::default()),
+                lasers: Mutex::new(LaserRegistry::load()),
+                active: Mutex::new(ActiveDriver::default()),
             });
             // Fenster-/Taskleisten-Icon zur Laufzeit setzen (greift auch im
             // Dev-Modus, wo das gebündelte Icon sonst nicht verwendet wird).
@@ -909,9 +1152,17 @@ pub fn run() {
             toggle_layer,
             move_layer,
             job_preview,
-            generate_gcode,
-            ruida_ping,
-            ruida_send,
+            laser_list,
+            laser_save,
+            laser_delete,
+            laser_set_active,
+            laser_actions,
+            laser_run_action,
+            laser_export,
+            laser_jog,
+            laser_home,
+            laser_position,
+            laser_ping,
             clear_selection,
             delete_selected,
             get_ui_settings,

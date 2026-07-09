@@ -3,6 +3,8 @@
   import PreviewCanvas from "./lib/PreviewCanvas.svelte";
   import LayerDialog from "./lib/LayerDialog.svelte";
   import LaserPanel from "./lib/LaserPanel.svelte";
+  import LaserSettings from "./lib/LaserSettings.svelte";
+  import SettingsModal from "./lib/SettingsModal.svelte";
   import PanelHost from "./lib/PanelHost.svelte";
   import ToolsPanel from "./lib/ToolsPanel.svelte";
   import LayersPanel from "./lib/LayersPanel.svelte";
@@ -41,8 +43,18 @@
   let editImage = $state<number | null>(null);
   // Versteckter Datei-Input fuer den Bild-Import (per Button ausgeloest).
   let fileInput = $state<HTMLInputElement | null>(null);
-  let gcode = $state<string | null>(null);
   let status = $state<string | null>(null);
+
+  // --- Laser (ADR 0007) -----------------------------------------------------
+  let laserReg = $state<core.LaserRegistry | null>(null);
+  let laserActions = $state<string[]>([]);
+  let showLaserSettings = $state(false);
+  // Zentrales Einstellungs-Modal (Zahnrad oben rechts).
+  let showSettings = $state(false);
+  // Verbindungsstatus (LED) + gelesene Positionen (Canvas-Marker).
+  let laserConnected = $state(false);
+  let laserHead = $state<[number, number] | null>(null);
+  let laserOrigin = $state<[number, number] | null>(null);
 
   // --- Projektverwaltung (ADR 0003) -----------------------------------------
   // saveMode: Projekt-Reiter zeigt das Speichern-Formular (Strg+S bei namenlos).
@@ -68,6 +80,10 @@
       applyTheme(settings.theme);
       // Start-Toast: zuletzt geoeffnetes Projekt anbieten (ADR 0003 §3).
       if (settings.last_project) startToast = settings.last_project;
+      await loadLasers();
+      // Verbindungs-LED periodisch aktualisieren (nur wenn ein Laser aktiv ist).
+      refreshConnection();
+      setInterval(refreshConnection, 3000);
     } catch (e) {
       error = String(e);
     }
@@ -271,31 +287,101 @@
   async function moveLayer(from: number, to: number) {
     scene = await core.moveLayer(from, to);
   }
-  async function generateGcode() {
+  // --- Laser-Profile & Aktionen (ADR 0007) ----------------------------------
+  async function loadLasers() {
     try {
-      gcode = await core.generateGcode();
+      laserReg = await core.laserList();
+      laserActions = await core.laserActions();
     } catch (e) {
       error = String(e);
     }
   }
-  function copyGcode() {
-    if (gcode) navigator.clipboard?.writeText(gcode);
-  }
-  async function pingRuida(ip: string): Promise<boolean> {
+  async function selectLaser(id: string) {
     try {
-      const ok = await core.ruidaPing(ip);
-      status = ok ? `Verbunden mit ${ip}` : `Keine Antwort von ${ip}`;
-      setTimeout(() => (status = null), 3000);
-      return ok;
+      laserReg = await core.laserSetActive(id);
+      laserActions = await core.laserActions();
     } catch (e) {
       error = String(e);
-      return false;
     }
   }
-  async function sendRuida(ip: string) {
+  async function runLaserAction(action: string, params: core.JobParamsDto) {
     try {
-      status = await core.ruidaSend(ip);
+      status = await core.laserRunAction(action, params);
       setTimeout(() => (status = null), 4000);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  // Job als Datei herunterladen (.rd bzw. .gcode) — kein natives Plugin nötig.
+  async function exportLaser(params: core.JobParamsDto) {
+    try {
+      const dto = await core.laserExport(params);
+      const blob = new Blob([new Uint8Array(dto.bytes)], {
+        type: "application/octet-stream",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = dto.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      status = `Exportiert: ${dto.filename} (${dto.bytes.length} Byte)`;
+      setTimeout(() => (status = null), 4000);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function jogLaser(dx: number, dy: number, speed: number) {
+    try {
+      await core.laserJog(dx, dy, speed);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function homeLaser(speed: number) {
+    try {
+      await core.laserHome(speed);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  // Kopf- und Ursprungsposition lesen und als Marker im Canvas zeigen.
+  async function readLaserPosition() {
+    try {
+      const p = await core.laserPosition();
+      laserHead = p.head;
+      laserOrigin = p.origin;
+      laserConnected = true;
+      status = `Kopf ${p.head[0].toFixed(1)}/${p.head[1].toFixed(1)} mm`;
+      setTimeout(() => (status = null), 4000);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  // Verbindungs-LED: periodisch pingen, solange ein Laser aktiv ist.
+  async function refreshConnection() {
+    if (!laserReg?.active_id) {
+      laserConnected = false;
+      return;
+    }
+    try {
+      laserConnected = await core.laserPing();
+    } catch {
+      laserConnected = false;
+    }
+  }
+  async function saveLaser(profile: core.LaserProfile) {
+    try {
+      laserReg = await core.laserSave(profile);
+      laserActions = await core.laserActions();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function deleteLaser(id: string) {
+    try {
+      laserReg = await core.laserDelete(id);
+      laserActions = await core.laserActions();
     } catch (e) {
       error = String(e);
     }
@@ -507,6 +593,8 @@
       {onselectrect}
       {onmove}
       {onscale}
+      laserHead={laserHead}
+      laserOrigin={laserOrigin}
       oneditimage={(i) => (editImage = i)}
     />
   {/if}
@@ -559,9 +647,8 @@
       <div class="hright">
         <button
           class="gbtn hbtn"
-          class:active={editing}
-          onclick={() => (editing = !editing)}
-          title="Einstellungen / Oberfläche bearbeiten"
+          onclick={() => (showSettings = true)}
+          title="Einstellungen"
           aria-label="Einstellungen"
         >
           <Icon name="settings" />
@@ -585,7 +672,18 @@
         {:else if p.kind === "Anordnen"}
           <ArrangePanel {selCount} onalign={doAlign} ondistribute={doDistribute} />
         {:else if p.kind === "Laser"}
-          <LaserPanel ongenerate={generateGcode} onping={pingRuida} onsend={sendRuida} />
+          <LaserPanel
+            registry={laserReg}
+            actions={laserActions}
+            connected={laserConnected}
+            onselect={selectLaser}
+            onaction={runLaserAction}
+            onexport={exportLaser}
+            onjog={jogLaser}
+            onhome={homeLaser}
+            onreadposition={readLaserPosition}
+            onopensettings={() => (showLaserSettings = true)}
+          />
         {:else if p.kind === "JobStatus"}
           <div class="placeholder">Job-Status folgt (Monitor-Reiter).</div>
         {/if}
@@ -700,27 +798,29 @@
     </div>
   {/if}
 
-  <!-- G-Code-Overlay -->
-  {#if gcode !== null}
-    <div
-      class="backdrop"
-      onclick={() => (gcode = null)}
-      onkeydown={(e) => e.key === "Escape" && (gcode = null)}
-      role="button"
-      tabindex="-1"
-    >
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <div class="gcode glass" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-        <div class="gc-head">
-          <span>G-Code ({gcode.split("\n").length} Zeilen)</span>
-          <div>
-            <button onclick={copyGcode}>Kopieren</button>
-            <button class="primary" onclick={() => (gcode = null)}>Schließen</button>
-          </div>
-        </div>
-        <pre>{gcode}</pre>
-      </div>
-    </div>
+  <!-- Laser-Verwaltung als Schnellzugriff aus dem Laserpanel (ADR 0007) -->
+  {#if showLaserSettings}
+    <LaserSettings
+      registry={laserReg}
+      onsave={saveLaser}
+      ondelete={deleteLaser}
+      onclose={() => (showLaserSettings = false)}
+    />
+  {/if}
+
+  <!-- Zentrales Einstellungs-Modal (Zahnrad): Laser + Oberfläche -->
+  {#if showSettings}
+    <SettingsModal
+      registry={laserReg}
+      onsave={saveLaser}
+      ondelete={deleteLaser}
+      oneditlayout={() => {
+        showSettings = false;
+        editing = true;
+      }}
+      onresettab={resetTab}
+      onclose={() => (showSettings = false)}
+    />
   {/if}
 </main>
 
@@ -909,33 +1009,6 @@
     align-items: center;
     justify-content: center;
     z-index: 100;
-  }
-  .gcode {
-    width: min(600px, 90%);
-    max-height: 80%;
-    display: flex;
-    flex-direction: column;
-  }
-  .gc-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
-    gap: 8px;
-  }
-  .gc-head > div {
-    display: flex;
-    gap: 8px;
-  }
-  .gcode pre {
-    margin: 0;
-    padding: 14px 16px;
-    overflow: auto;
-    font-family: ui-monospace, "Cascadia Code", monospace;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text);
   }
   button {
     background: var(--btn);

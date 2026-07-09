@@ -17,6 +17,7 @@ pub mod assets;
 pub mod geometry;
 pub mod interact;
 pub mod job;
+pub mod laser;
 pub mod model;
 pub mod preview;
 pub mod project;
@@ -32,7 +33,13 @@ pub use assets::{
 };
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
 pub use interact::Handle;
-pub use job::{JobLayer, JobPlan, LayerWork, MachineDriver, Path};
+pub use job::{
+    Anchor, DriverError, JobLayer, JobParams, JobPlan, LayerWork, MachineDriver, MachineStatus,
+    Path, StartMode,
+};
+pub use laser::{
+    Connection, DriverKind, JobAction, LaserProfile, LaserRegistry, ScanOffsetCal, ScanOffsetPoint,
+};
 pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};
 pub use project::{
     delete_project, list_projects, projects_dir, rename_project, version_thumb_path, ProjectFile,

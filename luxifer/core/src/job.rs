@@ -35,6 +35,13 @@ pub struct JobLayer {
     pub power_pct: f64,
     pub min_power_pct: f64,
     pub passes: u32,
+    /// Luftunterstützung an? Geräteneutral — jeder Treiber, der Air-Assist
+    /// kennt, schaltet danach (Ruida pro Layer, GRBL per M7/M9).
+    pub air_assist: bool,
+    /// Bidirektionales Rastern (Scan hin und zurück). Nur für Fill/Raster
+    /// relevant; steuert im Treiber den Rückwärts-Scan (und damit, ob dessen
+    /// geschwindigkeitsabhängige Reversal-Korrektur greift).
+    pub bidirectional: bool,
     pub work: LayerWork,
 }
 
@@ -128,6 +135,8 @@ impl JobPlan {
                 power_pct: layer.power_pct,
                 min_power_pct: layer.min_power_pct,
                 passes: layer.passes,
+                air_assist: layer.air_assist,
+                bidirectional: layer.bidirectional,
                 work,
             });
         }
@@ -212,18 +221,208 @@ fn bounding_box(layers: &[JobLayer]) -> Option<(f64, f64, f64, f64)> {
     any.then_some((min_x, min_y, max_x, max_y))
 }
 
+/// Startmodus eines Jobs — „Starten von" (ADR 0006). Geräteneutral: jeder
+/// Treiber setzt ihn in seine Form um (Ruida: Preamble-Byte).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StartMode {
+    /// Maschinen-absolute Koordinaten.
+    #[default]
+    Absolut,
+    /// Relativ zur aktuellen Kopfposition.
+    AktuellePosition,
+    /// Relativ zum am Panel gesetzten Benutzerursprung.
+    Benutzerursprung,
+}
+
+/// Job-Nullpunkt-Anker (3×3-Raster). Welcher Punkt der Zeichnung auf dem
+/// Bezugspunkt landet — nur relevant, wenn `StartMode` nicht `Absolut` ist.
+/// Reihenfolge = Frontend-Index 0..8 (0 = oben-links, 4 = Mitte, 8 = unten-rechts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Anchor {
+    NW,
+    N,
+    NE,
+    W,
+    #[default]
+    Center,
+    E,
+    SW,
+    S,
+    SE,
+}
+
+impl Anchor {
+    /// Aus dem 3×3-Index (0..8) des Frontends. Andere Werte → Mitte.
+    pub fn from_index(i: usize) -> Self {
+        [
+            Anchor::NW,
+            Anchor::N,
+            Anchor::NE,
+            Anchor::W,
+            Anchor::Center,
+            Anchor::E,
+            Anchor::SW,
+            Anchor::S,
+            Anchor::SE,
+        ]
+        .get(i)
+        .copied()
+        .unwrap_or(Anchor::Center)
+    }
+
+    /// Ankerpunkt (x, y) in mm innerhalb der Bounding-Box (min_x, min_y, max_x, max_y).
+    pub fn point(self, bbox: (f64, f64, f64, f64)) -> (f64, f64) {
+        let (minx, miny, maxx, maxy) = bbox;
+        let (cx, cy) = ((minx + maxx) / 2.0, (miny + maxy) / 2.0);
+        let x = match self {
+            Anchor::NW | Anchor::W | Anchor::SW => minx,
+            Anchor::N | Anchor::Center | Anchor::S => cx,
+            Anchor::NE | Anchor::E | Anchor::SE => maxx,
+        };
+        let y = match self {
+            Anchor::NW | Anchor::N | Anchor::NE => miny,
+            Anchor::W | Anchor::Center | Anchor::E => cy,
+            Anchor::SW | Anchor::S | Anchor::SE => maxy,
+        };
+        (x, y)
+    }
+}
+
+/// Geräteneutrale Job-Parameter, die das Panel setzt (ADR 0006/0007). Kein
+/// Gerätedetail — jeder Treiber setzt sie in seine Form um.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct JobParams {
+    pub start_mode: StartMode,
+    pub anchor: Anchor,
+}
+
+/// Momentaufnahme des Maschinenzustands (geräteneutral, mm).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct MachineStatus {
+    pub is_running: bool,
+    pub is_paused: bool,
+    pub pos_x_mm: f64,
+    pub pos_y_mm: f64,
+}
+
+/// Fehler der Live-Steuerung — geräteneutral gehalten (der Treiber wandelt
+/// seine internen Fehler, z. B. UDP-Timeouts, hierher).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DriverError {
+    /// Keine Verbindung zur Maschine.
+    NotConnected,
+    /// Transport-/Kommunikationsfehler (Text vom Treiber).
+    Transport(String),
+    /// Der Treiber unterstützt diese Aktion nicht (z. B. GRBL-Stub).
+    NotSupported,
+}
+
+impl std::fmt::Display for DriverError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DriverError::NotConnected => write!(f, "Nicht mit einer Maschine verbunden."),
+            DriverError::Transport(e) => write!(f, "Kommunikationsfehler: {e}"),
+            DriverError::NotSupported => write!(f, "Dieser Treiber unterstützt die Aktion nicht."),
+        }
+    }
+}
+
 /// Was ein Treiber können muss. Der Core kennt keine Gerätedetails; die GUI
-/// spricht ausschließlich über diesen Trait (ADR 0001).
+/// spricht ausschließlich über diesen Trait (ADR 0001/0006).
 ///
-/// `compile` ist der Kern: geräteunabhängiger Plan → gerätespezifische Bytes
-/// (Ruida-Binär bzw. G-Code als UTF-8). Die Live-Steuerung (jog/home/…) kommt,
-/// sobald der erste Treiber gebaut wird.
+/// `name`/`compile` sind Pflicht (geräteunabhängiger Plan → gerätespezifische
+/// Bytes). Die **Live-Steuerung** (connect/jog/…) hat Default-Implementierungen,
+/// die `NotSupported`/`NotConnected` liefern — so bleibt ein Treiber baubar, der
+/// (noch) keine Verbindung kann (z. B. GRBL), und überschreibt nur, was er
+/// beherrscht.
 pub trait MachineDriver {
     /// Name des Treibers (z. B. "Ruida", "GRBL").
     fn name(&self) -> &str;
 
-    /// Übersetzt den Plan in gerätespezifische Job-Daten.
-    fn compile(&self, plan: &JobPlan, layers: &[Layer]) -> Result<Vec<u8>, String>;
+    /// Übersetzt den Plan in gerätespezifische Job-Daten (Standardparameter:
+    /// Absolut/Mitte). Für „Starten von"/Anker siehe [`compile_with`].
+    ///
+    /// [`compile_with`]: MachineDriver::compile_with
+    fn compile(&self, plan: &JobPlan, layers: &[Layer]) -> Result<Vec<u8>, String> {
+        self.compile_with(plan, layers, &JobParams::default())
+    }
+
+    /// Wie [`compile`](MachineDriver::compile), aber mit geräteneutralen
+    /// Job-Parametern (Startmodus, Anker). Der Treiber setzt sie in seine Form
+    /// um; der Plan selbst bleibt unverändert.
+    fn compile_with(
+        &self,
+        plan: &JobPlan,
+        layers: &[Layer],
+        params: &JobParams,
+    ) -> Result<Vec<u8>, String>;
+
+    /// Verbindung zur Maschine aufbauen (IP/Port bzw. serieller Anschluss).
+    fn connect(&mut self, _target: &str) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Verbindung trennen.
+    fn disconnect(&mut self) {}
+
+    /// Aktuellen Maschinenstatus abfragen.
+    fn status(&self) -> Result<MachineStatus, DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Kopf **relativ** um (dx, dy) mm mit `speed` bewegen (Jog-Tippen).
+    fn jog(&self, _dx_mm: f64, _dy_mm: f64, _speed_mm_s: f64) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Referenzfahrt (absolut zum Nullpunkt).
+    fn home(&self, _speed_mm_s: f64) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Zum am Gerät gesetzten Benutzerursprung fahren (nicht die Maschinen-Null).
+    fn go_origin(&self, _speed_mm_s: f64) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Den am Gerät gesetzten Benutzerursprung (mm) lesen, falls verfügbar.
+    fn read_origin(&self) -> Result<(f64, f64), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Die Job-Bounding-Box abfahren, um die Platzierung zu prüfen.
+    fn frame(&self, _plan: &JobPlan, _speed_mm_s: f64) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Fertig kompilierte Job-Bytes an die Maschine senden.
+    fn send_job(&self, _bytes: &[u8]) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Sofort-Stopp.
+    fn stop(&self) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Welche Job-Aktionen dieser Treiber im Panel anbietet (ADR 0007). Das Panel
+    /// rendert genau diese — kein fixer G-Code-/Sende-Knopf. Default: keine.
+    fn actions(&self) -> Vec<crate::laser::JobAction> {
+        Vec::new()
+    }
+
+    /// Eine gemeldete Aktion ausführen. Der Treiber entscheidet, was intern
+    /// passiert (Ruida: kompilieren + UDP-Upload; GRBL: G-Code streamen). Gibt bei
+    /// Bedarf einen Text fürs Frontend zurück (z. B. „Job gesendet (N Byte)").
+    fn run_action(
+        &self,
+        _action: crate::laser::JobAction,
+        _plan: &JobPlan,
+        _layers: &[Layer],
+        _params: &JobParams,
+    ) -> Result<String, DriverError> {
+        Err(DriverError::NotSupported)
+    }
 }
 
 /// Ob ein Layer-Modus (perspektivisch) Flächenfüllung braucht.

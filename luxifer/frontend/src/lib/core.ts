@@ -298,10 +298,70 @@ export interface JobPreview {
 // keine Mutation).
 export const jobPreview = () => invoke<JobPreview>("job_preview");
 
-export const generateGcode = () => invoke<string>("generate_gcode");
+// ---- Laser-Profile & gerätespezifische Aktionen (ADR 0007) -----------------
 
-export const ruidaPing = (ip: string) => invoke<boolean>("ruida_ping", { ip });
-export const ruidaSend = (ip: string) => invoke<string>("ruida_send", { ip });
+export type DriverKind = "Ruida" | "Grbl" | "MiniGrbl";
+
+export type Connection =
+  | { art: "netz"; ip: string; port: number | null }
+  | { art: "seriell"; port: string; baud: number };
+
+export interface ScanOffsetPoint {
+  speed_mm_s: number;
+  offset_mm: number;
+}
+export interface ScanOffsetCal {
+  enabled: boolean;
+  points: ScanOffsetPoint[];
+}
+
+export interface LaserProfile {
+  id: string;
+  name: string;
+  kind: DriverKind;
+  connection: Connection;
+  bed_mm: [number, number];
+  scan_offset: ScanOffsetCal;
+}
+
+export interface LaserRegistry {
+  profiles: LaserProfile[];
+  active_id: string | null;
+}
+
+export interface JobParamsDto {
+  start_mode: "absolut" | "aktuell" | "ursprung";
+  anchor: number;
+}
+
+export const laserList = () => invoke<LaserRegistry>("laser_list");
+export const laserSave = (profile: LaserProfile) =>
+  invoke<LaserRegistry>("laser_save", { profile });
+export const laserDelete = (id: string) =>
+  invoke<LaserRegistry>("laser_delete", { id });
+export const laserSetActive = (id: string) =>
+  invoke<LaserRegistry>("laser_set_active", { id });
+export const laserActions = () => invoke<string[]>("laser_actions");
+export const laserRunAction = (action: string, params: JobParamsDto) =>
+  invoke<string>("laser_run_action", { action, params });
+export const laserPing = () => invoke<boolean>("laser_ping");
+
+export interface ExportDto {
+  bytes: number[];
+  filename: string;
+}
+export const laserExport = (params: JobParamsDto) =>
+  invoke<ExportDto>("laser_export", { params });
+
+export const laserJog = (dx: number, dy: number, speed: number) =>
+  invoke<void>("laser_jog", { dx, dy, speed });
+export const laserHome = (speed: number) => invoke<void>("laser_home", { speed });
+
+export interface PositionDto {
+  head: [number, number];
+  origin: [number, number] | null;
+}
+export const laserPosition = () => invoke<PositionDto>("laser_position");
 
 export const undo = () => invoke<Scene>("undo");
 export const redo = () => invoke<Scene>("redo");

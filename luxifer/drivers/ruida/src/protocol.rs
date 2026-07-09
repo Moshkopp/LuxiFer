@@ -125,6 +125,44 @@ pub fn cmd_stop() -> Vec<u8> {
     vec![0xD8, 0x01]
 }
 
+/// Eilgang (Rapid) absolut, Laser AUS (`D9 10 00`) — für Jog/Home/Frame.
+pub fn cmd_rapid_move_xy(x_um: i32, y_um: i32) -> Vec<u8> {
+    let mut v = vec![0xD9, 0x10, 0x00];
+    v.extend(encode_coord(x_um));
+    v.extend(encode_coord(y_um));
+    v
+}
+
+// --- Register-Abfrage (Status/Position) -------------------------------------
+
+pub const ADDR_STATUS: u16 = 0x0400;
+pub const ADDR_POS_X: u16 = 0x0421;
+pub const ADDR_POS_Y: u16 = 0x0431;
+/// Benutzerursprung (am Panel gesetzt), an HW verifiziert (gotoorigin.pcap).
+pub const ADDR_ORIGIN_X: u16 = 0x0424;
+pub const ADDR_ORIGIN_Y: u16 = 0x0434;
+
+/// Register lesen (`DA 00 <hi> <lo>`). Antwort: `DA 01 <hi> <lo> <5-Byte-Wert>`.
+pub fn cmd_read_reg(addr: u16) -> Vec<u8> {
+    vec![0xDA, 0x00, (addr >> 8) as u8, (addr & 0xFF) as u8]
+}
+
+/// 7-Bit-pro-Byte big-endian dekodieren (Umkehrung von [`encode_value`]).
+pub fn decode_value(data: &[u8]) -> u64 {
+    data.iter()
+        .fold(0u64, |acc, &b| (acc << 7) | (b & 0x7F) as u64)
+}
+
+/// 5-Byte-Koordinate (µm) als signed 32-Bit dekodieren.
+pub fn decode_coord(data: &[u8]) -> i32 {
+    let v = decode_value(&data[..5.min(data.len())]) & 0xFFFF_FFFF;
+    if v > 0x7FFF_FFFF {
+        (v as i64 - 0x1_0000_0000) as i32
+    } else {
+        v as i32
+    }
+}
+
 /// mm → µm (ganzzahlig gerundet).
 pub fn mm_to_um(mm: f64) -> i32 {
     (mm * 1000.0).round() as i32
@@ -139,6 +177,7 @@ pub const SET_FILE_SUM: [u8; 2] = [0xE5, 0x05];
 /// Antwort-Bytes des Controllers.
 pub const ACK: u8 = 0xCC;
 pub const NAK: u8 = 0xCF;
+pub const ERR: u8 = 0xCD;
 
 /// Trailer mit Dateisumme über den gesamten bisherigen Job.
 pub fn recompute_file_sum(job: &[u8]) -> Vec<u8> {

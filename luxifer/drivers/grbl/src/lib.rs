@@ -3,7 +3,7 @@
 //! Kennt nur `luxifer-core` (ADR 0001). Der Core liefert Cut-Pfade in mm; dieser
 //! Treiber macht daraus G-Code-Text (als UTF-8-Bytes).
 
-use luxifer_core::{JobPlan, Layer, LayerWork, MachineDriver};
+use luxifer_core::{DriverError, JobAction, JobParams, JobPlan, Layer, LayerWork, MachineDriver};
 
 /// Einstellungen der GRBL-Maschine.
 #[derive(Debug, Clone)]
@@ -109,11 +109,42 @@ impl MachineDriver for GrblDriver {
         "GRBL"
     }
 
-    fn compile(&self, plan: &JobPlan, layers: &[Layer]) -> Result<Vec<u8>, String> {
+    fn compile_with(
+        &self,
+        plan: &JobPlan,
+        layers: &[Layer],
+        _params: &JobParams,
+    ) -> Result<Vec<u8>, String> {
         if plan.is_empty() {
             return Err("Leerer Job — nichts zu lasern.".into());
         }
+        // GRBL arbeitet in Maschinenkoordinaten; „Starten von"/Anker werden
+        // (vorerst) nicht umgesetzt — der Startmodus ist ein Ruida-Konzept.
         Ok(self.to_gcode(plan, layers).into_bytes())
+    }
+
+    fn actions(&self) -> Vec<JobAction> {
+        // Streamen braucht noch den seriellen Transport; Export geht schon.
+        vec![JobAction::ExportFile, JobAction::StreamGcode]
+    }
+
+    fn run_action(
+        &self,
+        action: JobAction,
+        plan: &JobPlan,
+        layers: &[Layer],
+        params: &JobParams,
+    ) -> Result<String, DriverError> {
+        match action {
+            JobAction::ExportFile => {
+                let bytes = self
+                    .compile_with(plan, layers, params)
+                    .map_err(DriverError::Transport)?;
+                Ok(format!("G-Code erzeugt ({} Byte).", bytes.len()))
+            }
+            // Serielles Streamen kommt mit dem GRBL-Transport (späterer Schritt).
+            _ => Err(DriverError::NotSupported),
+        }
     }
 }
 
