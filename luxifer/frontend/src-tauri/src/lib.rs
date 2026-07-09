@@ -3,6 +3,7 @@
 
 use std::sync::Mutex;
 
+use luxifer_core::preview::{JobPreview, MoveKind};
 use luxifer_core::{
     asset_meta, assets_dir, delete_project, import_image, list_projects, projects_dir,
     rename_project, rendered_png, AppState, Geo, ImageParams, Layer, PolyShape, ProjectFile,
@@ -63,6 +64,54 @@ impl Scene {
                 tags: f.tags.clone(),
                 current_version: f.current_version.clone(),
             }),
+        }
+    }
+}
+
+/// Ein Bewegungssegment der Laser-Vorschau fürs Frontend (ADR 0005). Schlanke,
+/// serialisierbare Sicht auf `luxifer_core::preview::PreviewMove` — der Core
+/// bleibt UI-frei, die Grenze zum Frontend liegt hier.
+#[derive(Serialize)]
+struct PreviewMoveDto {
+    from: [f64; 2],
+    to: [f64; 2],
+    /// "Cut" | "Fill" | "Raster" | "Travel" — fürs Einfärben im Frontend.
+    kind: &'static str,
+    layer_id: usize,
+    seq: u32,
+}
+
+/// Die komplette Laser-Vorschau fürs Frontend.
+#[derive(Serialize)]
+struct PreviewDto {
+    moves: Vec<PreviewMoveDto>,
+    /// (min_x, min_y, max_x, max_y) in mm, oder `None` bei leerem Job.
+    bbox: Option<[f64; 4]>,
+    total_len_mm: f64,
+}
+
+impl PreviewDto {
+    fn from_preview(p: &JobPreview) -> Self {
+        let kind_str = |k: MoveKind| match k {
+            MoveKind::Cut => "Cut",
+            MoveKind::Fill => "Fill",
+            MoveKind::Raster => "Raster",
+            MoveKind::Travel => "Travel",
+        };
+        PreviewDto {
+            moves: p
+                .moves
+                .iter()
+                .map(|m| PreviewMoveDto {
+                    from: [m.from.0, m.from.1],
+                    to: [m.to.0, m.to.1],
+                    kind: kind_str(m.kind),
+                    layer_id: m.layer_id,
+                    seq: m.seq,
+                })
+                .collect(),
+            bbox: p.bbox.map(|(a, b, c, d)| [a, b, c, d]),
+            total_len_mm: p.total_len_mm,
         }
     }
 }
@@ -396,6 +445,28 @@ fn toggle_layer(data: State<AppData>, index: usize, field: String) -> Scene {
         }
     }
     scene_with(&s, &data)
+}
+
+/// Verschiebt einen Layer in der Brenn-Reihenfolge (ADR 0005 §0). `from`/`to`
+/// sind Layer-Indizes; der Core remappt dabei alle `shape.layer_id`. Ein
+/// Undo-Punkt entsteht nur bei tatsächlicher Bewegung.
+#[tauri::command]
+fn move_layer(data: State<AppData>, from: usize, to: usize) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.move_layer(from, to);
+    scene_with(&s, &data)
+}
+
+/// Leitet aus dem aktuellen Zustand die Laser-Vorschau ab (ADR 0005): die zu
+/// fahrenden Segmente in Ausführungsreihenfolge inkl. Verfahrwege. Reine
+/// Ableitung des `JobPlan` — kein Undo, keine Mutation.
+#[tauri::command]
+fn job_preview(data: State<AppData>) -> PreviewDto {
+    use luxifer_core::JobPlan;
+    let s = data.state.lock().unwrap();
+    let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
+    let preview = JobPreview::from_plan(&plan);
+    PreviewDto::from_preview(&preview)
 }
 
 /// Erzeugt aus dem aktuellen Zustand einen G-Code-Job (GRBL-Treiber).
@@ -836,6 +907,8 @@ pub fn run() {
             mirror,
             set_layer_params,
             toggle_layer,
+            move_layer,
+            job_preview,
             generate_gcode,
             ruida_ping,
             ruida_send,
