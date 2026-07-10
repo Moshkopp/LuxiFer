@@ -270,6 +270,16 @@
   async function doDistribute(kind: core.DistributeKind) {
     scene = await core.distribute(kind);
   }
+  // Geometrie-Werkzeuge (Boolean/Offset/Fillet) — wirken auf die Auswahl.
+  async function doBoolean(op: core.BoolOpKind) {
+    scene = await core.booleanOp(op);
+  }
+  async function doOffset(dist: number) {
+    scene = await core.offsetOp(dist);
+  }
+  async function doFillet(radius: number) {
+    scene = await core.filletOp(radius);
+  }
   // Sofort-Befehle aus der Werkzeugleiste (Spiegeln). Wirken auf die Auswahl.
   async function doToolAction(a: "mirror_h" | "mirror_v") {
     scene = await core.mirror(a === "mirror_h" ? "h" : "v");
@@ -670,7 +680,14 @@
         {:else if p.kind === "Formen"}
           <ShapesPanel {shapes} {activeShape} onpickshape={pickShape} />
         {:else if p.kind === "Anordnen"}
-          <ArrangePanel {selCount} onalign={doAlign} ondistribute={doDistribute} />
+          <ArrangePanel
+            {selCount}
+            onalign={doAlign}
+            ondistribute={doDistribute}
+            onboolean={doBoolean}
+            onoffset={doOffset}
+            onfillet={doFillet}
+          />
         {:else if p.kind === "Laser"}
           <LaserPanel
             registry={laserReg}

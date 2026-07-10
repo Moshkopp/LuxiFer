@@ -252,6 +252,13 @@ export const distribute = (kind: DistributeKind) => invoke<Scene>("distribute", 
 export type MirrorAxis = "h" | "v";
 export const mirror = (axis: MirrorAxis) => invoke<Scene>("mirror", { axis });
 
+// Geometrie-Werkzeuge: Boolean auf der Auswahl (Subjekt = zuerst selektiert),
+// parallele Kontur (Offset, mm) und Eckenverrundung (Fillet, mm).
+export type BoolOpKind = "union" | "intersect" | "diff";
+export const booleanOp = (op: BoolOpKind) => invoke<Scene>("boolean_op", { op });
+export const offsetOp = (dist: number) => invoke<Scene>("offset_op", { dist });
+export const filletOp = (radius: number) => invoke<Scene>("fillet_op", { radius });
+
 export const clearSelection = () => invoke<Scene>("clear_selection");
 
 export const deleteSelected = () => invoke<Scene>("delete_selected");

@@ -32,3 +32,10 @@ image = { version = "0.25", default-features = false, features = [
     "bmp",
     "webp",
 ] }
+# Boolesche Polygon-Operationen (Vereinigen/Schneiden/Abziehen). Erprobte
+# Bibliothek statt handgerollter Schnittpunkt-Topologie (v3s 377-Zeilen-
+# Greiner-Hormann war ein Kantenfall-Minenfeld).
+i_overlay = "7"
+# Polylinien-Offset (parallele Kontur) — CAM-Standardbibliothek; dieselbe
+# Wahl hatte v3 für seinen Offset getroffen.
+cavalier_contours = "0.7"

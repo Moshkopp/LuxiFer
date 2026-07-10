@@ -10,3 +10,5 @@ description = "Kern von LuxiFer: Datenmodell, Geometrie, Layer/Farbe, Undo. UI-f
 serde = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true }
+i_overlay = { workspace = true }
+cavalier_contours = { workspace = true }

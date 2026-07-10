@@ -142,6 +142,28 @@ pub enum Geo {
 }
 
 impl Geo {
+    /// Kontur-Punkte der Geometrie (ohne Rotation) + ob geschlossen.
+    /// Bilder liefern ihre Box-Ecken (die Kontur; der Bildinhalt wird im
+    /// Job gerastert). Eine Quelle für Job-Kompilierung UND Geometrie-Ops.
+    pub fn outline_points(&self) -> (Vec<Pt>, bool) {
+        match self {
+            Geo::Rect { x, y, w, h } | Geo::Image { x, y, w, h, .. } => (
+                vec![(*x, *y), (*x + *w, *y), (*x + *w, *y + *h), (*x, *y + *h)],
+                true,
+            ),
+            Geo::Ellipse { cx, cy, rx, ry } => {
+                let segs = 64;
+                let mut pts = Vec::with_capacity(segs);
+                for i in 0..segs {
+                    let a = (i as f64 / segs as f64) * std::f64::consts::TAU;
+                    pts.push((cx + rx * a.cos(), cy + ry * a.sin()));
+                }
+                (pts, true)
+            }
+            Geo::Polyline { pts, closed } => (pts.clone(), *closed),
+        }
+    }
+
     /// Achsenparallele Bounding-Box (ohne Rotation).
     pub fn bbox(&self) -> BBox {
         match self {

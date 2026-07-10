@@ -15,6 +15,7 @@
 pub mod arrange;
 pub mod assets;
 pub mod dither;
+pub mod geo_ops;
 pub mod geometry;
 pub mod interact;
 pub mod job;
@@ -33,6 +34,7 @@ pub use assets::{
     apply_params, asset_meta, asset_path, assets_dir, import_image, load_asset, load_asset_luma,
     rendered_png, AssetId, AssetMeta,
 };
+pub use geo_ops::BoolOp;
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
 pub use interact::Handle;
 pub use job::{

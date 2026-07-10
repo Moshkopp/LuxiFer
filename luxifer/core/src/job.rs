@@ -271,9 +271,10 @@ where
     (out, texture)
 }
 
-/// Wandelt eine Shape (inkl. Rotation) in einen mm-Pfad.
+/// Wandelt eine Shape (inkl. Rotation) in einen mm-Pfad. Die Kontur kommt aus
+/// `Geo::outline_points` (eine Quelle mit den Geometrie-Ops, geo_ops.rs).
 fn shape_to_path(s: &Shape) -> Path {
-    let (mut points, closed) = raw_points(&s.geo);
+    let (mut points, closed) = s.geo.outline_points();
     if s.rotation != 0.0 {
         let (cx, cy) = s.bbox().center();
         for p in points.iter_mut() {
@@ -281,28 +282,6 @@ fn shape_to_path(s: &Shape) -> Path {
         }
     }
     Path { points, closed }
-}
-
-/// Rohe Punkte einer Geometrie (ohne Rotation) + ob geschlossen.
-fn raw_points(geo: &Geo) -> (Vec<Pt>, bool) {
-    match geo {
-        // Bild wie Rechteck: die Box-Ecken sind die Kontur. Die eigentliche
-        // Rasterung des Bildinhalts folgt im Job-Teil (ADR 0004 §5, später).
-        Geo::Rect { x, y, w, h } | Geo::Image { x, y, w, h, .. } => (
-            vec![(*x, *y), (*x + *w, *y), (*x + *w, *y + *h), (*x, *y + *h)],
-            true,
-        ),
-        Geo::Ellipse { cx, cy, rx, ry } => {
-            let segs = 64;
-            let mut pts = Vec::with_capacity(segs);
-            for i in 0..segs {
-                let a = (i as f64 / segs as f64) * std::f64::consts::TAU;
-                pts.push((cx + rx * a.cos(), cy + ry * a.sin()));
-            }
-            (pts, true)
-        }
-        Geo::Polyline { pts, closed } => (pts.clone(), *closed),
-    }
 }
 
 fn bounding_box(layers: &[JobLayer]) -> Option<(f64, f64, f64, f64)> {

@@ -428,6 +428,39 @@ fn distribute(data: State<AppData>, kind: String) -> Scene {
     scene_with(&s, &data)
 }
 
+/// Boolesche Operation auf der Auswahl: "union" | "intersect" | "diff".
+/// Subjekt = zuerst selektierte Shape; die Eingaben werden ersetzt.
+#[tauri::command]
+fn boolean_op(data: State<AppData>, op: String) -> Scene {
+    use luxifer_core::BoolOp;
+    let mut s = data.state.lock().unwrap();
+    let o = match op.as_str() {
+        "union" => BoolOp::Union,
+        "intersect" => BoolOp::Intersect,
+        "diff" => BoolOp::Difference,
+        _ => return scene_with(&s, &data),
+    };
+    s.boolean_selected(o);
+    scene_with(&s, &data)
+}
+
+/// Parallele Kontur (mm) zu jeder selektierten Shape hinzufügen.
+/// Positiv = außen, negativ = innen; das Original bleibt.
+#[tauri::command]
+fn offset_op(data: State<AppData>, dist: f64) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.offset_selected(dist);
+    scene_with(&s, &data)
+}
+
+/// Ecken der selektierten Shapes mit Radius (mm) verrunden.
+#[tauri::command]
+fn fillet_op(data: State<AppData>, radius: f64) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.fillet_selected(radius);
+    scene_with(&s, &data)
+}
+
 /// Spiegelt die Auswahl an der Mittelachse ihrer gemeinsamen BBox.
 /// `axis`: "h" = horizontal spiegeln (links↔rechts, vertikale Achse),
 /// "v" = vertikal spiegeln (oben↔unten, horizontale Achse).
@@ -1186,6 +1219,9 @@ pub fn run() {
             align,
             distribute,
             mirror,
+            boolean_op,
+            offset_op,
+            fillet_op,
             set_layer_params,
             toggle_layer,
             move_layer,
