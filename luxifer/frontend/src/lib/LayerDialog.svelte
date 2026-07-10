@@ -33,6 +33,10 @@
   let dpi = $state(layer.dpi);
   /* svelte-ignore state_referenced_locally */
   let bidirectional = $state(layer.bidirectional);
+  /* svelte-ignore state_referenced_locally */
+  let fillAngle = $state(layer.fill_angle_deg ?? 0);
+  /* svelte-ignore state_referenced_locally */
+  let crossFill = $state(layer.cross_fill ?? false);
 
   // Bild-Layer (ADR 0004): Modus fest „Bild", eigene Parameter (DPI +
   // Bidirektional statt Linienabstand). Die Bildverarbeitung (Schwelle/Tonwert)
@@ -55,6 +59,8 @@
       line_step_mm: lineStep,
       dpi,
       bidirectional,
+      fill_angle_deg: fillAngle,
+      cross_fill: crossFill,
     });
   }
 </script>
@@ -115,6 +121,10 @@
       </div>
     {:else if isFill}
       <label class="field"><span>Linienabstand mm</span><input type="number" step="0.01" bind:value={lineStep} min="0.01" /></label>
+      <div class="row">
+        <label class="field"><span>Füllwinkel °</span><input type="number" step="5" min="-90" max="90" bind:value={fillAngle} /></label>
+        <label class="check"><input type="checkbox" bind:checked={crossFill} /> Kreuzschraffur</label>
+      </div>
     {/if}
 
     <label class="check"><input type="checkbox" bind:checked={airAssist} /> Air-Assist</label>

@@ -56,6 +56,8 @@ export interface Layer {
   passes: number;
   dpi: number;
   bidirectional: boolean;
+  fill_angle_deg: number;
+  cross_fill: boolean;
 }
 
 export interface Shape {
@@ -290,6 +292,10 @@ export interface LayerParams {
   line_step_mm: number;
   dpi: number;
   bidirectional: boolean;
+  /// Füllwinkel (Grad) für Fill-Layer; 0 = horizontaler Scan.
+  fill_angle_deg: number;
+  /// Kreuzschraffur (zweiter Durchgang um 90°).
+  cross_fill: boolean;
 }
 
 export const setLayerParams = (index: number, p: LayerParams) =>

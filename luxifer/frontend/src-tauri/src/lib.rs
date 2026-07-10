@@ -650,6 +650,12 @@ struct LayerParams {
     dpi: f64,
     #[serde(default = "default_bidirectional")]
     bidirectional: bool,
+    /// Füllwinkel (Grad) für Fill-Layer; 0 = horizontaler Scan.
+    #[serde(default)]
+    fill_angle_deg: f64,
+    /// Kreuzschraffur (zweiter Durchgang um 90°).
+    #[serde(default)]
+    cross_fill: bool,
 }
 
 fn default_bidirectional() -> bool {
@@ -679,6 +685,8 @@ fn set_layer_params(data: State<AppData>, index: usize, p: LayerParams) -> Scene
         l.line_step_mm = p.line_step_mm;
         l.dpi = p.dpi;
         l.bidirectional = p.bidirectional;
+        l.fill_angle_deg = p.fill_angle_deg;
+        l.cross_fill = p.cross_fill;
     }
     scene_with(&s, &data)
 }

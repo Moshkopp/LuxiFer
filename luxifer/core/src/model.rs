@@ -121,6 +121,13 @@ pub struct Layer {
     /// Alte Dateien ohne das Feld gelten als bidirektional.
     #[serde(default = "default_true")]
     pub bidirectional: bool,
+    /// Füllwinkel in Grad für Fill-Layer (0 = horizontaler Scan). Winkel ≠ 0
+    /// wird als Vektor-Linienzug gefahren, nicht als Raster-Scan.
+    #[serde(default)]
+    pub fill_angle_deg: f64,
+    /// Kreuzschraffur: zweiter Fülldurchgang um 90° versetzt.
+    #[serde(default)]
+    pub cross_fill: bool,
 }
 
 impl Layer {
@@ -147,6 +154,8 @@ impl Layer {
             passes: 1,
             dpi: 254.0,
             bidirectional: true,
+            fill_angle_deg: 0.0,
+            cross_fill: false,
         }
     }
 
