@@ -153,6 +153,19 @@ pub fn load_asset(store_dir: &Path, id: &AssetId) -> Result<Vec<u8>, AssetError>
     std::fs::read(&path).map_err(|e| AssetError(format!("Asset {id} nicht lesbar: {e}")))
 }
 
+/// Lädt ein Asset und dekodiert es zu **Graustufen-Pixeln** (row-major `u8`)
+/// samt Pixelmaßen `(pixels, width, height)`. Für den Job-Rasterpfad: der Core
+/// hält so die Bilddekodierung, das Tauri-Backend liefert nur den Store-Pfad
+/// (CLAUDE.md Regel 2). Fehlt das Asset oder ist es nicht dekodierbar ⇒ Fehler.
+pub fn load_asset_luma(store_dir: &Path, id: &AssetId) -> Result<(Vec<u8>, u32, u32), AssetError> {
+    let bytes = load_asset(store_dir, id)?;
+    let luma = image::load_from_memory(&bytes)
+        .map_err(|e| AssetError(e.to_string()))?
+        .to_luma8();
+    let (w, h) = (luma.width(), luma.height());
+    Ok((luma.into_raw(), w, h))
+}
+
 /// Lädt die Metadaten eines Assets.
 pub fn asset_meta(store_dir: &Path, id: &AssetId) -> Result<AssetMeta, AssetError> {
     let path = store_dir.join(format!("{id}.meta.json"));

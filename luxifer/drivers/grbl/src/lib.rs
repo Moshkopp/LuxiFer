@@ -93,6 +93,18 @@ impl GrblDriver {
                             g.push_str("M5\n");
                         }
                     }
+                    LayerWork::Raster { rows } => {
+                        // Bild-Raster: jeder An-Run einer Zeile wie ein Fill-Segment.
+                        for row in rows {
+                            for &(x0, x1) in &row.runs {
+                                g.push_str("M5\n");
+                                g.push_str(&format!("G0 X{} Y{}\n", num(x0), num(row.y)));
+                                g.push_str(&format!("{laser_on} S{}\n", num(s)));
+                                g.push_str(&format!("G1 X{} Y{}\n", num(x1), num(row.y)));
+                                g.push_str("M5\n");
+                            }
+                        }
+                    }
                 }
             }
         }

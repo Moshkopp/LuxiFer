@@ -154,21 +154,24 @@ impl RuidaDriver {
                         }
                     }
                 }
-                LayerWork::Fill { .. } => self.compile_fill(&mut j, jl, offset),
+                // Fill und Raster fahren beide bidirektionale Scanlinien —
+                // derselbe Boustrophedon-Pfad, nur unterschiedliche Herkunft der
+                // An-Strecken (Scanline-Segmente bzw. Bild-Runs).
+                LayerWork::Fill { .. } | LayerWork::Raster { .. } => {
+                    self.compile_scan(&mut j, jl, offset)
+                }
             }
         }
         j
     }
 
-    /// Fill als bidirektionales Raster (Boustrophedon): Zeilen abwechselnd vor-
-    /// und rückwärts. Auf die Rückwärts-Zeilen wirkt der geschwindigkeits-
-    /// abhängige Scan-Offset (Vorwärts +off, Rückwärts −off), der den Reversal-
-    /// Versatz der Röhre kompensiert. Bei `bidirectional = false` fährt jede
-    /// Zeile links→rechts; dann greift kein Offset.
-    fn compile_fill(&self, j: &mut Vec<u8>, jl: &JobLayer, offset: (i32, i32)) {
-        let LayerWork::Fill { segments } = &jl.work else {
-            return;
-        };
+    /// Scan-Arbeit (Fill wie Bild-Raster) als bidirektionales Raster
+    /// (Boustrophedon): Zeilen abwechselnd vor- und rückwärts. Auf die
+    /// Rückwärts-Zeilen wirkt der geschwindigkeitsabhängige Scan-Offset
+    /// (Vorwärts +off, Rückwärts −off), der den Reversal-Versatz der Röhre
+    /// kompensiert. Bei `bidirectional = false` fährt jede Zeile links→rechts;
+    /// dann greift kein Offset.
+    fn compile_scan(&self, j: &mut Vec<u8>, jl: &JobLayer, offset: (i32, i32)) {
         let (ox, oy) = offset;
         // Nur bei bidirektionalem Scan korrigieren; interpoliert zur Layer-Speed.
         let off = if jl.bidirectional {
@@ -177,15 +180,31 @@ impl RuidaDriver {
             0
         };
 
-        // Segmente nach Zeile (y) gruppieren, Zeilen von oben nach unten.
-        // Anker-Offset (ox, oy) wird auf jede Koordinate addiert.
+        // An-Strecken nach Zeile (y) gruppieren, Zeilen von oben nach unten.
+        // Anker-Offset (ox, oy) wird auf jede Koordinate addiert. Fill liefert
+        // Scanline-Segmente, Raster die Bild-Runs — beide werden zu (lo, hi).
         let mut by_y: std::collections::BTreeMap<i32, Vec<(i32, i32)>> =
             std::collections::BTreeMap::new();
-        for seg in segments {
-            let y = mm_to_um(seg.y) + oy;
-            let (lo, hi) = (mm_to_um(seg.x0) + ox, mm_to_um(seg.x1) + ox);
+        let mut add = |y_mm: f64, x0_mm: f64, x1_mm: f64| {
+            let y = mm_to_um(y_mm) + oy;
+            let (lo, hi) = (mm_to_um(x0_mm) + ox, mm_to_um(x1_mm) + ox);
             let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
             by_y.entry(y).or_default().push((lo, hi));
+        };
+        match &jl.work {
+            LayerWork::Fill { segments } => {
+                for seg in segments {
+                    add(seg.y, seg.x0, seg.x1);
+                }
+            }
+            LayerWork::Raster { rows } => {
+                for row in rows {
+                    for &(x0, x1) in &row.runs {
+                        add(row.y, x0, x1);
+                    }
+                }
+            }
+            LayerWork::Cut { .. } => return,
         }
 
         let mut left_to_right = true;
@@ -498,10 +517,11 @@ fn compile_layer_config(layers: &[JobLayer], max_idx: u8, offset: (i32, i32)) ->
 /// Byte-für-Byte nach der HW-verifizierten Referenz (`_layer_markers`, commit
 /// 5982765, Cut+Fill real gefahren) — Reihenfolge/Felder NICHT ohne HW-Test ändern.
 fn write_settings_block(j: &mut Vec<u8>, jl: &JobLayer, l: u8, first: bool) {
-    let is_fill = matches!(jl.work, LayerWork::Fill { .. });
+    // Scan-Arbeit (Fill wie Bild-Raster) gatet das Laser-Feuern auf die X-Fahrt.
+    let is_scan = matches!(jl.work, LayerWork::Fill { .. } | LayerWork::Raster { .. });
     // CA 01 01 = Raster-Gating (Laser feuert nur bei X-Fahrt) — nur beim ERSTEN
     // Layer und nur für Fill/Image; sonst CA 01 00. (Referenz-verifiziert.)
-    let gating = if first && is_fill { 0x01 } else { 0x00 };
+    let gating = if first && is_scan { 0x01 } else { 0x00 };
     j.extend_from_slice(&[0xCA, 0x01, gating]);
     j.extend_from_slice(&[0xCA, 0x02, l]);
     j.extend_from_slice(&[0xCA, 0x01, 0x30]);
@@ -527,7 +547,7 @@ fn write_settings_block(j: &mut Vec<u8>, jl: &JobLayer, l: u8, first: bool) {
     j.extend_from_slice(&[0xC6, 0x13]);
     j.extend_from_slice(&[0x00; 5]);
     // Nur Cut: C6 50/51 = Power 0.
-    if !is_fill {
+    if !is_scan {
         let pw0 = encode_power(0.0);
         j.extend_from_slice(&[0xC6, 0x50]);
         j.extend(pw0.clone());
@@ -551,6 +571,43 @@ mod tests {
             h: 5.0,
         });
         JobPlan::from_shapes(&st.shapes, &st.layers)
+    }
+
+    /// Baut aus einem Raster-Plan Bytes und prüft das Scan-Gating. Der Plan wird
+    /// im Test von Hand gebaut (ohne `image`-Dependency im Treiber); die echte
+    /// Bild→Raster-Kette testet der Core.
+    #[test]
+    fn raster_plan_setzt_scan_gating() {
+        use luxifer_core::{JobLayer, LayerWork, RasterRow};
+        let plan = JobPlan {
+            layers: vec![JobLayer {
+                layer_id: 0,
+                color: [0, 0, 0],
+                speed_mm_s: 100.0,
+                power_pct: 50.0,
+                min_power_pct: 10.0,
+                passes: 1,
+                air_assist: false,
+                bidirectional: true,
+                work: LayerWork::Raster {
+                    rows: vec![RasterRow {
+                        y: 1.0,
+                        runs: vec![(0.0, 4.0)],
+                    }],
+                },
+            }],
+            bbox: Some((0.0, 1.0, 4.0, 1.0)),
+        };
+        let job = RuidaDriver::default().build_job(&plan);
+        assert!(
+            job.windows(3).any(|w| w == [0xCA, 0x01, 0x01]),
+            "Raster muss (wie Fill) das Scan-Gating setzen"
+        );
+        assert!(
+            job.contains(&0x88) && job.contains(&0xA8),
+            "move+cut erwartet"
+        );
+        assert_eq!(*job.last().unwrap(), END_OF_FILE);
     }
 
     #[test]

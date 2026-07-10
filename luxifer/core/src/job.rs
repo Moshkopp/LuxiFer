@@ -6,6 +6,7 @@
 
 use crate::geometry::{rotate_point, Geo, Pt};
 use crate::model::{Layer, LayerMode, Shape};
+use crate::raster::{raster_rows, Placement, RasterImage, RasterRow};
 use crate::scanline::{fill_segments, Contour, FillSegment};
 
 /// Ein zusammenhängender Pfad in mm (Polygonzug). `closed` = Kontur schließt sich.
@@ -22,7 +23,9 @@ pub enum LayerWork {
     Cut { paths: Vec<Path> },
     /// Fläche mit horizontalen Linien füllen (Even-Odd-Scanline).
     Fill { segments: Vec<FillSegment> },
-    // Raster { ... } folgt mit dem Bild-Support.
+    /// Bild rastern: An/Aus-Zeilen aus einem geschwellten Graustufenbild
+    /// (raster.rs). Jede Zeile trägt ihre durchzubrennenden Runs.
+    Raster { rows: Vec<RasterRow> },
 }
 
 /// Ein Layer-Block des Jobs: Parameter + Arbeit. Referenziert den Original-Layer.
@@ -74,6 +77,14 @@ impl JobLayer {
                     acc(s.x1, s.y);
                 }
             }
+            LayerWork::Raster { rows } => {
+                for r in rows {
+                    for &(x0, x1) in &r.runs {
+                        acc(x0, r.y);
+                        acc(x1, r.y);
+                    }
+                }
+            }
         }
         any.then_some((min_x, min_y, max_x, max_y))
     }
@@ -93,9 +104,29 @@ impl JobPlan {
     /// die Punkte angewandt, sodass Treiber nur noch fertige mm-Pfade sehen.
     ///
     /// Cut-Layer erhalten Kontur-Pfade, Fill-Layer eine Scanline-Füllung
-    /// (Zeilenabstand aus `line_step_mm`). Raster wird bis zum Bild-Support wie
-    /// Fill behandelt. Nur **aktive, nicht gesperrte, sichtbare** Layer.
+    /// (Zeilenabstand aus `line_step_mm`). Bild-Layer werden **nicht** hier
+    /// gerastert, weil `from_shapes` die Asset-Pixel nicht hat — dafür
+    /// [`from_shapes_with_assets`](JobPlan::from_shapes_with_assets).
     pub fn from_shapes(shapes: &[Shape], layers: &[Layer]) -> JobPlan {
+        // Ohne Asset-Auflösung liefert der Resolver nie Pixel — Bild-Layer
+        // werden dann übersprungen (Treiber-Tests u. Ä. ohne Store).
+        JobPlan::from_shapes_with_assets(shapes, layers, |_| None)
+    }
+
+    /// Wie [`from_shapes`](JobPlan::from_shapes), löst aber Bild-Assets auf:
+    /// `resolve` liefert zu einer Asset-ID die **Graustufen-Pixel** (row-major
+    /// `u8`) samt Pixelmaßen `(pixels, px_w, px_h)`, oder `None`, wenn das Asset
+    /// fehlt. Image-Layer werden damit zu `LayerWork::Raster` (Schwellwert,
+    /// raster.rs); der Core selbst fasst die Platte nicht an (Aufrufer liest den
+    /// Store).
+    pub fn from_shapes_with_assets<'a, F>(
+        shapes: &[Shape],
+        layers: &[Layer],
+        mut resolve: F,
+    ) -> JobPlan
+    where
+        F: FnMut(&str) -> Option<(std::borrow::Cow<'a, [u8]>, usize, usize)>,
+    {
         let mut job_layers: Vec<JobLayer> = Vec::new();
 
         for (li, layer) in layers.iter().enumerate() {
@@ -104,6 +135,28 @@ impl JobPlan {
             if !layer.enabled {
                 continue;
             }
+
+            // Bild-Layer: Shapes werden gerastert (Schwellwert), nicht als
+            // Kontur/Fill behandelt. Nur die Bild-Shapes des Layers zählen.
+            if layer.mode == LayerMode::Image {
+                let rows = raster_image_layer(shapes, li, layer, &mut resolve);
+                if rows.is_empty() {
+                    continue;
+                }
+                job_layers.push(JobLayer {
+                    layer_id: li,
+                    color: layer.color,
+                    speed_mm_s: layer.speed_mm_s,
+                    power_pct: layer.power_pct,
+                    min_power_pct: layer.min_power_pct,
+                    passes: layer.passes,
+                    air_assist: layer.air_assist,
+                    bidirectional: layer.bidirectional,
+                    work: LayerWork::Raster { rows },
+                });
+                continue;
+            }
+
             let paths: Vec<Path> = shapes
                 .iter()
                 .filter(|s| s.layer_id == li)
@@ -114,7 +167,7 @@ impl JobPlan {
             }
 
             let work = if layer.mode.is_filled() {
-                // Fill/Raster: geschlossene Konturen des Layers gemeinsam füllen.
+                // Fill: geschlossene Konturen des Layers gemeinsam füllen.
                 let contours: Vec<Contour> = paths
                     .iter()
                     .map(|p| Contour {
@@ -152,6 +205,61 @@ impl JobPlan {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
+}
+
+/// Rastert alle Bild-Shapes des Layers `li` zu An/Aus-Zeilen (Schwellwert).
+/// `resolve` liefert die Graustufen-Pixel je Asset-ID. Gedrehte Bilder werden
+/// achsenparallel gerastert und die Runs anschließend um das Box-Zentrum
+/// rotiert (analog `shape_to_path`).
+fn raster_image_layer<'a, F>(
+    shapes: &[Shape],
+    li: usize,
+    layer: &Layer,
+    resolve: &mut F,
+) -> Vec<RasterRow>
+where
+    F: FnMut(&str) -> Option<(std::borrow::Cow<'a, [u8]>, usize, usize)>,
+{
+    let mut out: Vec<RasterRow> = Vec::new();
+    for s in shapes.iter().filter(|s| s.layer_id == li) {
+        let Geo::Image {
+            asset,
+            x,
+            y,
+            w,
+            h,
+            params,
+        } = &s.geo
+        else {
+            continue;
+        };
+        let Some((pixels, px_w, px_h)) = resolve(asset) else {
+            continue;
+        };
+        // Achsenparallel rastern. Bild-Rotation wird hier bewusst NICHT
+        // angewandt: horizontale An/Aus-Runs (y, x0, x1) können keine schräge
+        // Strecke tragen, und ein „schiefes" Raster ist für Ausmalbilder ein
+        // Randfall. Offen für später, falls gedrehte Bilder gebraucht werden
+        // (dann müssten Runs echte 2D-Strecken sein).
+        let rows = raster_rows(
+            RasterImage {
+                pixels: &pixels,
+                px_w,
+                px_h,
+            },
+            Placement {
+                x: *x,
+                y: *y,
+                w: *w,
+                h: *h,
+                step_mm: layer.line_step_mm,
+            },
+            params,
+            params.invert_laser,
+        );
+        out.extend(rows);
+    }
+    out
 }
 
 /// Wandelt eine Shape (inkl. Rotation) in einen mm-Pfad.
@@ -214,6 +322,14 @@ fn bounding_box(layers: &[JobLayer]) -> Option<(f64, f64, f64, f64)> {
                 for s in segments {
                     acc(s.x0, s.y);
                     acc(s.x1, s.y);
+                }
+            }
+            LayerWork::Raster { rows } => {
+                for r in rows {
+                    for &(x0, x1) in &r.runs {
+                        acc(x0, r.y);
+                        acc(x1, r.y);
+                    }
                 }
             }
         }
@@ -509,6 +625,85 @@ mod tests {
             - ys.iter().cloned().fold(f64::MAX, f64::min);
         assert!((w - 20.0).abs() < 1e-6, "Breite nach Drehung ~20, war {w}");
         assert!((h - 100.0).abs() < 1e-6, "Höhe nach Drehung ~100, war {h}");
+    }
+
+    #[test]
+    fn image_layer_wird_gerastert_wenn_asset_aufloesbar() {
+        // Bild-Layer mit 2×2-Asset (obere Zeile schwarz, untere weiß), 2×2 mm.
+        let mut s = AppState::new();
+        s.add_image("cafe".into(), 0.0, 0.0, 2.0, 2.0);
+        s.layers.last_mut().unwrap().line_step_mm = 1.0;
+
+        // Resolver liefert die Pixel des Assets „cafe": Zeile 0 schwarz, Zeile 1 weiß.
+        let pixels = vec![0u8, 0, 255, 255];
+        let plan = JobPlan::from_shapes_with_assets(&s.shapes, &s.layers, |id| {
+            (id == "cafe").then_some((std::borrow::Cow::Borrowed(pixels.as_slice()), 2, 2))
+        });
+
+        assert_eq!(plan.layers.len(), 1);
+        let LayerWork::Raster { rows } = &plan.layers[0].work else {
+            panic!("Raster erwartet, war {:?}", plan.layers[0].work)
+        };
+        // Nur die schwarze Zeile (oben) erzeugt einen Run über die volle Breite.
+        assert_eq!(rows.len(), 1, "nur die schwarze Zeile brennt");
+        assert_eq!(rows[0].runs.len(), 1);
+        assert!((rows[0].runs[0].0 - 0.0).abs() < 1e-6);
+        assert!((rows[0].runs[0].1 - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bild_import_bis_raster_plan_end_to_end() {
+        use crate::assets::{import_image, load_asset_luma};
+
+        // Echtes 4×4-PNG (linke Hälfte schwarz, rechte weiß) importieren …
+        let dir = std::env::temp_dir().join(format!("luxifer_job_raster_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut img = image::GrayImage::new(4, 4);
+        for y in 0..4 {
+            for x in 0..4 {
+                img.put_pixel(x, y, image::Luma([if x < 2 { 0 } else { 255 }]));
+            }
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let meta = import_image(&dir, &png, "kante.png").unwrap();
+
+        // … als Bild-Layer platzieren (8×8 mm, step 2 mm ⇒ 4×4 Zielraster) …
+        let mut s = AppState::new();
+        s.add_image(meta.id.clone(), 0.0, 0.0, 8.0, 8.0);
+        s.layers.last_mut().unwrap().line_step_mm = 2.0;
+
+        // … und über die Store-Auflösung zu einem Raster-Plan bauen.
+        let plan = JobPlan::from_shapes_with_assets(&s.shapes, &s.layers, |id| {
+            let (px, w, h) = load_asset_luma(&dir, &id.to_string()).ok()?;
+            Some((std::borrow::Cow::Owned(px), w as usize, h as usize))
+        });
+
+        let LayerWork::Raster { rows } = &plan.layers[0].work else {
+            panic!("Raster erwartet")
+        };
+        // Vier Zeilen, jede mit einem Run über die linke (schwarze) Hälfte 0..4 mm.
+        assert_eq!(rows.len(), 4);
+        for r in rows {
+            assert_eq!(r.runs.len(), 1, "je Zeile ein Run");
+            assert!((r.runs[0].0 - 0.0).abs() < 1e-6);
+            assert!(
+                (r.runs[0].1 - 4.0).abs() < 0.5,
+                "Run endet ~Bildmitte (4mm)"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn image_layer_ohne_asset_wird_uebersprungen() {
+        // Ohne Asset-Auflösung (from_shapes) rastert nichts → leerer Plan.
+        let mut s = AppState::new();
+        s.add_image("fehlt".into(), 0.0, 0.0, 2.0, 2.0);
+        let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
+        assert!(plan.is_empty(), "unauflösbares Bild = kein Raster-Layer");
     }
 
     #[test]

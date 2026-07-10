@@ -145,7 +145,25 @@ impl JobPreview {
                             jl.layer_id,
                         );
                     }
-                } // Raster folgt mit dem Bild-Job (ADR 0004 §5, ADR 0005 §3).
+                }
+                LayerWork::Raster { rows } => {
+                    // Jede Zeile: ihre Runs als Raster-Moves (Laser an). Travel
+                    // zwischen Runs/Zeilen ergänzt `emit` automatisch, wenn der
+                    // Kopf woanders steht.
+                    for row in rows {
+                        for &(x0, x1) in &row.runs {
+                            emit(
+                                &mut moves,
+                                &mut head,
+                                &mut seq,
+                                (x0, row.y),
+                                (x1, row.y),
+                                MoveKind::Raster,
+                                jl.layer_id,
+                            );
+                        }
+                    }
+                }
             }
         }
 

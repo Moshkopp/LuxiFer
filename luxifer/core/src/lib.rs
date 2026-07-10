@@ -21,6 +21,7 @@ pub mod laser;
 pub mod model;
 pub mod preview;
 pub mod project;
+pub mod raster;
 pub mod scanline;
 pub mod shapes;
 pub mod state;
@@ -28,8 +29,8 @@ pub mod ui_settings;
 
 pub use arrange::{Align, Distribute};
 pub use assets::{
-    apply_params, asset_meta, asset_path, assets_dir, import_image, load_asset, rendered_png,
-    AssetId, AssetMeta,
+    apply_params, asset_meta, asset_path, assets_dir, import_image, load_asset, load_asset_luma,
+    rendered_png, AssetId, AssetMeta,
 };
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
 pub use interact::Handle;
@@ -45,6 +46,7 @@ pub use project::{
     delete_project, list_projects, projects_dir, rename_project, version_thumb_path, ProjectFile,
     ProjectInfo, VersionInfo,
 };
+pub use raster::{raster_rows, Placement, RasterImage, RasterRow};
 pub use scanline::FillSegment;
 pub use shapes::{PolyShape, ShapeInfo};
 pub use state::AppState;
