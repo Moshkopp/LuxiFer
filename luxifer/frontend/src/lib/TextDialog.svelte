@@ -2,7 +2,7 @@
   // Text-Werkzeug: Text + Font + Größe → Vektorpfade im Canvas (Text→Pfad).
   // Der Core erzeugt die Glyph-Konturen; hier nur Eingabe + Font-Auswahl.
   import { onMount } from "svelte";
-  import { listFonts, type FontInfo } from "./core";
+  import { listFonts, uploadFont, type FontInfo } from "./core";
 
   let {
     oninsert,
@@ -35,6 +35,24 @@
       return;
     }
     oninsert(text, fontPath, sizeMm);
+  }
+
+  // Eigenen Font installieren (TTF/OTF → App-Fonts-Ordner) und auswählen.
+  let fontFile = $state<HTMLInputElement | null>(null);
+  async function onFontFile(ev: Event) {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+      const path = await uploadFont(bytes, file.name);
+      fonts = await listFonts();
+      fontPath = path;
+      error = "";
+    } catch (e) {
+      error = `Font nicht installierbar: ${e}`;
+    }
   }
 </script>
 
@@ -69,6 +87,10 @@
     {#if error}<p class="err">{error}</p>{/if}
 
     <div class="actions">
+      <button class="ghost" onclick={() => fontFile?.click()} title="TTF/OTF in den App-Fonts-Ordner installieren">
+        Font installieren…
+      </button>
+      <input type="file" accept=".ttf,.otf" bind:this={fontFile} onchange={onFontFile} hidden />
       <button class="ghost" onclick={onclose}>Abbrechen</button>
       <button class="primary" onclick={insert}>Einfügen</button>
     </div>

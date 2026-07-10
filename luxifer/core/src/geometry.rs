@@ -354,6 +354,51 @@ pub fn point_segment_distance(px: f64, py: f64, a: Pt, b: Pt) -> f64 {
     ((px - projx).powi(2) + (py - projy).powi(2)).sqrt()
 }
 
+/// Catmull-Rom-Spline durch die Stützpunkte (wie das Spline-Werkzeug in v1:
+/// Punkte klicken, glatte Kurve hindurch). `segs` Unterteilungen je Abschnitt.
+/// Offene Kurven behalten Anfangs-/Endpunkt (Endsegmente werden gedoppelt).
+pub fn catmull_rom(pts: &[Pt], closed: bool, segs: usize) -> Vec<Pt> {
+    let n = pts.len();
+    if n < 3 || segs == 0 {
+        return pts.to_vec();
+    }
+    let at = |i: i64| -> Pt {
+        if closed {
+            pts[i.rem_euclid(n as i64) as usize]
+        } else {
+            pts[i.clamp(0, n as i64 - 1) as usize]
+        }
+    };
+    let spans = if closed { n } else { n - 1 };
+    let mut out = Vec::with_capacity(spans * segs + 1);
+    for k in 0..spans {
+        let (p0, p1, p2, p3) = (
+            at(k as i64 - 1),
+            at(k as i64),
+            at(k as i64 + 1),
+            at(k as i64 + 2),
+        );
+        let last = k == spans - 1;
+        let upper = if last && !closed { segs } else { segs - 1 };
+        for i in 0..=upper {
+            let t = i as f64 / segs as f64;
+            let (t2, t3) = (t * t, t * t * t);
+            let x = 0.5
+                * ((2.0 * p1.0)
+                    + (-p0.0 + p2.0) * t
+                    + (2.0 * p0.0 - 5.0 * p1.0 + 4.0 * p2.0 - p3.0) * t2
+                    + (-p0.0 + 3.0 * p1.0 - 3.0 * p2.0 + p3.0) * t3);
+            let y = 0.5
+                * ((2.0 * p1.1)
+                    + (-p0.1 + p2.1) * t
+                    + (2.0 * p0.1 - 5.0 * p1.1 + 4.0 * p2.1 - p3.1) * t2
+                    + (-p0.1 + 3.0 * p1.1 - 3.0 * p2.1 + p3.1) * t3);
+            out.push((x, y));
+        }
+    }
+    out
+}
+
 /// Dreht den Punkt (x,y) um das Zentrum (cx,cy) um `degrees` (im Uhrzeigersinn
 /// bei y-nach-unten-Achse). Für Rotations-Hit-Test/Rendering.
 pub fn rotate_point(x: f64, y: f64, cx: f64, cy: f64, degrees: f64) -> Pt {

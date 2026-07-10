@@ -15,6 +15,7 @@
   import ProjectBrowser from "./lib/ProjectBrowser.svelte";
   import ImageEditor from "./lib/ImageEditor.svelte";
   import TextDialog from "./lib/TextDialog.svelte";
+  import GeoToolDialog from "./lib/GeoToolDialog.svelte";
   import Icon from "./lib/Icon.svelte";
   import logoUrl from "./assets/logo.png";
   import * as core from "./lib/core";
@@ -30,7 +31,7 @@
   } from "./lib/core";
   import { applyTheme } from "./lib/theme";
 
-  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon";
+  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline";
 
   let scene = $state<Scene | null>(null);
   let tool = $state<Tool>("select");
@@ -205,7 +206,11 @@
     scene = await core.addLine(x1, y1, x2, y2);
   }
   async function ondrawpolyline(pts: [number, number][], closed: boolean) {
-    scene = await core.addPolyline(pts, closed);
+    // Spline nutzt denselben Zeichenfluss; die Glättung passiert im Core.
+    scene =
+      tool === "spline"
+        ? await core.addSpline(pts, closed)
+        : await core.addPolyline(pts, closed);
   }
   async function ondrawpolygon(shape: string, cx: number, cy: number, r: number, rot: number) {
     scene = await core.addPolygon(shape, cx, cy, r, rot);
@@ -300,12 +305,40 @@
   }
   // Sofort-Befehle aus der Werkzeugleiste. Spiegeln wirkt auf die Auswahl;
   // "text" öffnet den Text-Dialog (Text→Pfad).
-  async function doToolAction(a: "mirror_h" | "mirror_v" | "text") {
+  async function doToolAction(
+    a: "mirror_h" | "mirror_v" | "text" | "boolean" | "fillet" | "offset" | "pattern-fill",
+  ) {
     if (a === "text") {
       textOpen = true;
       return;
     }
+    // Geometrie-Werkzeuge (Referenz-UX): Button öffnet die Optionen,
+    // angewendet wird auf die Auswahl.
+    if (a === "boolean" || a === "fillet" || a === "offset") {
+      geoTool = a;
+      return;
+    }
+    if (a === "pattern-fill") {
+      geoTool = "pattern";
+      return;
+    }
     scene = await core.mirror(a === "mirror_h" ? "h" : "v");
+  }
+  // Offener Geometrie-Werkzeug-Dialog (oder null).
+  let geoTool = $state<null | "boolean" | "fillet" | "offset" | "pattern">(null);
+  async function doPatternFill(
+    p: core.PatternKind,
+    gapX: number,
+    gapY: number,
+    angle: number,
+    size: number,
+  ) {
+    try {
+      scene = await core.patternFillOp(p, gapX, gapY, angle, size);
+      geoTool = null;
+    } catch (e) {
+      error = String(e);
+    }
   }
   let textOpen = $state(false);
   async function doInsertText(text: string, fontPath: string, sizeMm: number) {
@@ -712,15 +745,7 @@
         {:else if p.kind === "Formen"}
           <ShapesPanel {shapes} {activeShape} onpickshape={pickShape} />
         {:else if p.kind === "Anordnen"}
-          <ArrangePanel
-            {selCount}
-            onalign={doAlign}
-            ondistribute={doDistribute}
-            onboolean={doBoolean}
-            onoffset={doOffset}
-            onfillet={doFillet}
-            onnest={doNest}
-          />
+          <ArrangePanel {selCount} onalign={doAlign} ondistribute={doDistribute} onnest={doNest} />
         {:else if p.kind === "Laser"}
           <LaserPanel
             registry={laserReg}
@@ -770,6 +795,19 @@
       layer={scene.layers[editLayer]}
       onsave={saveLayer}
       oncancel={() => (editLayer = null)}
+    />
+  {/if}
+
+  <!-- Geometrie-Werkzeuge (Boolean/Fillet/Offset/Muster) aus der Toolbar -->
+  {#if geoTool !== null}
+    <GeoToolDialog
+      kind={geoTool}
+      {selCount}
+      onboolean={(op) => { doBoolean(op); geoTool = null; }}
+      onfillet={(r) => { doFillet(r); geoTool = null; }}
+      onoffset={(d) => { doOffset(d); geoTool = null; }}
+      onpattern={doPatternFill}
+      onclose={() => (geoTool = null)}
     />
   {/if}
 

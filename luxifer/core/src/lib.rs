@@ -23,6 +23,7 @@ pub mod job;
 pub mod laser;
 pub mod model;
 pub mod nesting;
+pub mod pattern_fill;
 pub mod preview;
 pub mod project;
 pub mod raster;
@@ -50,8 +51,8 @@ pub use laser::{
 };
 pub use model::{Layer, LayerMode, Shape, SWATCH_COLORS};
 pub use project::{
-    delete_project, list_projects, projects_dir, rename_project, version_thumb_path, ProjectFile,
-    ProjectInfo, VersionInfo,
+    data_root, delete_project, list_projects, projects_dir, rename_project, version_thumb_path,
+    ProjectFile, ProjectInfo, VersionInfo,
 };
 pub use raster::{raster_rows, raster_texture, Placement, RasterImage, RasterRow, RasterTexture};
 pub use scanline::FillSegment;

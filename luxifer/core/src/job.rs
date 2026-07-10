@@ -174,30 +174,16 @@ impl JobPlan {
             }
 
             let work = if layer.mode.is_filled() {
-                if layer.fill_angle_deg == 0.0 && !layer.cross_fill {
-                    // Standard: horizontale Scanline-Füllung (Raster-Scan).
-                    let contours: Vec<Contour> = paths
-                        .iter()
-                        .map(|p| Contour {
-                            points: &p.points,
-                            closed: p.closed,
-                        })
-                        .collect();
-                    let segments = fill_segments(&contours, layer.line_step_mm);
-                    LayerWork::Fill { segments }
-                } else {
-                    // Muster-Hatch: gewinkelte (und ggf. gekreuzte) Fülllinien.
-                    // Die fährt der Laser als Vektor-Züge, nicht als Scan.
-                    let mut lines = hatch_lines(&paths, layer.line_step_mm, layer.fill_angle_deg);
-                    if layer.cross_fill {
-                        lines.extend(hatch_lines(
-                            &paths,
-                            layer.line_step_mm,
-                            layer.fill_angle_deg + 90.0,
-                        ));
-                    }
-                    LayerWork::Cut { paths: lines }
-                }
+                // Fill: geschlossene Konturen des Layers gemeinsam füllen.
+                let contours: Vec<Contour> = paths
+                    .iter()
+                    .map(|p| Contour {
+                        points: &p.points,
+                        closed: p.closed,
+                    })
+                    .collect();
+                let segments = fill_segments(&contours, layer.line_step_mm);
+                LayerWork::Fill { segments }
             } else {
                 LayerWork::Cut { paths }
             };
@@ -283,67 +269,6 @@ where
         }
     }
     (out, texture)
-}
-
-/// Gewinkelte Fülllinien (Muster-Hatch): die Konturen werden um −`angle`
-/// gedreht, mit der bewährten horizontalen Scanline gefüllt, und die Segmente
-/// um +`angle` zurückgedreht. Serpentinen-Reihenfolge (Zeilen abwechselnd
-/// hin/zurück) für kurze Leerfahrten. Ergebnis: offene 2-Punkt-Pfade.
-fn hatch_lines(paths: &[Path], step_mm: f64, angle_deg: f64) -> Vec<Path> {
-    // Drehzentrum: gemeinsame Bounding-Box-Mitte aller Konturen.
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-    for p in paths {
-        for &(x, y) in &p.points {
-            min_x = min_x.min(x);
-            min_y = min_y.min(y);
-            max_x = max_x.max(x);
-            max_y = max_y.max(y);
-        }
-    }
-    if min_x > max_x {
-        return Vec::new();
-    }
-    let (cx, cy) = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
-
-    // Konturen um −angle drehen.
-    let rotated: Vec<(Vec<Pt>, bool)> = paths
-        .iter()
-        .map(|p| {
-            (
-                p.points
-                    .iter()
-                    .map(|&(x, y)| rotate_point(x, y, cx, cy, -angle_deg))
-                    .collect(),
-                p.closed,
-            )
-        })
-        .collect();
-    let contours: Vec<Contour> = rotated
-        .iter()
-        .map(|(pts, closed)| Contour {
-            points: pts,
-            closed: *closed,
-        })
-        .collect();
-
-    // Horizontal füllen, dann zurückdrehen; Serpentinen über den Zeilenwechsel.
-    let mut out = Vec::new();
-    let mut flip = false;
-    let mut last_y = f64::NAN;
-    for s in fill_segments(&contours, step_mm) {
-        if s.y != last_y {
-            flip = !flip;
-            last_y = s.y;
-        }
-        let a = rotate_point(s.x0, s.y, cx, cy, angle_deg);
-        let b = rotate_point(s.x1, s.y, cx, cy, angle_deg);
-        let pts = if flip { vec![b, a] } else { vec![a, b] };
-        out.push(Path {
-            points: pts,
-            closed: false,
-        });
-    }
-    out
 }
 
 /// Wandelt eine Shape (inkl. Rotation) in einen mm-Pfad. Die Kontur kommt aus
@@ -712,60 +637,6 @@ mod tests {
         assert_eq!(rows[0].runs.len(), 1);
         assert!((rows[0].runs[0].0 - 0.0).abs() < 1e-6);
         assert!((rows[0].runs[0].1 - 2.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn hatch_45_grad_liefert_schraege_linien() {
-        let mut s = AppState::new();
-        s.add_shape(Geo::Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 10.0,
-            h: 10.0,
-        });
-        s.layers[0].mode = crate::model::LayerMode::Fill;
-        s.layers[0].line_step_mm = 1.0;
-        s.layers[0].fill_angle_deg = 45.0;
-        let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
-        let LayerWork::Cut { paths } = &plan.layers[0].work else {
-            panic!("Hatch wird als Vektor-Züge (Cut) gefahren")
-        };
-        assert!(!paths.is_empty());
-        // Jede Linie: offen, 2 Punkte, Steigung 45° (|dx| == |dy|).
-        for p in paths {
-            assert!(!p.closed);
-            assert_eq!(p.points.len(), 2);
-            let (a, b) = (p.points[0], p.points[1]);
-            let (dx, dy) = ((b.0 - a.0).abs(), (b.1 - a.1).abs());
-            assert!(
-                (dx - dy).abs() < 1e-6,
-                "45°-Linie: |dx|=|dy|, war dx={dx} dy={dy}"
-            );
-        }
-    }
-
-    #[test]
-    fn kreuzschraffur_verdoppelt_die_linien() {
-        let mut s = AppState::new();
-        s.add_shape(Geo::Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 10.0,
-            h: 10.0,
-        });
-        s.layers[0].mode = crate::model::LayerMode::Fill;
-        s.layers[0].line_step_mm = 1.0;
-        s.layers[0].fill_angle_deg = 45.0;
-        let n1 = match &JobPlan::from_shapes(&s.shapes, &s.layers).layers[0].work {
-            LayerWork::Cut { paths } => paths.len(),
-            _ => panic!(),
-        };
-        s.layers[0].cross_fill = true;
-        let n2 = match &JobPlan::from_shapes(&s.shapes, &s.layers).layers[0].work {
-            LayerWork::Cut { paths } => paths.len(),
-            _ => panic!(),
-        };
-        assert!(n2 > n1, "Kreuzschraffur ergänzt den zweiten Durchgang");
     }
 
     #[test]

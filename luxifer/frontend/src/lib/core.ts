@@ -56,8 +56,6 @@ export interface Layer {
   passes: number;
   dpi: number;
   bidirectional: boolean;
-  fill_angle_deg: number;
-  cross_fill: boolean;
 }
 
 export interface Shape {
@@ -266,6 +264,25 @@ export const filletOp = (radius: number) => invoke<Scene>("fillet_op", { radius 
 // Nesting: Auswahl platzsparend aufs Bett packen (gap = Abstand in mm).
 export const nestOp = (gap: number) => invoke<Scene>("nest_op", { gap });
 
+// Muster-Füllung (Pattern-Fill, wie v1): Linien/Kreise/Slots/Waben in die
+// selektierten geschlossenen Konturen (innere Konturen = Löcher).
+export type PatternKind = "lines" | "circles" | "slots" | "hex";
+export const patternFillOp = (
+  pattern: PatternKind,
+  gapX: number,
+  gapY: number,
+  angle: number,
+  size: number,
+) => invoke<Scene>("pattern_fill_op", { pattern, gapX, gapY, angle, size });
+
+// Spline: Catmull-Rom-Kurve durch die geklickten Punkte (Glättung im Core).
+export const addSpline = (pts: [number, number][], closed: boolean) =>
+  invoke<Scene>("add_spline", { pts, closed });
+
+// Font in den App-Fonts-Ordner installieren (TTF/OTF-Bytes).
+export const uploadFont = (bytes: number[], name: string) =>
+  invoke<string>("upload_font", { bytes, name });
+
 // Bild vektorisieren (Trace): Konturen des Motivs als Polylinien in mm.
 export const traceImage = (shapeIndex: number, threshold: number, invert: boolean) =>
   invoke<Scene>("trace_image", { shapeIndex, threshold, invert });
@@ -294,10 +311,6 @@ export interface LayerParams {
   line_step_mm: number;
   dpi: number;
   bidirectional: boolean;
-  /// Füllwinkel (Grad) für Fill-Layer; 0 = horizontaler Scan.
-  fill_angle_deg: number;
-  /// Kreuzschraffur (zweiter Durchgang um 90°).
-  cross_fill: boolean;
 }
 
 export const setLayerParams = (index: number, p: LayerParams) =>

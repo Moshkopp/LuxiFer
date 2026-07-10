@@ -1,28 +1,21 @@
 <script lang="ts">
-  // Anordnen-Toolbar: Ausrichten/Verteilen + Geometrie-Werkzeuge
-  // (Boolean/Offset/Fillet). Knoepfe je nach Auswahl aktiv.
-  import type { AlignKind, BoolOpKind, DistributeKind } from "./core";
+  // Anordnen-Toolbar: Ausrichten/Verteilen + Nesting. Die Geometrie-Werkzeuge
+  // (Boolean/Fillet/Offset/Muster) liegen wie in der Referenz in der
+  // WERKZEUGLEISTE (Gruppe 3), nicht hier.
+  import type { AlignKind, DistributeKind } from "./core";
   let {
     selCount,
     onalign,
     ondistribute,
-    onboolean,
-    onoffset,
-    onfillet,
     onnest,
   }: {
     selCount: number;
     onalign: (k: AlignKind) => void;
     ondistribute: (k: DistributeKind) => void;
-    onboolean: (op: BoolOpKind) => void;
-    onoffset: (dist: number) => void;
-    onfillet: (radius: number) => void;
     onnest: (gap: number) => void;
   } = $props();
 
-  // Eingaben fuer Offset-Abstand, Fillet-Radius und Nest-Abstand (mm).
-  let offsetMm = $state(2.0);
-  let filletMm = $state(2.0);
+  // Nest-Abstand (mm).
   let nestGapMm = $state(2.0);
 </script>
 
@@ -38,20 +31,6 @@
     <div class="vsep"></div>
     <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("h")} title="Horizontal verteilen">⋯</button>
     <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("v")} title="Vertikal verteilen">⋮</button>
-  </div>
-
-  <!-- Geometrie-Werkzeuge: Boolean braucht ≥2 geschlossene Formen;
-       Offset/Fillet wirken auf jede selektierte Form. -->
-  <div class="arrange">
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onboolean("union")} title="Vereinigen (erste ∪ Rest)">∪</button>
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onboolean("intersect")} title="Schneiden (erste ∩ Rest)">∩</button>
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onboolean("diff")} title="Abziehen (erste − Rest)">∖</button>
-    <div class="vsep"></div>
-    <input class="mm" type="number" step="0.5" bind:value={offsetMm} title="Offset-Abstand in mm (negativ = innen)" />
-    <button class="gbtn wide" disabled={selCount < 1} onclick={() => onoffset(offsetMm)} title="Parallele Kontur erzeugen">Off</button>
-    <div class="vsep"></div>
-    <input class="mm" type="number" step="0.5" min="0.1" bind:value={filletMm} title="Verrundungs-Radius in mm" />
-    <button class="gbtn wide" disabled={selCount < 1} onclick={() => onfillet(filletMm)} title="Ecken verrunden">Rund</button>
   </div>
 
   <!-- Nesting: Auswahl platzsparend aufs Bett packen. -->

@@ -6,9 +6,9 @@
   // hier — die liegen im Header bzw. auf der Entf-Taste.
   import Icon, { type IconName } from "./Icon.svelte";
 
-  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon";
+  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline";
   // Sofort-Befehle auf der Auswahl (kein Zeichenmodus), z. B. Spiegeln.
-  type Action = "mirror_h" | "mirror_v" | "text";
+  type Action = "mirror_h" | "mirror_v" | "text" | "boolean" | "fillet" | "offset" | "pattern-fill";
   let {
     tool,
     onpick,
@@ -43,7 +43,7 @@
       { name: "polygon", icon: "polygon", tip: "Polygon (Form unten wählen, dann aufziehen)", active: true },
       { name: "line", icon: "line", tip: "Linie", active: true },
       { name: "polyline", icon: "polyline", tip: "Polylinie (Klicks setzen Punkte, Doppelklick/Enter schließt ab)", active: true },
-      { name: "spline", icon: "spline", tip: "Spline" },
+      { name: "spline", icon: "spline", tip: "Spline (Klicks setzen Punkte, glatte Kurve hindurch)", active: true },
       { name: "bezier", icon: "bezier", tip: "Bézier-Feder" },
       { name: "text", icon: "text", tip: "Text einfügen (Text→Pfad)", action: true },
       { name: "node", icon: "node", tip: "Knoten bearbeiten" },
@@ -52,10 +52,10 @@
     [
       { name: "trim", icon: "trim", tip: "Trimmen" },
       { name: "bridge", icon: "bridge", tip: "Haltesteg" },
-      { name: "boolean", icon: "boolean", tip: "Boolean" },
-      { name: "fillet", icon: "fillet", tip: "Ecken verrunden" },
-      { name: "pattern-fill", icon: "pattern-fill", tip: "Muster füllen" },
-      { name: "offset", icon: "offset", tip: "Offset / Versatz" },
+      { name: "boolean", icon: "boolean", tip: "Boolean: Vereinigen/Schneiden/Abziehen (Auswahl)", action: true },
+      { name: "fillet", icon: "fillet", tip: "Ecken verrunden (Auswahl)", action: true },
+      { name: "pattern-fill", icon: "pattern-fill", tip: "Muster füllen: Linien/Kreise/Slots/Waben (Auswahl)", action: true },
+      { name: "offset", icon: "offset", tip: "Offset / parallele Kontur (Auswahl)", action: true },
       { name: "measure", icon: "measure", tip: "Messen" },
     ],
     // 4: Spiegeln (Sofort-Befehle auf der Auswahl)

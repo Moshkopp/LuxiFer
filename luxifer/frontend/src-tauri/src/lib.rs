@@ -440,6 +440,66 @@ fn import_vector_file(data: State<AppData>, bytes: Vec<u8>, name: String) -> Res
     Ok(scene_with(&s, &data))
 }
 
+/// Füllt die Auswahl mit einem Muster (Pattern-Fill, wie v1: Linien, Kreise,
+/// Slots, Waben). Alle selektierten geschlossenen Konturen wirken gemeinsam
+/// als Ringe (innere = Löcher). Ein Undo-Punkt; die Konturen bleiben.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn pattern_fill_op(
+    data: State<AppData>,
+    pattern: String,
+    gap_x: f64,
+    gap_y: f64,
+    angle: f64,
+    size: f64,
+) -> Result<Scene, String> {
+    use luxifer_core::pattern_fill::{FillParams, Pattern};
+    let Some(pat) = Pattern::from_key(&pattern) else {
+        return Err(format!("Unbekanntes Muster: {pattern}"));
+    };
+    let mut s = data.state.lock().unwrap();
+    s.pattern_fill_selected(&FillParams {
+        pattern: pat,
+        gap_x,
+        gap_y,
+        angle_deg: angle,
+        size,
+    });
+    Ok(scene_with(&s, &data))
+}
+
+/// Fügt eine Spline hinzu: Catmull-Rom-Kurve durch die geklickten Punkte
+/// (Zeichenfluss wie die Polylinie; die Glättung passiert im Core).
+#[tauri::command]
+fn add_spline(data: State<AppData>, pts: Vec<(f64, f64)>, closed: bool) -> Scene {
+    use luxifer_core::geometry::catmull_rom;
+    let mut s = data.state.lock().unwrap();
+    let smooth = catmull_rom(&pts, closed, 12);
+    s.add_shape(Geo::Polyline {
+        pts: smooth,
+        closed,
+    });
+    scene_with(&s, &data)
+}
+
+/// Eigener Fonts-Ordner der App (<data_root>/Fonts) — wie v3s Fonts-Ablage.
+fn fonts_dir() -> std::path::PathBuf {
+    luxifer_core::data_root().join("Fonts")
+}
+
+/// Installiert einen Font (TTF/OTF-Bytes) in den App-Fonts-Ordner.
+#[tauri::command]
+fn upload_font(bytes: Vec<u8>, name: String) -> Result<String, String> {
+    // Vorab prüfen, dass der Font lesbar ist (sonst Datenmüll im Ordner).
+    luxifer_core::text::text_to_contours(&bytes, "Ag", 10.0).map_err(|e| e.to_string())?;
+    let dir = fonts_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let safe = name.replace(['/', '\\'], "_");
+    let path = dir.join(&safe);
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// Ein installierter Font (fürs Text-Werkzeug).
 #[derive(Serialize)]
 struct FontInfo {
@@ -451,7 +511,9 @@ struct FontInfo {
 #[tauri::command]
 fn list_fonts() -> Vec<FontInfo> {
     let home = std::env::var("HOME").unwrap_or_default();
+    // Eigene Fonts der App zuerst (erscheinen oben in der Liste).
     let dirs = [
+        fonts_dir().to_string_lossy().to_string(),
         "/usr/share/fonts".to_string(),
         "/usr/local/share/fonts".to_string(),
         format!("{home}/.fonts"),
@@ -658,12 +720,6 @@ struct LayerParams {
     dpi: f64,
     #[serde(default = "default_bidirectional")]
     bidirectional: bool,
-    /// Füllwinkel (Grad) für Fill-Layer; 0 = horizontaler Scan.
-    #[serde(default)]
-    fill_angle_deg: f64,
-    /// Kreuzschraffur (zweiter Durchgang um 90°).
-    #[serde(default)]
-    cross_fill: bool,
 }
 
 fn default_bidirectional() -> bool {
@@ -693,8 +749,6 @@ fn set_layer_params(data: State<AppData>, index: usize, p: LayerParams) -> Scene
         l.line_step_mm = p.line_step_mm;
         l.dpi = p.dpi;
         l.bidirectional = p.bidirectional;
-        l.fill_angle_deg = p.fill_angle_deg;
-        l.cross_fill = p.cross_fill;
     }
     scene_with(&s, &data)
 }
@@ -1385,6 +1439,9 @@ pub fn run() {
             list_fonts,
             import_vector_file,
             add_text,
+            pattern_fill_op,
+            add_spline,
+            upload_font,
             offset_op,
             fillet_op,
             nest_op,

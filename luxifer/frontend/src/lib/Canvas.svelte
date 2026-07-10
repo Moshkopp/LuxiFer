@@ -1,7 +1,7 @@
 <script lang="ts">
   import { rgb, polygonPreview, imageRender, type Scene, type Shape, type ImageParams } from "./core";
 
-  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon";
+  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline";
 
   let {
     scene,
@@ -338,7 +338,7 @@
   // Vorschau des laufenden Polylinien-Zugs: gesetzte Segmente, Gummiband zur
   // Maus und kleine Marker an den Stuetzpunkten.
   function drawPolyPreview(ctx: CanvasRenderingContext2D) {
-    if (tool !== "polyline" || polyPts.length === 0) return;
+    if (tool !== "polyline" && tool !== "spline" || polyPts.length === 0) return;
     ctx.strokeStyle = "rgba(255,255,255,0.7)";
     ctx.lineWidth = 1.4;
     ctx.beginPath();
@@ -617,7 +617,7 @@
       drag = { kind: "draw", sx: mx, sy: my, cx: mx, cy: my };
       return;
     }
-    if (tool === "polyline") {
+    if ((tool === "polyline" || tool === "spline")) {
       // Klick auf den ersten Punkt (im Fangradius) schliesst die Kontur.
       if (nearFirstPoint(px, py)) {
         polyCommit(true);
@@ -658,7 +658,7 @@
     const [px, py] = localXY(ev);
     const [mx, my] = toMm(px, py);
     // Polylinien-Gummiband: Cursor verfolgen, auch ohne aktiven Drag.
-    if (tool === "polyline" && polyPts.length > 0) {
+    if ((tool === "polyline" || tool === "spline") && polyPts.length > 0) {
       polyCursor = [mx, my];
       polyNearStart = nearFirstPoint(px, py);
       draw();
@@ -768,7 +768,7 @@
   // entfernen wir, wenn er auf dem vorherigen liegt.
   function onDblClick(ev: MouseEvent) {
     // Im Polyline-Modus: Kontur abschliessen (wie bisher).
-    if (tool === "polyline" && polyPts.length >= 2) {
+    if ((tool === "polyline" || tool === "spline") && polyPts.length >= 2) {
       const n = polyPts.length;
       const [ax, ay] = polyPts[n - 1];
       const [bx, by] = polyPts[n - 2];
@@ -835,7 +835,7 @@
   $effect(() => () => { if (rafId) cancelAnimationFrame(rafId); });
   // Werkzeugwechsel bricht einen laufenden Polylinien-Zug ab.
   $effect(() => {
-    if (tool !== "polyline" && polyPts.length > 0) polyCancel();
+    if (tool !== "polyline" && tool !== "spline" && polyPts.length > 0) polyCancel();
   });
   $effect(() => {
     resize();
