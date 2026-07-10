@@ -199,15 +199,20 @@ fn unit(from: Pt, to: Pt) -> Option<((f64, f64), f64)> {
     Some(((dx / l, dy / l), l))
 }
 
-/// Haltesteg: schneidet eine Lücke der Breite `width` (mm) in die Kontur,
-/// zentriert am kontur-nächsten Punkt zu `near` — das Teil bleibt beim
-/// Schneiden am Restmaterial hängen. Geschlossene Konturen werden zu EINER
-/// offenen Polylinie (Lücke = Steg), offene zu zwei Teilstücken. `None`,
-/// wenn die Kontur zu kurz für den Steg ist.
-pub fn insert_bridge(
+/// Haltesteg nach v3-Modell: der Nutzer zieht eine **Steg-Linie** `p0`→`p1`
+/// der Breite `width` (mm) über eine Kontur. Wo die Linie die Kontur kreuzt,
+/// wird die Kontur aufgeschnitten und die Teilstücke **innerhalb des
+/// Steg-Bandes** (Abstand ≤ width/2 zur Linie) entfernt — dort bleibt beim
+/// Schneiden Material stehen (die Brücke). Die Kontur wird also **geöffnet**,
+/// nicht neu geschlossen.
+///
+/// Ergebnis: die verbleibenden (offenen) Teilstücke, oder `None`, wenn die
+/// Linie die Kontur nicht kreuzt.
+pub fn bridge_line(
     points: &[Pt],
     closed: bool,
-    near: Pt,
+    p0: Pt,
+    p1: Pt,
     width: f64,
 ) -> Option<Vec<(Vec<Pt>, bool)>> {
     let n = points.len();
@@ -215,100 +220,132 @@ pub fn insert_bridge(
         return None;
     }
     let edges = if closed { n } else { n - 1 };
-    // Bogenlängen am Kantenanfang + Gesamtlänge; nächste Stelle (Kante, t).
-    let mut acc = Vec::with_capacity(edges);
-    let mut total = 0.0;
-    let mut best = (0usize, 0.0f64, f64::MAX);
+    let r = width / 2.0;
+
+    // 1. Jede Kontur-Kante an den Schnittpunkten mit der Steg-Linie UND an den
+    //    Ein-/Austrittspunkten des Steg-Bandes (Kreise um die Schnittpunkte,
+    //    Radius r) unterteilen — 1:1 die v3-Logik.
+    let mut crossings: Vec<Pt> = Vec::new();
+    for i in 0..edges {
+        if let Some(pt) = seg_seg_point(points[i], points[(i + 1) % n], p0, p1) {
+            crossings.push(pt);
+        }
+    }
+    if crossings.is_empty() {
+        return None;
+    }
+
+    // 2. Kontur in Mikro-Segmente zerlegen, die entweder ganz „drin" (Band)
+    //    oder ganz „draußen" sind.
+    let mut sub: Vec<(Pt, Pt)> = Vec::new();
     for i in 0..edges {
         let a = points[i];
         let b = points[(i + 1) % n];
-        acc.push(total);
-        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-        let len2 = dx * dx + dy * dy;
-        let t = if len2 > 1e-18 {
-            (((near.0 - a.0) * dx + (near.1 - a.1) * dy) / len2).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let (px, py) = (a.0 + dx * t, a.1 + dy * t);
-        let d2 = (px - near.0).powi(2) + (py - near.1).powi(2);
-        if d2 < best.2 {
-            best = (i, t, d2);
+        // Teilungsparameter: Schnitt mit der Linie + Ein/Austritt der Bänder.
+        let mut ts: Vec<f64> = vec![0.0, 1.0];
+        if let Some(t) = seg_seg_t(a, b, p0, p1) {
+            ts.push(t);
         }
-        total += len2.sqrt();
+        for &c in &crossings {
+            ts.extend(seg_circle_ts(a, b, c, r));
+        }
+        ts.retain(|&t| (0.0..=1.0).contains(&t));
+        ts.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        ts.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
+        let lerp = |t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+        for w in ts.windows(2) {
+            sub.push((lerp(w[0]), lerp(w[1])));
+        }
     }
-    if total <= width * 2.0 {
+
+    // 3. Segmente „drin" markieren (Mittelpunkt im Band eines Schnittpunkts).
+    let inside = |seg: &(Pt, Pt)| -> bool {
+        let mid = ((seg.0 .0 + seg.1 .0) / 2.0, (seg.0 .1 + seg.1 .1) / 2.0);
+        crossings
+            .iter()
+            .any(|c| (mid.0 - c.0).hypot(mid.1 - c.1) <= r + 1e-5)
+    };
+
+    // 4. Zusammenhängende „draußen"-Ketten sammeln = die stehenbleibenden
+    //    Schneidlinien (offen). Bei geschlossenen Konturen am ersten
+    //    Innen→Außen-Übergang beginnen, damit die Kette nicht mittendrin bricht.
+    let total = sub.len();
+    let mut start = 0;
+    if closed {
+        for i in 0..total {
+            if !inside(&sub[i]) && inside(&sub[(i + total - 1) % total]) {
+                start = i;
+                break;
+            }
+        }
+    }
+    let add = |path: &mut Vec<Pt>, pt: Pt| {
+        if path
+            .last()
+            .is_none_or(|l: &Pt| (l.0 - pt.0).hypot(l.1 - pt.1) > 1e-6)
+        {
+            path.push(pt);
+        }
+    };
+    let mut out: Vec<(Vec<Pt>, bool)> = Vec::new();
+    let mut cur: Vec<Pt> = Vec::new();
+    for step in 0..total {
+        let idx = if closed { (start + step) % total } else { step };
+        let seg = &sub[idx];
+        if inside(seg) {
+            if cur.len() >= 2 {
+                out.push((std::mem::take(&mut cur), false));
+            } else {
+                cur.clear();
+            }
+        } else {
+            add(&mut cur, seg.0);
+            add(&mut cur, seg.1);
+        }
+    }
+    if cur.len() >= 2 {
+        out.push((cur, false));
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Schnittpunkt zweier Strecken (falls vorhanden).
+fn seg_seg_point(a: Pt, b: Pt, c: Pt, d: Pt) -> Option<Pt> {
+    let t = seg_seg_t(a, b, c, d)?;
+    Some((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t))
+}
+
+/// Parameter t auf a–b des Schnitts mit c–d (beide Strecken), falls vorhanden.
+fn seg_seg_t(a: Pt, b: Pt, c: Pt, d: Pt) -> Option<f64> {
+    let den = (b.0 - a.0) * (d.1 - c.1) - (b.1 - a.1) * (d.0 - c.0);
+    if den.abs() < 1e-12 {
         return None;
     }
-    let (ei, et, _) = best;
-    let elen = {
-        let a = points[ei];
-        let b = points[(ei + 1) % n];
-        (b.0 - a.0).hypot(b.1 - a.1)
-    };
-    let s_mid = acc[ei] + elen * et;
-    let s0 = (s_mid - width / 2.0).rem_euclid(total);
-    let s1 = (s_mid + width / 2.0).rem_euclid(total);
+    let t = ((c.0 - a.0) * (d.1 - c.1) - (c.1 - a.1) * (d.0 - c.0)) / den;
+    let u = ((c.0 - a.0) * (b.1 - a.1) - (c.1 - a.1) * (b.0 - a.0)) / den;
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some(t)
+}
 
-    // Punkt an Bogenlänge s (0..total).
-    let point_at = |s: f64| -> Pt {
-        let mut rest = s;
-        for i in 0..edges {
-            let a = points[i];
-            let b = points[(i + 1) % n];
-            let l = (b.0 - a.0).hypot(b.1 - a.1);
-            if rest <= l || i == edges - 1 {
-                let t = if l > 1e-12 {
-                    (rest / l).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-                return (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-            }
-            rest -= l;
-        }
-        points[0]
-    };
-    // Punkte von s_from vorwärts nach s_to (zyklisch), Original-Ecken dazwischen.
-    let collect = |s_from: f64, s_to: f64| -> Vec<Pt> {
-        let mut out = vec![point_at(s_from)];
-        let mut verts: Vec<(f64, Pt)> = Vec::new();
-        let in_range = |v: f64| {
-            if s_from <= s_to {
-                v > s_from && v < s_to
-            } else {
-                v > s_from || v < s_to
-            }
-        };
-        for i in 0..edges {
-            if in_range(acc[i]) {
-                verts.push((acc[i], points[i]));
-            }
-        }
-        verts.sort_by(|x, y| {
-            let dx = (x.0 - s_from).rem_euclid(total);
-            let dy = (y.0 - s_from).rem_euclid(total);
-            dx.partial_cmp(&dy).unwrap()
-        });
-        out.extend(verts.into_iter().map(|(_, p)| p));
-        out.push(point_at(s_to));
-        out
-    };
-
-    if closed {
-        Some(vec![(collect(s1, s0), false)])
-    } else {
-        let part1 = collect(0.0, s0);
-        let part2 = collect(s1, total - 1e-9);
-        let mut out = Vec::new();
-        if part1.len() >= 2 {
-            out.push((part1, false));
-        }
-        if part2.len() >= 2 {
-            out.push((part2, false));
-        }
-        (!out.is_empty()).then_some(out)
+/// Parameter t auf a–b, an denen die Strecke den Kreis (Mittelpunkt `c`,
+/// Radius `r`) schneidet.
+fn seg_circle_ts(a: Pt, b: Pt, c: Pt, r: f64) -> Vec<f64> {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    if len2 < 1e-12 {
+        return Vec::new();
     }
+    let (vx, vy) = (a.0 - c.0, a.1 - c.1);
+    let bq = 2.0 * (vx * dx + vy * dy);
+    let cq = vx * vx + vy * vy - r * r;
+    let disc = bq * bq - 4.0 * len2 * cq;
+    if disc < 0.0 {
+        return Vec::new();
+    }
+    let sq = disc.sqrt();
+    [(-bq - sq) / (2.0 * len2), (-bq + sq) / (2.0 * len2)]
+        .into_iter()
+        .filter(|&t| (0.0..=1.0).contains(&t))
+        .collect()
 }
 
 // ── AppState-Anbindung (Muster wie arrange.rs) ───────────────────────────────
@@ -441,44 +478,52 @@ impl AppState {
         self.dirty = true;
     }
 
-    /// Fügt einen Haltesteg an der Klickstelle ein: trifft der Punkt (Toleranz
-    /// `tol`) eine Vektor-Kontur, wird dort eine Lücke von `width` mm
-    /// geschnitten (das Teil bleibt beim Schneiden hängen). Ein Undo-Punkt.
-    /// Gibt `true` zurück, wenn ein Steg entstanden ist.
-    pub fn bridge_at(&mut self, x: f64, y: f64, tol: f64, width: f64) -> bool {
-        // Oberstes getroffenes Vektor-Shape suchen (spätere liegen oben).
-        let Some(idx) = (0..self.shapes.len()).rev().find(|&i| {
-            let s = &self.shapes[i];
-            !matches!(s.geo, Geo::Image { .. }) && s.hit_test(x, y, tol)
-        }) else {
-            return false;
-        };
-        let s = &self.shapes[idx];
-        let (mut pts, closed) = s.geo.outline_points();
-        if pts.len() < 2 {
-            return false;
-        }
-        let rotation = s.rotation;
-        let center = s.bbox().center();
-        if rotation != 0.0 {
-            for p in pts.iter_mut() {
-                *p = rotate_point(p.0, p.1, center.0, center.1, rotation);
+    /// Haltesteg: der Nutzer zieht eine Steg-Linie (`p0`→`p1`) der Breite
+    /// `width` über die Konturen (v3-Modell). Jede Kontur, die die Linie
+    /// kreuzt, wird dort **aufgeschnitten** (Lücke = Materialbrücke); die
+    /// verbleibenden Teilstücke ersetzen sie. Ein Undo-Punkt. `true`, wenn
+    /// mindestens eine Kontur getroffen wurde.
+    pub fn bridge_stroke(&mut self, p0: Pt, p1: Pt, width: f64) -> bool {
+        // Betroffene Shapes vorab bestimmen (Index + Teilstücke), dann anwenden.
+        type Cut = (usize, Vec<(Vec<Pt>, bool)>);
+        let mut cuts: Vec<Cut> = Vec::new();
+        for (i, s) in self.shapes.iter().enumerate() {
+            if matches!(s.geo, Geo::Image { .. }) {
+                continue;
+            }
+            let (mut pts, closed) = s.geo.outline_points();
+            if pts.len() < 2 {
+                continue;
+            }
+            if s.rotation != 0.0 {
+                let (cx, cy) = s.bbox().center();
+                for p in pts.iter_mut() {
+                    *p = rotate_point(p.0, p.1, cx, cy, s.rotation);
+                }
+            }
+            if let Some(pieces) = bridge_line(&pts, closed, p0, p1, width) {
+                cuts.push((i, pieces));
             }
         }
-        let Some(pieces) = insert_bridge(&pts, closed, (x, y), width) else {
+        if cuts.is_empty() {
             return false;
-        };
+        }
         self.push_undo();
-        let layer_id = self.shapes[idx].layer_id;
-        let group_id = self.shapes[idx].group_id;
-        self.shapes.remove(idx);
+        // Von hinten anwenden, damit die Indizes gültig bleiben.
+        cuts.sort_by_key(|c| std::cmp::Reverse(c.0));
         self.selected.clear();
-        for (piece, closed) in pieces {
-            let i = self.shapes.len();
-            let mut sh = crate::model::Shape::new(layer_id, Geo::Polyline { pts: piece, closed });
-            sh.group_id = group_id;
-            self.shapes.push(sh);
-            self.selected.push(i);
+        for (idx, pieces) in cuts {
+            let layer_id = self.shapes[idx].layer_id;
+            let group_id = self.shapes[idx].group_id;
+            self.shapes.remove(idx);
+            for (piece, closed) in pieces {
+                let i = self.shapes.len();
+                let mut sh =
+                    crate::model::Shape::new(layer_id, Geo::Polyline { pts: piece, closed });
+                sh.group_id = group_id;
+                self.shapes.push(sh);
+                self.selected.push(i);
+            }
         }
         self.dirty = true;
         true
@@ -687,6 +732,35 @@ mod tests {
         // Kein Punkt liegt mehr auf der spitzen Ecke (0,0). Der nächste
         // Bogenpunkt hat Abstand r·(√2−1)·√2 ≈ 0,828 zur alten Ecke.
         assert!(out.iter().all(|&(x, y)| (x - 0.0).hypot(y - 0.0) > 0.8));
+    }
+
+    #[test]
+    fn bridge_line_oeffnet_kontur_an_kreuzung() {
+        // 20mm-Quadrat, Steg-Linie waagerecht mitten durch (y=10), Breite 4.
+        let sq = rect(0.0, 0.0, 20.0, 20.0);
+        let pieces = bridge_line(&sq, true, (-5.0, 10.0), (25.0, 10.0), 4.0).unwrap();
+        // Es entstehen OFFENE Teilstücke (keine geschlossenen mehr).
+        assert!(
+            pieces.iter().all(|(_, closed)| !closed),
+            "Kontur wird geöffnet"
+        );
+        // Kein Punkt liegt im Steg-Band (|y-10| < 2 an den linken/rechten Kanten
+        // bei x=0 und x=20 — dort schneidet die Linie).
+        for (pts, _) in &pieces {
+            for &(x, y) in pts {
+                let on_side = (x <= 0.01 || x >= 19.99);
+                if on_side {
+                    assert!((y - 10.0).abs() >= 2.0 - 1e-6, "Lücke im Band bei y={y}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bridge_line_ohne_kreuzung_ist_none() {
+        let sq = rect(0.0, 0.0, 20.0, 20.0);
+        // Linie komplett außerhalb.
+        assert!(bridge_line(&sq, true, (30.0, 30.0), (40.0, 40.0), 4.0).is_none());
     }
 
     #[test]

@@ -23,10 +23,12 @@
     filletsel = [],
     onfilletcorner,
     bridgepick = false,
-    onbridgeat,
+    bridgewidth = 2,
+    onbridgestroke,
     ondragnode,
     onsplitnode,
     ondeletenode,
+    onbezierdone,
     laserHead,
     laserOrigin,
   }: {
@@ -62,11 +64,14 @@
     onfilletcorner?: (shape: number, corner: number) => void;
     // Haltesteg-Modus: Klick auf eine Kontur meldet die mm-Position.
     bridgepick?: boolean;
-    onbridgeat?: (x: number, y: number, tol: number) => void;
+    bridgewidth?: number;
+    onbridgestroke?: (x0: number, y0: number, x1: number, y1: number) => void;
     // Node-Editor: Knoten/Handle ziehen, Segment teilen, Knoten löschen.
     ondragnode?: (shape: number, node: number, part: "anchor" | "in" | "out", x: number, y: number, begin: boolean) => void;
     onsplitnode?: (shape: number, segStart: number) => void;
     ondeletenode?: (shape: number, node: number) => void;
+    // Fertiger Bézier-Pfad: Knoten (Anker+Tangenten in mm) + geschlossen.
+    onbezierdone?: (nodes: { p: [number, number]; h_in: [number, number] | null; h_out: [number, number] | null }[], closed: boolean) => void;
     // Laser-Positionen (mm) fuer Marker: Kopf und Benutzerursprung. Optional.
     laserHead?: [number, number] | null;
     laserOrigin?: [number, number] | null;
@@ -171,6 +176,7 @@
   type Drag =
     | { kind: "measure" }
     | { kind: "node"; shape: number; node: number; part: "anchor" | "in" | "out"; began: boolean }
+    | { kind: "bridge"; sx: number; sy: number; cx: number; cy: number }
     | { kind: "draw"; sx: number; sy: number; cx: number; cy: number }
     | { kind: "marquee"; sx: number; sy: number; cx: number; cy: number }
     | { kind: "move"; sx: number; sy: number; dx: number; dy: number }
@@ -192,6 +198,14 @@
   let polyCursor = $state<[number, number] | null>(null);
   // Cursor nah genug am ersten Punkt, um die Kontur zu schliessen? (>= 3 Punkte)
   let polyNearStart = $state(false);
+
+  // Bézier-Feder (Inkscape-Stil): Knoten mit Anker + Tangenten, live gezeichnet.
+  // Klick = Ecke, Klick+Ziehen = glatter Knoten (hOut folgt, hIn = Spiegel).
+  type BNode = { p: [number, number]; hIn: [number, number] | null; hOut: [number, number] | null };
+  let bez = $state<{ nodes: BNode[]; cursor: [number, number] | null; closed: boolean } | null>(null);
+  let bezDrag = $state<BNode | null>(null);
+  let bezDragStart: [number, number] | null = null;
+  let bezDragged = false;
   // Fangradius um den ersten Punkt in Bildschirm-Pixeln.
   const POLY_CLOSE_PX = 10;
 
@@ -324,8 +338,10 @@
     drawSelection(ctx);
     drawGesturePreview(ctx);
     drawPolyPreview(ctx);
+    drawBezierDraft(ctx);
     drawLaserMarkers(ctx);
     drawMeasure(ctx);
+    drawBridgePreview(ctx);
     drawFilletMarkers(ctx);
     drawNodes(ctx);
     drawRulers(ctx, w, h);
@@ -384,20 +400,98 @@
     ctx.fillRect(0, 0, RULER_PX, RULER_PX);
   }
 
+  // ---- Bézier-Feder: live gezeichnete Kurve + Tangenten während des Zeichnens
+  // Lokale Kubik-Flatten nur für die VORSCHAU (Wahrheit erzeugt der Core).
+  function cubic(p0: [number, number], p1: [number, number], p2: [number, number], p3: [number, number], out: [number, number][]) {
+    const N = 16;
+    for (let i = 1; i <= N; i++) {
+      const t = i / N, u = 1 - t;
+      out.push([
+        u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0],
+        u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1],
+      ]);
+    }
+  }
+  function bezFlatten(nodes: BNode[], closed: boolean): [number, number][] {
+    if (nodes.length < 2) return nodes.map((n) => n.p);
+    const out: [number, number][] = [nodes[0].p];
+    const seg = (a: BNode, b: BNode) => cubic(a.p, a.hOut ?? a.p, b.hIn ?? b.p, b.p, out);
+    for (let i = 0; i < nodes.length - 1; i++) seg(nodes[i], nodes[i + 1]);
+    if (closed) seg(nodes[nodes.length - 1], nodes[0]);
+    return out;
+  }
+  function drawBezierDraft(ctx: CanvasRenderingContext2D) {
+    if (tool !== "bezier" || !bez || bez.nodes.length === 0) return;
+    // Kurve inkl. Gummiband zum Cursor.
+    const nodes = bez.cursor
+      ? [...bez.nodes, { p: bez.cursor, hIn: null, hOut: null }]
+      : bez.nodes;
+    if (nodes.length >= 2) {
+      const flat = bezFlatten(nodes, false);
+      ctx.strokeStyle = "#ff5c62";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      flat.forEach((pt, i) => {
+        const [x, y] = toScreen(pt[0], pt[1]);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+    // Tangenten des zuletzt/aktiv gezogenen Knotens + Anker-Quadrate.
+    ctx.strokeStyle = "rgba(120,160,230,0.85)";
+    ctx.lineWidth = 1;
+    for (const nd of bez.nodes) {
+      const [ax, ay] = toScreen(nd.p[0], nd.p[1]);
+      for (const h of [nd.hIn, nd.hOut]) {
+        if (!h) continue;
+        const [hx, hy] = toScreen(h[0], h[1]);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(hx, hy); ctx.stroke();
+        ctx.beginPath(); ctx.arc(hx, hy, 3, 0, Math.PI * 2); ctx.fillStyle = "#7aa8ff"; ctx.fill();
+      }
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#4c82f7";
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(ax - 3, ay - 3, 6, 6);
+      ctx.strokeRect(ax - 3, ay - 3, 6, 6);
+    }
+  }
+
+  function bezCommit() {
+    if (bez && bez.nodes.length >= 2) {
+      onbezierdone?.(bez.nodes.map((n) => ({ p: n.p, h_in: n.hIn, h_out: n.hOut })), bez.closed);
+    }
+    bez = null;
+    bezDrag = null;
+    draw();
+  }
+
   // ---- Node-Editor: Knoten + Tangenten der selektierten Shapes ----------------
   const NODE_ACCENT = "#4c82f7";
+  // Editier-Knoten einer Shape: aus dem Bézier-Meta ODER (Fallback) aus den
+  // Konturpunkten der Polyline/Rect. So ist JEDE Vektor-Shape node-editierbar.
+  function editNodes(s: Shape): { p: [number, number]; hIn: [number, number] | null; hOut: [number, number] | null }[] {
+    if (s.bezier) return s.bezier.nodes.map((n) => ({ p: n.p, hIn: n.h_in ?? null, hOut: n.h_out ?? null }));
+    if ("Polyline" in s.geo) return s.geo.Polyline.pts.map((p) => ({ p: [p[0], p[1]] as [number, number], hIn: null, hOut: null }));
+    if ("Rect" in s.geo) {
+      const { x, y, w, h } = s.geo.Rect;
+      return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map((p) => ({ p: p as [number, number], hIn: null, hOut: null }));
+    }
+    return [];
+  }
   function drawNodes(ctx: CanvasRenderingContext2D) {
     if (tool !== "node") return;
     for (const idx of scene.selected) {
       const s = scene.shapes[idx];
-      const bp = s?.bezier;
-      if (!bp) continue;
+      if (!s) continue;
+      const nodes = editNodes(s);
+      if (nodes.length === 0) continue;
+      const bp = { nodes };
       // Tangenten-Linien zuerst (unter den Quadraten).
       ctx.strokeStyle = "rgba(120,160,230,0.8)";
       ctx.lineWidth = 1;
       for (const nd of bp.nodes) {
         const [ax, ay] = toScreen(nd.p[0], nd.p[1]);
-        for (const h of [nd.h_in, nd.h_out]) {
+        for (const h of [nd.hIn, nd.hOut]) {
           if (!h) continue;
           const [hx, hy] = toScreen(h[0], h[1]);
           ctx.beginPath();
@@ -427,12 +521,12 @@
     const tol = 7;
     for (const idx of scene.selected) {
       const s = scene.shapes[idx];
-      const bp = s?.bezier;
-      if (!bp) continue;
-      for (let n = bp.nodes.length - 1; n >= 0; n--) {
-        const nd = bp.nodes[n];
+      if (!s) continue;
+      const nodes = editNodes(s);
+      for (let n = nodes.length - 1; n >= 0; n--) {
+        const nd = nodes[n];
         // Handles zuerst (liegen "über" dem Anker beim Greifen).
-        for (const [part, h] of [["in", nd.h_in], ["out", nd.h_out]] as const) {
+        for (const [part, h] of [["in", nd.hIn], ["out", nd.hOut]] as const) {
           if (!h) continue;
           const [hx, hy] = toScreen(h[0], h[1]);
           if (Math.hypot(hx - px, hy - py) <= tol) return { shape: idx, node: n, part };
@@ -455,6 +549,36 @@
       draw();
     }
   });
+  function drawBridgePreview(ctx: CanvasRenderingContext2D) {
+    if (!drag || drag.kind !== "bridge") return;
+    const [ax, ay] = toScreen(drag.sx, drag.sy);
+    const [bx, by] = toScreen(drag.cx, drag.cy);
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    // Band-Breite in Bildschirmpixeln (Breite in mm × zoom).
+    const halfW = (bridgewidth / 2) * zoom;
+    const nx = (-dy / len) * halfW, ny = (dx / len) * halfW;
+    ctx.save();
+    ctx.fillStyle = "rgba(14,165,233,0.15)";
+    ctx.strokeStyle = "rgba(14,165,233,0.85)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(ax - nx, ay - ny);
+    ctx.lineTo(bx - nx, by - ny);
+    ctx.lineTo(bx + nx, by + ny);
+    ctx.lineTo(ax + nx, ay + ny);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "rgba(14,165,233,0.5)";
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawMeasure(ctx: CanvasRenderingContext2D) {
     if (!measureA || !measureB) return;
     const [ax, ay] = toScreen(measureA[0], measureA[1]);
@@ -525,7 +649,7 @@
   // Vorschau des laufenden Polylinien-Zugs: gesetzte Segmente, Gummiband zur
   // Maus und kleine Marker an den Stuetzpunkten.
   function drawPolyPreview(ctx: CanvasRenderingContext2D) {
-    if (tool !== "polyline" && tool !== "spline" && tool !== "bezier" || polyPts.length === 0) return;
+    if (tool !== "polyline" && tool !== "spline" || polyPts.length === 0) return;
     ctx.strokeStyle = "rgba(255,255,255,0.7)";
     ctx.lineWidth = 1.4;
     ctx.beginPath();
@@ -837,6 +961,28 @@
     if (ev.button !== 0) return;
     const [mx, my] = toMm(px, py);
 
+    if (tool === "bezier") {
+      const CLOSE = 10;
+      if (!bez) {
+        bez = { nodes: [{ p: [mx, my], hIn: null, hOut: null }], cursor: [mx, my], closed: false };
+        bezDrag = bez.nodes[0];
+      } else {
+        // Nahe Startknoten (>=2 Knoten) → schließen + fertig.
+        const [sx, sy] = toScreen(...bez.nodes[0].p);
+        if (bez.nodes.length >= 2 && Math.hypot(sx - px, sy - py) < CLOSE) {
+          bez.closed = true;
+          bezCommit();
+          return;
+        }
+        const nd: BNode = { p: [mx, my], hIn: null, hOut: null };
+        bez.nodes = [...bez.nodes, nd];
+        bezDrag = nd;
+      }
+      bezDragStart = [px, py];
+      bezDragged = false;
+      draw();
+      return;
+    }
     if (tool === "node") {
       const hit = hitNode(px, py);
       if (hit) {
@@ -848,7 +994,8 @@
       return;
     }
     if (bridgepick) {
-      onbridgeat?.(mx, my, 4 / zoom);
+      drag = { kind: "bridge", sx: mx, sy: my, cx: mx, cy: my };
+      draw();
       return;
     }
     if (filletpick) {
@@ -880,7 +1027,7 @@
       drag = { kind: "draw", sx: mx, sy: my, cx: mx, cy: my };
       return;
     }
-    if ((tool === "polyline" || tool === "spline" || tool === "bezier")) {
+    if ((tool === "polyline" || tool === "spline")) {
       // Klick auf den ersten Punkt (im Fangradius) schliesst die Kontur.
       if (nearFirstPoint(px, py)) {
         polyCommit(true);
@@ -920,8 +1067,22 @@
   function onPointerMove(ev: PointerEvent) {
     const [px, py] = localXY(ev);
     const [mx, my] = toMm(px, py);
+    // Bézier-Feder: Ziehen setzt symmetrische Tangenten am eben gesetzten Knoten.
+    if (tool === "bezier" && bez) {
+      if (bezDrag && bezDragStart) {
+        if (!bezDragged && Math.hypot(px - bezDragStart[0], py - bezDragStart[1]) > 3) bezDragged = true;
+        if (bezDragged) {
+          bezDrag.hOut = [mx, my];
+          bezDrag.hIn = [2 * bezDrag.p[0] - mx, 2 * bezDrag.p[1] - my];
+        }
+      } else {
+        bez.cursor = [mx, my]; // Gummiband
+      }
+      draw();
+      return;
+    }
     // Polylinien-Gummiband: Cursor verfolgen, auch ohne aktiven Drag.
-    if ((tool === "polyline" || tool === "spline" || tool === "bezier") && polyPts.length > 0) {
+    if ((tool === "polyline" || tool === "spline") && polyPts.length > 0) {
       polyCursor = [mx, my];
       polyNearStart = nearFirstPoint(px, py);
       draw();
@@ -931,6 +1092,10 @@
       viewTouched = true;
       panX = drag.ox + (px - drag.px);
       panY = drag.oy + (py - drag.py);
+    } else if (drag.kind === "bridge") {
+      drag.cx = mx;
+      drag.cy = my;
+      draw();
     } else if (drag.kind === "node") {
       ondragnode?.(drag.shape, drag.node, drag.part, mx, my, !drag.began);
       drag.began = true;
@@ -959,6 +1124,12 @@
   }
 
   async function onPointerUp(ev: PointerEvent) {
+    // Bézier-Feder: Tangenten-Drag beenden (kein drag-Objekt im Spiel).
+    if (tool === "bezier" && bezDrag) {
+      bezDrag = null;
+      bezDragStart = null;
+      return;
+    }
     if (!drag) return;
     const g = drag;
     // WICHTIG: Bei move/scale bleibt `drag` (und damit die Live-Vorschau an der
@@ -971,6 +1142,11 @@
     }
     if (g.kind === "node") {
       drag = null;
+      return;
+    }
+    if (g.kind === "bridge") {
+      drag = null;
+      onbridgestroke?.(g.sx, g.sy, g.cx, g.cy);
       return;
     }
     if (g.kind === "draw") {
@@ -1042,7 +1218,11 @@
   // entfernen wir, wenn er auf dem vorherigen liegt.
   function onDblClick(ev: MouseEvent) {
     // Im Polyline-Modus: Kontur abschliessen (wie bisher).
-    if ((tool === "polyline" || tool === "spline" || tool === "bezier") && polyPts.length >= 2) {
+    if (tool === "bezier" && bez && bez.nodes.length >= 2) {
+      bezCommit();
+      return;
+    }
+    if ((tool === "polyline" || tool === "spline") && polyPts.length >= 2) {
       const n = polyPts.length;
       const [ax, ay] = polyPts[n - 1];
       const [bx, by] = polyPts[n - 2];
@@ -1054,6 +1234,28 @@
     const [mx, my] = toMm(px, py);
     // Node-Modus: Doppelklick auf einen Knoten löscht ihn; auf ein Segment
     // (Kurve) fügt einen Knoten ein (Segment davor teilen).
+    if (tool === "bezier") {
+      const CLOSE = 10;
+      if (!bez) {
+        bez = { nodes: [{ p: [mx, my], hIn: null, hOut: null }], cursor: [mx, my], closed: false };
+        bezDrag = bez.nodes[0];
+      } else {
+        // Nahe Startknoten (>=2 Knoten) → schließen + fertig.
+        const [sx, sy] = toScreen(...bez.nodes[0].p);
+        if (bez.nodes.length >= 2 && Math.hypot(sx - px, sy - py) < CLOSE) {
+          bez.closed = true;
+          bezCommit();
+          return;
+        }
+        const nd: BNode = { p: [mx, my], hIn: null, hOut: null };
+        bez.nodes = [...bez.nodes, nd];
+        bezDrag = nd;
+      }
+      bezDragStart = [px, py];
+      bezDragged = false;
+      draw();
+      return;
+    }
     if (tool === "node") {
       const hit = hitNode(px, py);
       if (hit) {
@@ -1106,6 +1308,12 @@
   }
 
   function onKeydown(ev: KeyboardEvent) {
+    // Bézier-Feder: Enter schließt offen ab, Esc bricht ab.
+    if (bez) {
+      if (ev.key === "Enter") { ev.preventDefault(); bezCommit(); }
+      else if (ev.key === "Escape") { ev.preventDefault(); bez = null; bezDrag = null; draw(); }
+      return;
+    }
     if (polyPts.length === 0) return;
     if (ev.key === "Enter") {
       ev.preventDefault();
@@ -1149,10 +1357,24 @@
   $effect(() => () => { if (rafId) cancelAnimationFrame(rafId); });
   // Werkzeugwechsel bricht einen laufenden Polylinien-Zug ab.
   $effect(() => {
-    if (tool !== "polyline" && tool !== "spline" && tool !== "bezier" && polyPts.length > 0) polyCancel();
+    if (tool !== "polyline" && tool !== "spline" && polyPts.length > 0) polyCancel();
+    if (tool !== "bezier" && bez) { bez = null; bezDrag = null; }
   });
   $effect(() => {
     resize();
+    // Beim (Neu-)Mount die Ansicht sicher einpassen — auch wenn beim ersten
+    // resize() das Layout (Canvas-Größe/insets) noch nicht stand. Ohne das
+    // musste man nach jedem Tab-Wechsel Preview→Design erst zurückscrollen.
+    viewTouched = false;
+    requestAnimationFrame(() => {
+      resize();
+      requestAnimationFrame(() => {
+        if (!viewTouched) {
+          fitBed();
+          draw();
+        }
+      });
+    });
     const ro = new ResizeObserver(resize);
     if (wrapEl) ro.observe(wrapEl);
     return () => ro.disconnect();

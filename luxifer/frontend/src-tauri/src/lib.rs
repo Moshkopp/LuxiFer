@@ -653,6 +653,18 @@ fn add_bezier(data: State<AppData>, pts: Vec<(f64, f64)>, closed: bool) -> Scene
     scene_with(&s, &data)
 }
 
+/// Fügt eine Bézier-Feder aus fertigen Knoten ein (Inkscape-Feder-Stil).
+#[tauri::command]
+fn add_bezier_nodes(
+    data: State<AppData>,
+    nodes: Vec<luxifer_core::bezier::BezierNode>,
+    closed: bool,
+) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.add_bezier_nodes(nodes, closed);
+    scene_with(&s, &data)
+}
+
 /// Node-Editor: Anker/Handle eines Bézier-Knotens ziehen. `part` = "anchor" |
 /// "in" | "out". `begin` = true beim Drag-Start (setzt den Undo-Punkt).
 #[tauri::command]
@@ -786,12 +798,13 @@ fn offset_op(data: State<AppData>, dist: f64) -> Scene {
     scene_with(&s, &data)
 }
 
-/// Haltesteg an der Klickstelle (x,y in mm): Lücke von `width` mm in die
-/// getroffene Kontur schneiden.
+/// Haltesteg: Steg-Linie (x0,y0)→(x1,y1) in mm der Breite `width` über die
+/// Konturen ziehen — wo sie kreuzt, wird aufgeschnitten (Materialbrücke).
 #[tauri::command]
-fn bridge_op(data: State<AppData>, x: f64, y: f64, tol: f64, width: f64) -> Scene {
+#[allow(clippy::too_many_arguments)]
+fn bridge_op(data: State<AppData>, x0: f64, y0: f64, x1: f64, y1: f64, width: f64) -> Scene {
     let mut s = data.state.lock().unwrap();
-    s.bridge_at(x, y, tol, width);
+    s.bridge_stroke((x0, y0), (x1, y1), width);
     scene_with(&s, &data)
 }
 
@@ -1610,6 +1623,7 @@ pub fn run() {
             pattern_fill_op,
             add_spline,
             add_bezier,
+            add_bezier_nodes,
             drag_node,
             split_node,
             delete_node,

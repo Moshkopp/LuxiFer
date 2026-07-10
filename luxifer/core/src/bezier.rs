@@ -214,6 +214,22 @@ impl AppState {
         idx
     }
 
+    /// Fügt eine Bézier-Feder aus **fertigen Knoten** (Inkscape-Feder-Stil) ein.
+    /// Ein Undo-Punkt.
+    pub fn add_bezier_nodes(&mut self, nodes: Vec<BezierNode>, closed: bool) -> usize {
+        let bp = BezierPath { nodes, closed };
+        let flat = bp.flatten();
+        self.push_undo();
+        let layer_id = self.layer_for_new_shape();
+        let mut sh = Shape::new(layer_id, Geo::Polyline { pts: flat, closed });
+        sh.bezier = Some(bp);
+        self.shapes.push(sh);
+        let idx = self.shapes.len() - 1;
+        self.selected = vec![idx];
+        self.pending_color = None;
+        idx
+    }
+
     /// Node-Editor: verschiebt Anker/Handle des Knotens `node` von Shape `idx`
     /// an die neue Weltposition und schreibt die Polyline neu. Ein Undo-Punkt
     /// pro Geste — der Aufrufer ruft `push_undo` einmal beim Drag-Beginn.

@@ -303,9 +303,10 @@ export type BoolOpKind = "union" | "intersect" | "diff";
 export const booleanOp = (op: BoolOpKind) => invoke<Scene>("boolean_op", { op });
 export const offsetOp = (dist: number) => invoke<Scene>("offset_op", { dist });
 export const filletOp = (radius: number) => invoke<Scene>("fillet_op", { radius });
-// Haltesteg: Lücke (width mm) in die Kontur an der Klickstelle schneiden.
-export const bridgeOp = (x: number, y: number, tol: number, width: number) =>
-  invoke<Scene>("bridge_op", { x, y, tol, width });
+// Haltesteg: Steg-Linie (Breite width mm) über die Konturen ziehen; wo sie
+// kreuzt, wird aufgeschnitten (Materialbrücke bleibt stehen).
+export const bridgeOp = (x0: number, y0: number, x1: number, y1: number, width: number) =>
+  invoke<Scene>("bridge_op", { x0, y0, x1, y1, width });
 // Nur die angeklickten Ecken einer Shape verrunden (Punkt-Indizes der Kontur).
 export const filletCornersOp = (shapeIndex: number, corners: number[], radius: number) =>
   invoke<Scene>("fillet_corners_op", { shapeIndex, corners, radius });
@@ -337,6 +338,11 @@ export const addSpline = (pts: [number, number][], closed: boolean) =>
 // Bézier-Feder: glatte Kurve durch die Punkte, mit editierbaren Knoten.
 export const addBezier = (pts: [number, number][], closed: boolean) =>
   invoke<Scene>("add_bezier", { pts, closed });
+// Bézier-Feder aus fertigen Knoten (Inkscape-Stil: Klick=Ecke, Ziehen=Kurve).
+export const addBezierNodes = (
+  nodes: { p: [number, number]; h_in: [number, number] | null; h_out: [number, number] | null }[],
+  closed: boolean,
+) => invoke<Scene>("add_bezier_nodes", { nodes, closed });
 // Node-Editor: Anker/Handle ziehen (part: "anchor"|"in"|"out", begin=Drag-Start).
 export const dragNode = (
   shapeIndex: number, node: number, part: "anchor" | "in" | "out",

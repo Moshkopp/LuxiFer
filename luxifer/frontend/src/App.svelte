@@ -368,8 +368,8 @@
   // Haltesteg-Modus: Klick auf Konturen schneidet Lücken.
   let bridgePick = $state(false);
   let bridgeWidth = $state(2.0);
-  async function doBridgeAt(x: number, y: number, tol: number) {
-    scene = await core.bridgeOp(x, y, tol, bridgeWidth);
+  async function doBridgeStroke(x0: number, y0: number, x1: number, y1: number) {
+    scene = await core.bridgeOp(x0, y0, x1, y1, bridgeWidth);
   }
   let filletRadius = $state(2.0);
   let filletCorners = $state<string[]>([]);
@@ -763,10 +763,12 @@
       filletsel={filletCorners}
       onfilletcorner={toggleFilletCorner}
       bridgepick={bridgePick}
-      onbridgeat={doBridgeAt}
+      bridgewidth={bridgeWidth}
+      onbridgestroke={doBridgeStroke}
       ondragnode={async (sh, n, part, x, y, begin) => (scene = await core.dragNode(sh, n, part, x, y, begin))}
       onsplitnode={async (sh, seg) => (scene = await core.splitNode(sh, seg))}
       ondeletenode={async (sh, n) => (scene = await core.deleteNode(sh, n))}
+      onbezierdone={async (nodes, closed) => (scene = await core.addBezierNodes(nodes, closed))}
     />
   {/if}
 
@@ -921,7 +923,7 @@
   <!-- Haltesteg-Modus: schwebende Leiste -->
   {#if bridgePick}
     <div class="fillet-bar glass">
-      <span>Haltesteg: Kontur anklicken</span>
+      <span>Haltesteg: Linie über die Kontur ziehen</span>
       <label>Breite <input type="number" step="0.5" min="0.2" bind:value={bridgeWidth} /> mm</label>
       <button class="mini" onclick={() => (bridgePick = false)}>Fertig</button>
     </div>
