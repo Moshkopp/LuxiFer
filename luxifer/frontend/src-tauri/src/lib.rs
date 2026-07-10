@@ -644,6 +644,60 @@ fn update_text(
     Ok(scene_with(&s, &data))
 }
 
+/// Fügt eine Bézier-Feder aus den geklickten Punkten ein (glatte Kurve durch
+/// alle Punkte, editierbare Knoten).
+#[tauri::command]
+fn add_bezier(data: State<AppData>, pts: Vec<(f64, f64)>, closed: bool) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.add_bezier(pts, closed);
+    scene_with(&s, &data)
+}
+
+/// Node-Editor: Anker/Handle eines Bézier-Knotens ziehen. `part` = "anchor" |
+/// "in" | "out". `begin` = true beim Drag-Start (setzt den Undo-Punkt).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn drag_node(
+    data: State<AppData>,
+    shape_index: usize,
+    node: usize,
+    part: String,
+    x: f64,
+    y: f64,
+    begin: bool,
+) -> Scene {
+    use luxifer_core::bezier::NodePart;
+    let np = match part.as_str() {
+        "in" => NodePart::HandleIn,
+        "out" => NodePart::HandleOut,
+        _ => NodePart::Anchor,
+    };
+    let mut s = data.state.lock().unwrap();
+    if begin {
+        s.push_undo();
+    }
+    s.drag_node(shape_index, node, np, (x, y));
+    scene_with(&s, &data)
+}
+
+/// Teilt das Segment ab Knoten `seg_start` (fügt einen Mittelknoten ein).
+#[tauri::command]
+fn split_node(data: State<AppData>, shape_index: usize, seg_start: usize) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.push_undo();
+    s.split_node_segment(shape_index, seg_start);
+    scene_with(&s, &data)
+}
+
+/// Löscht einen Bézier-Knoten.
+#[tauri::command]
+fn delete_node(data: State<AppData>, shape_index: usize, node: usize) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.push_undo();
+    s.delete_node(shape_index, node);
+    scene_with(&s, &data)
+}
+
 /// Vektorisiert ein Bild-Shape (Trace): Konturen des Motivs als geschlossene
 /// Polylinien in mm, auf dem aktiven Zeichen-Layer (ein Undo-Punkt). Die
 /// Tonwert-LUT des Bildes (Helligkeit/Kontrast/Gamma) wirkt vor der Schwelle.
@@ -1555,6 +1609,10 @@ pub fn run() {
             text_preview,
             pattern_fill_op,
             add_spline,
+            add_bezier,
+            drag_node,
+            split_node,
+            delete_node,
             upload_font,
             offset_op,
             fillet_op,

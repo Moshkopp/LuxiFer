@@ -65,6 +65,17 @@ export interface TextMeta {
   size_mm: number;
 }
 
+// Ein Bézier-Knoten: Anker + optionale Tangenten (absolute mm).
+export interface BezierNode {
+  p: [number, number];
+  h_in?: [number, number] | null;
+  h_out?: [number, number] | null;
+}
+export interface BezierPath {
+  nodes: BezierNode[];
+  closed: boolean;
+}
+
 export interface Shape {
   layer_id: number;
   geo: Geo;
@@ -73,6 +84,7 @@ export interface Shape {
   speed_override?: number | null;
   power_override?: number | null;
   text_meta?: TextMeta | null;
+  bezier?: BezierPath | null;
 }
 
 // Metadaten des offenen Projekts (oder null, wenn namenlos).
@@ -322,6 +334,18 @@ export const patternFillOp = (
 // Spline: Catmull-Rom-Kurve durch die geklickten Punkte (Glättung im Core).
 export const addSpline = (pts: [number, number][], closed: boolean) =>
   invoke<Scene>("add_spline", { pts, closed });
+// Bézier-Feder: glatte Kurve durch die Punkte, mit editierbaren Knoten.
+export const addBezier = (pts: [number, number][], closed: boolean) =>
+  invoke<Scene>("add_bezier", { pts, closed });
+// Node-Editor: Anker/Handle ziehen (part: "anchor"|"in"|"out", begin=Drag-Start).
+export const dragNode = (
+  shapeIndex: number, node: number, part: "anchor" | "in" | "out",
+  x: number, y: number, begin: boolean,
+) => invoke<Scene>("drag_node", { shapeIndex, node, part, x, y, begin });
+export const splitNode = (shapeIndex: number, segStart: number) =>
+  invoke<Scene>("split_node", { shapeIndex, segStart });
+export const deleteNode = (shapeIndex: number, node: number) =>
+  invoke<Scene>("delete_node", { shapeIndex, node });
 
 // Font in den App-Fonts-Ordner installieren (TTF/OTF-Bytes).
 export const uploadFont = (bytes: number[], name: string) =>

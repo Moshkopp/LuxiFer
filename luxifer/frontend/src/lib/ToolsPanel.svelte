@@ -6,7 +6,7 @@
   // hier — die liegen im Header bzw. auf der Entf-Taste.
   import Icon, { type IconName } from "./Icon.svelte";
 
-  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure";
+  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure" | "bezier" | "node";
   // Sofort-Befehle auf der Auswahl (kein Zeichenmodus), z. B. Spiegeln.
   type Action = "mirror_h" | "mirror_v" | "text" | "boolean" | "fillet" | "offset" | "pattern-fill" | "coaster_rect" | "coaster_circle" | "bridge";
   let {
@@ -44,9 +44,9 @@
       { name: "line", icon: "line", tip: "Linie", active: true },
       { name: "polyline", icon: "polyline", tip: "Polylinie (Klicks setzen Punkte, Doppelklick/Enter schließt ab)", active: true },
       { name: "spline", icon: "spline", tip: "Spline (Klicks setzen Punkte, glatte Kurve hindurch)", active: true },
-      { name: "bezier", icon: "bezier", tip: "Bézier-Feder" },
+      { name: "bezier", icon: "bezier", tip: "Bézier-Feder (Klicks setzen Punkte, glatte Kurve; editierbar)", active: true },
       { name: "text", icon: "text", tip: "Text einfügen (Text→Pfad)", action: true },
-      { name: "node", icon: "node", tip: "Knoten bearbeiten" },
+      { name: "node", icon: "node", tip: "Knoten bearbeiten (Punkte + Tangenten ziehen)", active: true },
     ],
     // 3: Operationen & Hilfsmittel
     [

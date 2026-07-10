@@ -31,7 +31,7 @@
   } from "./lib/core";
   import { applyTheme } from "./lib/theme";
 
-  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure";
+  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure" | "bezier" | "node";
 
   let scene = $state<Scene | null>(null);
   let tool = $state<Tool>("select");
@@ -206,11 +206,13 @@
     scene = await core.addLine(x1, y1, x2, y2);
   }
   async function ondrawpolyline(pts: [number, number][], closed: boolean) {
-    // Spline nutzt denselben Zeichenfluss; die Glättung passiert im Core.
+    // Spline/Bézier nutzen denselben Zeichenfluss; Glättung/Knoten im Core.
     scene =
-      tool === "spline"
-        ? await core.addSpline(pts, closed)
-        : await core.addPolyline(pts, closed);
+      tool === "bezier"
+        ? await core.addBezier(pts, closed)
+        : tool === "spline"
+          ? await core.addSpline(pts, closed)
+          : await core.addPolyline(pts, closed);
   }
   async function ondrawpolygon(shape: string, cx: number, cy: number, r: number, rot: number) {
     scene = await core.addPolygon(shape, cx, cy, r, rot);
@@ -762,6 +764,9 @@
       onfilletcorner={toggleFilletCorner}
       bridgepick={bridgePick}
       onbridgeat={doBridgeAt}
+      ondragnode={async (sh, n, part, x, y, begin) => (scene = await core.dragNode(sh, n, part, x, y, begin))}
+      onsplitnode={async (sh, seg) => (scene = await core.splitNode(sh, seg))}
+      ondeletenode={async (sh, n) => (scene = await core.deleteNode(sh, n))}
     />
   {/if}
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { rgb, polygonPreview, imageRender, type Scene, type Shape, type ImageParams } from "./core";
 
-  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure";
+  type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure" | "bezier" | "node";
 
   let {
     scene,
@@ -24,6 +24,9 @@
     onfilletcorner,
     bridgepick = false,
     onbridgeat,
+    ondragnode,
+    onsplitnode,
+    ondeletenode,
     laserHead,
     laserOrigin,
   }: {
@@ -60,6 +63,10 @@
     // Haltesteg-Modus: Klick auf eine Kontur meldet die mm-Position.
     bridgepick?: boolean;
     onbridgeat?: (x: number, y: number, tol: number) => void;
+    // Node-Editor: Knoten/Handle ziehen, Segment teilen, Knoten löschen.
+    ondragnode?: (shape: number, node: number, part: "anchor" | "in" | "out", x: number, y: number, begin: boolean) => void;
+    onsplitnode?: (shape: number, segStart: number) => void;
+    ondeletenode?: (shape: number, node: number) => void;
     // Laser-Positionen (mm) fuer Marker: Kopf und Benutzerursprung. Optional.
     laserHead?: [number, number] | null;
     laserOrigin?: [number, number] | null;
@@ -163,6 +170,7 @@
   // ---- Interaktions-Zustand (lokal, nur während einer Geste) ----------------
   type Drag =
     | { kind: "measure" }
+    | { kind: "node"; shape: number; node: number; part: "anchor" | "in" | "out"; began: boolean }
     | { kind: "draw"; sx: number; sy: number; cx: number; cy: number }
     | { kind: "marquee"; sx: number; sy: number; cx: number; cy: number }
     | { kind: "move"; sx: number; sy: number; dx: number; dy: number }
@@ -319,6 +327,7 @@
     drawLaserMarkers(ctx);
     drawMeasure(ctx);
     drawFilletMarkers(ctx);
+    drawNodes(ctx);
     drawRulers(ctx, w, h);
   }
 
@@ -373,6 +382,66 @@
     // Ecke abdecken.
     ctx.fillStyle = "rgba(20, 21, 24, 1)";
     ctx.fillRect(0, 0, RULER_PX, RULER_PX);
+  }
+
+  // ---- Node-Editor: Knoten + Tangenten der selektierten Shapes ----------------
+  const NODE_ACCENT = "#4c82f7";
+  function drawNodes(ctx: CanvasRenderingContext2D) {
+    if (tool !== "node") return;
+    for (const idx of scene.selected) {
+      const s = scene.shapes[idx];
+      const bp = s?.bezier;
+      if (!bp) continue;
+      // Tangenten-Linien zuerst (unter den Quadraten).
+      ctx.strokeStyle = "rgba(120,160,230,0.8)";
+      ctx.lineWidth = 1;
+      for (const nd of bp.nodes) {
+        const [ax, ay] = toScreen(nd.p[0], nd.p[1]);
+        for (const h of [nd.h_in, nd.h_out]) {
+          if (!h) continue;
+          const [hx, hy] = toScreen(h[0], h[1]);
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(hx, hy);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = "#7aa8ff";
+          ctx.fill();
+        }
+      }
+      // Anker-Quadrate (erster Knoten rot, wie v3).
+      bp.nodes.forEach((nd, i) => {
+        const [ax, ay] = toScreen(nd.p[0], nd.p[1]);
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = i === 0 ? "#ff5c62" : NODE_ACCENT;
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(ax - 3.5, ay - 3.5, 7, 7);
+        ctx.strokeRect(ax - 3.5, ay - 3.5, 7, 7);
+      });
+    }
+  }
+
+  // Trifft ein Bildschirmpunkt einen Knoten/Handle? Liefert {shape,node,part}.
+  function hitNode(px: number, py: number): { shape: number; node: number; part: "anchor" | "in" | "out" } | null {
+    const tol = 7;
+    for (const idx of scene.selected) {
+      const s = scene.shapes[idx];
+      const bp = s?.bezier;
+      if (!bp) continue;
+      for (let n = bp.nodes.length - 1; n >= 0; n--) {
+        const nd = bp.nodes[n];
+        // Handles zuerst (liegen "über" dem Anker beim Greifen).
+        for (const [part, h] of [["in", nd.h_in], ["out", nd.h_out]] as const) {
+          if (!h) continue;
+          const [hx, hy] = toScreen(h[0], h[1]);
+          if (Math.hypot(hx - px, hy - py) <= tol) return { shape: idx, node: n, part };
+        }
+        const [ax, ay] = toScreen(nd.p[0], nd.p[1]);
+        if (Math.hypot(ax - px, ay - py) <= tol) return { shape: idx, node: n, part: "anchor" };
+      }
+    }
+    return null;
   }
 
   // ---- Messen-Werkzeug (reine Anzeige, keine Wahrheit) ----------------------
@@ -456,7 +525,7 @@
   // Vorschau des laufenden Polylinien-Zugs: gesetzte Segmente, Gummiband zur
   // Maus und kleine Marker an den Stuetzpunkten.
   function drawPolyPreview(ctx: CanvasRenderingContext2D) {
-    if (tool !== "polyline" && tool !== "spline" || polyPts.length === 0) return;
+    if (tool !== "polyline" && tool !== "spline" && tool !== "bezier" || polyPts.length === 0) return;
     ctx.strokeStyle = "rgba(255,255,255,0.7)";
     ctx.lineWidth = 1.4;
     ctx.beginPath();
@@ -768,6 +837,16 @@
     if (ev.button !== 0) return;
     const [mx, my] = toMm(px, py);
 
+    if (tool === "node") {
+      const hit = hitNode(px, py);
+      if (hit) {
+        drag = { kind: "node", ...hit, began: false };
+      } else {
+        // Kein Knoten getroffen → Shape unter dem Cursor selektieren (zum Editieren).
+        onselectat(mx, my, ev.shiftKey || ev.ctrlKey);
+      }
+      return;
+    }
     if (bridgepick) {
       onbridgeat?.(mx, my, 4 / zoom);
       return;
@@ -801,7 +880,7 @@
       drag = { kind: "draw", sx: mx, sy: my, cx: mx, cy: my };
       return;
     }
-    if ((tool === "polyline" || tool === "spline")) {
+    if ((tool === "polyline" || tool === "spline" || tool === "bezier")) {
       // Klick auf den ersten Punkt (im Fangradius) schliesst die Kontur.
       if (nearFirstPoint(px, py)) {
         polyCommit(true);
@@ -842,7 +921,7 @@
     const [px, py] = localXY(ev);
     const [mx, my] = toMm(px, py);
     // Polylinien-Gummiband: Cursor verfolgen, auch ohne aktiven Drag.
-    if ((tool === "polyline" || tool === "spline") && polyPts.length > 0) {
+    if ((tool === "polyline" || tool === "spline" || tool === "bezier") && polyPts.length > 0) {
       polyCursor = [mx, my];
       polyNearStart = nearFirstPoint(px, py);
       draw();
@@ -852,9 +931,9 @@
       viewTouched = true;
       panX = drag.ox + (px - drag.px);
       panY = drag.oy + (py - drag.py);
-    } else if (drag.kind === "measure") {
-      measureB = [mx, my];
-      draw();
+    } else if (drag.kind === "node") {
+      ondragnode?.(drag.shape, drag.node, drag.part, mx, my, !drag.began);
+      drag.began = true;
     } else if (drag.kind === "draw" || drag.kind === "marquee") {
       drag = { ...drag, cx: mx, cy: my };
     } else if (drag.kind === "move") {
@@ -888,6 +967,10 @@
     // weil `drag=null` sofort greift, die neue Scene aber erst async ankommt.
     if (g.kind === "measure") {
       drag = null; // Messung bleibt sichtbar, bis neu gemessen/Tool gewechselt
+      return;
+    }
+    if (g.kind === "node") {
+      drag = null;
       return;
     }
     if (g.kind === "draw") {
@@ -959,7 +1042,7 @@
   // entfernen wir, wenn er auf dem vorherigen liegt.
   function onDblClick(ev: MouseEvent) {
     // Im Polyline-Modus: Kontur abschliessen (wie bisher).
-    if ((tool === "polyline" || tool === "spline") && polyPts.length >= 2) {
+    if ((tool === "polyline" || tool === "spline" || tool === "bezier") && polyPts.length >= 2) {
       const n = polyPts.length;
       const [ax, ay] = polyPts[n - 1];
       const [bx, by] = polyPts[n - 2];
@@ -967,10 +1050,34 @@
       polyCommit(false);
       return;
     }
-    // Sonst: Doppelklick auf ein Bild-Shape oeffnet den Bild-Editor,
-    // auf einen Text-Block den Text-Editor.
     const [px, py] = localXY(ev);
     const [mx, my] = toMm(px, py);
+    // Node-Modus: Doppelklick auf einen Knoten löscht ihn; auf ein Segment
+    // (Kurve) fügt einen Knoten ein (Segment davor teilen).
+    if (tool === "node") {
+      const hit = hitNode(px, py);
+      if (hit) {
+        ondeletenode?.(hit.shape, hit.node);
+        return;
+      }
+      // Nächstes Kurvensegment finden: Knoten, dessen geflatteter Abschnitt
+      // dem Klick am nächsten liegt. Vereinfachung: nächster Knoten davor.
+      for (const idx of scene.selected) {
+        const bp = scene.shapes[idx]?.bezier;
+        if (!bp) continue;
+        let best = -1, bestD = 12;
+        for (let i = 0; i < bp.nodes.length; i++) {
+          const [ax, ay] = toScreen(bp.nodes[i].p[0], bp.nodes[i].p[1]);
+          const d = Math.hypot(ax - px, ay - py);
+          if (d < bestD) { bestD = d; best = i; }
+        }
+        // Segment ab dem nächstgelegenen Knoten teilen.
+        if (best >= 0) { onsplitnode?.(idx, best); return; }
+      }
+      return;
+    }
+    // Sonst: Doppelklick auf ein Bild-Shape oeffnet den Bild-Editor,
+    // auf einen Text-Block den Text-Editor.
     // Oberstes getroffenes Shape (spaetere liegen oben).
     for (let i = scene.shapes.length - 1; i >= 0; i--) {
       const s = scene.shapes[i];
@@ -1042,7 +1149,7 @@
   $effect(() => () => { if (rafId) cancelAnimationFrame(rafId); });
   // Werkzeugwechsel bricht einen laufenden Polylinien-Zug ab.
   $effect(() => {
-    if (tool !== "polyline" && tool !== "spline" && polyPts.length > 0) polyCancel();
+    if (tool !== "polyline" && tool !== "spline" && tool !== "bezier" && polyPts.length > 0) polyCancel();
   });
   $effect(() => {
     resize();

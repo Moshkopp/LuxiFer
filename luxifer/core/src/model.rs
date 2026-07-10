@@ -188,6 +188,11 @@ pub struct Shape {
     /// Text-Quelldaten (nur am ersten Shape eines Text-Blocks).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_meta: Option<TextMeta>,
+    /// Bézier-Knoten (nur bei Polyline-Shapes, die aus einem editierbaren
+    /// Bézier-Pfad stammen). Die Polyline hält die geflatteten Punkte; hier
+    /// liegen die Knoten für den Node-Editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bezier: Option<crate::bezier::BezierPath>,
 }
 
 impl Shape {
@@ -201,6 +206,7 @@ impl Shape {
             speed_override: None,
             power_override: None,
             text_meta: None,
+            bezier: None,
         }
     }
 
