@@ -506,14 +506,27 @@ fn move_layer(data: State<AppData>, from: usize, to: usize) -> Scene {
     scene_with(&s, &data)
 }
 
+/// Baut den `JobPlan` aus Shapes + Layern **mit Asset-Auflösung**: Bild-Assets
+/// werden aus dem Store gelesen und zu Graustufen-Pixeln dekodiert, damit
+/// Image-Layer gerastert werden (raster.rs). Der Core selbst fasst die Platte
+/// nicht an — diese Closure liefert ihm die Pixel. Dekodierfehler/fehlende
+/// Assets ⇒ Layer wird still übersprungen (der Job bleibt baubar).
+fn plan_with_assets(shapes: &[Shape], layers: &[Layer]) -> JobPlan {
+    use luxifer_core::load_asset_luma;
+    let dir = assets_dir();
+    JobPlan::from_shapes_with_assets(shapes, layers, |asset| {
+        let (pixels, w, h) = load_asset_luma(&dir, &asset.to_string()).ok()?;
+        Some((std::borrow::Cow::Owned(pixels), w as usize, h as usize))
+    })
+}
+
 /// Leitet aus dem aktuellen Zustand die Laser-Vorschau ab (ADR 0005): die zu
 /// fahrenden Segmente in Ausführungsreihenfolge inkl. Verfahrwege. Reine
 /// Ableitung des `JobPlan` — kein Undo, keine Mutation.
 #[tauri::command]
 fn job_preview(data: State<AppData>) -> PreviewDto {
-    use luxifer_core::JobPlan;
     let s = data.state.lock().unwrap();
-    let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
+    let plan = plan_with_assets(&s.shapes, &s.layers);
     let preview = JobPreview::from_plan(&plan);
     PreviewDto::from_preview(&preview)
 }
@@ -623,7 +636,7 @@ fn laser_run_action(
     let job_action = action_from_key(&action)?;
     let (plan, layers) = {
         let s = data.state.lock().unwrap();
-        (JobPlan::from_shapes(&s.shapes, &s.layers), s.layers.clone())
+        (plan_with_assets(&s.shapes, &s.layers), s.layers.clone())
     };
     let jp = params.to_params();
     // Aktion, die eine Verbindung braucht, verbindet vorher automatisch.
@@ -643,7 +656,7 @@ fn laser_run_action(
 fn laser_export(data: State<AppData>, params: JobParamsDto) -> Result<ExportDto, String> {
     let (plan, layers) = {
         let s = data.state.lock().unwrap();
-        (JobPlan::from_shapes(&s.shapes, &s.layers), s.layers.clone())
+        (plan_with_assets(&s.shapes, &s.layers), s.layers.clone())
     };
     let jp = params.to_params();
     data.with_active_driver(|d| {
