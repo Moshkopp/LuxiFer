@@ -428,6 +428,18 @@ fn distribute(data: State<AppData>, kind: String) -> Scene {
     scene_with(&s, &data)
 }
 
+/// Importiert eine Vektordatei (SVG/DXF): Konturen als Polylinien auf dem
+/// aktiven Layer (ein Undo-Punkt). Die Endung des Dateinamens entscheidet.
+#[tauri::command]
+fn import_vector_file(data: State<AppData>, bytes: Vec<u8>, name: String) -> Result<Scene, String> {
+    let ext = name.rsplit('.').next().unwrap_or("");
+    let contours =
+        luxifer_core::import::import_vector(&bytes, ext).map_err(|e| e.to_string())?;
+    let mut s = data.state.lock().unwrap();
+    s.add_polylines(contours);
+    Ok(scene_with(&s, &data))
+}
+
 /// Ein installierter Font (fürs Text-Werkzeug).
 #[derive(Serialize)]
 struct FontInfo {
@@ -1355,6 +1367,7 @@ pub fn run() {
             boolean_op,
             trace_image,
             list_fonts,
+            import_vector_file,
             add_text,
             offset_op,
             fillet_op,

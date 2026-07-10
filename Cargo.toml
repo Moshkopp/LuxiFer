@@ -41,3 +41,7 @@ i_overlay = "7"
 cavalier_contours = "0.7"
 # Font-Parsing für Text→Pfad (Glyph-Outlines); dieselbe Wahl wie v3.
 ttf-parser = "0.25"
+# Vektor-Import: SVG (usvg flacht Transformationen/Formen zu Pfaden ab)
+# und DXF — dieselben Bibliothekswahlen wie v3.
+usvg = { version = "0.47", default-features = false }
+dxf = "0.6"

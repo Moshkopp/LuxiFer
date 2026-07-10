@@ -113,6 +113,9 @@ export const addPolyline = (pts: [number, number][], closed: boolean) =>
 // Importiert ein Bild aus rohen Datei-Bytes (Frontend liest sie per <input file>).
 export const importImageFile = (bytes: number[], name: string) =>
   invoke<Scene>("import_image_file", { bytes, name });
+// Vektor-Import (SVG/DXF): Konturen als Polylinien auf dem aktiven Layer.
+export const importVectorFile = (bytes: number[], name: string) =>
+  invoke<Scene>("import_vector_file", { bytes, name });
 
 // Rendert ein Asset mit Parametern als PNG-Data-URL (Canvas/Editor-Vorschau).
 export const imageRender = (asset: string, params: ImageParams, invert: boolean) =>

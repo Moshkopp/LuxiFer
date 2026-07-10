@@ -13,3 +13,5 @@ image = { workspace = true }
 i_overlay = { workspace = true }
 cavalier_contours = { workspace = true }
 ttf-parser = { workspace = true }
+usvg = { workspace = true }
+dxf = { workspace = true }

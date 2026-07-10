@@ -231,9 +231,9 @@
     scene = await core.scaleSelected(start, target);
   }
 
-  // Bild importieren (ADR 0004): Datei-Bytes aus dem <input> lesen und an den
-  // Core geben. Der Core legt die Graustufen-Kopie im Store ab und fuegt das
-  // Bild-Objekt auf einem eigenen Image-Layer ein.
+  // Datei importieren: Bilder (ADR 0004) gehen in den Asset-Store, Vektor-
+  // Dateien (SVG/DXF) werden zu Polylinien auf dem aktiven Layer. Die Endung
+  // entscheidet — EIN Import-Knopf für alles.
   async function onImportFile(ev: Event) {
     const input = ev.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -241,7 +241,11 @@
     if (!file) return;
     try {
       const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-      scene = await core.importImageFile(bytes, file.name);
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      scene =
+        ext === "svg" || ext === "dxf"
+          ? await core.importVectorFile(bytes, file.name)
+          : await core.importImageFile(bytes, file.name);
     } catch (e) {
       error = String(e);
     }
@@ -666,7 +670,7 @@
           <input
             bind:this={fileInput}
             type="file"
-            accept="image/png,image/jpeg,image/bmp,image/webp"
+            accept="image/png,image/jpeg,image/bmp,image/webp,.svg,.dxf"
             style="display:none"
             onchange={onImportFile}
           />

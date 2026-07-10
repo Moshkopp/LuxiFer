@@ -17,6 +17,7 @@ pub mod assets;
 pub mod dither;
 pub mod geo_ops;
 pub mod geometry;
+pub mod import;
 pub mod interact;
 pub mod job;
 pub mod laser;
