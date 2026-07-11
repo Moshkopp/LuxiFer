@@ -124,12 +124,23 @@ Erledigt:
 - **`Canvas.svelte` 1.562 → 1.490:** zustandsfreie Helfer nach `canvas/handles.ts`
   (Auswahl-Griffe) und `canvas/bezier-draft.ts` (Kurven-Flatten) ausgelagert.
 
-Offen (bewusst als größerer, separater Schritt vertagt):
-- `Canvas.svelte` ist noch groß, weil der Rest kamera-/gestengebundenen Zustand
-  teilt (`zoom`/`pan`/`drag`/`toScreen`). Saubere Weiterzerlegung braucht einen
-  Camera-Store + Tool-Module — höheres Regressionsrisiko, eigener Schritt.
-- `App.svelte` (~1.300), `core/src/geo_ops.rs` (~1.057), `state.rs`/`project.rs`
-  (~920) noch nicht angefasst.
+Core-Module inzwischen zerlegt (je 192 Tests grün):
+- `state.rs` 924 → `state/{mod,layers,shapes,edit}.rs` (ein impl AppState nach
+  Verantwortung; mod.rs behält Struct/Undo/Tests).
+- `geo_ops.rs` 1.057 → `geo_ops/{mod,apply}.rs` (pure mm-Geometrie vs.
+  AppState-Anbindung).
+- `project.rs` 921 → 862 + `datetime.rs` (Zeit-/ID-Utils, auch von assets.rs
+  genutzt); der cohärente `impl ProjectFile` bewusst nicht weiter zerlegt.
+
+Bewusst NICHT gesplittet (mit Verstand):
+- `App.svelte` (~1.330) ist der **Kompositions-Root**: ~590 Z. flache async-
+  Dispatcher (`scene = await core.x()`) + bereits komponentisiertes Template
+  (ToolsPanel/LayersPanel/LaserPanel/Dialoge in {#if}-Blöcken) + Style. Ein Split
+  flacher Dispatcher würde `scene`-State durchreichen = mehr Kopplung, nicht
+  weniger. Länge ist inhärent, keine Tangle → nicht gesplittet.
+- `Canvas.svelte` (~1.490) Rest teilt kamera-/gestengebundenen Zustand
+  (`zoom`/`pan`/`drag`). Saubere Weiterzerlegung braucht einen Camera-Store +
+  Tool-Module — höheres Regressionsrisiko, eigener Schritt bei Bedarf.
 
 ### 🟡 Punkt 4 — Geometrie-Duplizierung Frontend ↔ Core (mittel)
 
