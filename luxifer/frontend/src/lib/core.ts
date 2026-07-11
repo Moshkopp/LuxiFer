@@ -1,6 +1,7 @@
 // Brücke zum Rust-Core über Tauri-Commands. Das Frontend hält KEINEN eigenen
 // Wahrheits-Zustand — es holt den Zustand hier und zeichnet ihn nur.
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { type Pt, ellipsePoints, rectPoints, rotateAroundBBoxCenter, boundsOf } from "./geometry";
 
 export interface EditorErrorData {
   code: string;
@@ -171,34 +172,20 @@ export interface Scene {
 
 // Welt-BBox einschließlich Rotation, analog zu Shape::bbox im Core.
 export function shapeBBox(s: Shape): [number, number, number, number] {
-  let points: [number, number][];
+  let points: Pt[];
   if ("Rect" in s.geo) {
     const { x, y, w, h } = s.geo.Rect;
-    points = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    points = rectPoints(x, y, w, h);
   } else if ("Image" in s.geo) {
     const { x, y, w, h } = s.geo.Image;
-    points = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    points = rectPoints(x, y, w, h);
   } else if ("Ellipse" in s.geo) {
     const { cx, cy, rx, ry } = s.geo.Ellipse;
-    points = Array.from({ length: 64 }, (_, i) => {
-      const a = i / 64 * Math.PI * 2;
-      return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
-    });
+    points = ellipsePoints(cx, cy, rx, ry);
   } else {
     points = s.geo.Polyline.pts;
   }
-  if (points.length === 0) return [0, 0, 0, 0];
-  if (Math.abs(s.rotation ?? 0) > Number.EPSILON) {
-    let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
-    for (const [x,y] of points) { x0=Math.min(x0,x); y0=Math.min(y0,y); x1=Math.max(x1,x); y1=Math.max(y1,y); }
-    const cx=(x0+x1)/2, cy=(y0+y1)/2, r=s.rotation*Math.PI/180, co=Math.cos(r), si=Math.sin(r);
-    points = points.map(([x,y]) => [cx+(x-cx)*co-(y-cy)*si, cy+(x-cx)*si+(y-cy)*co]);
-  }
-  let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-  for (const [px, py] of points) {
-    a = Math.min(a, px); b = Math.min(b, py); c = Math.max(c, px); d = Math.max(d, py);
-  }
-  return [a, b, c - a, d - b];
+  return boundsOf(rotateAroundBBoxCenter(points, s.rotation ?? 0));
 }
 
 export function rgb(color: [number, number, number]): string {

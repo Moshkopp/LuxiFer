@@ -7,14 +7,12 @@
 
 import type { Scene, Shape } from "../core";
 import type { LineBatch } from "./renderer";
+import { type Pt, ellipsePoints, rectPoints, rotateAroundBBoxCenter } from "../geometry";
 
 /** Ein Weltpunkt-Transformer (mm→mm), z. B. für Live-Drag selektierter Shapes. */
 export type PointXf = (x: number, y: number, shapeIdx: number) => [number, number];
 
 const IDENTITY: PointXf = (x, y) => [x, y];
-
-/** Auflösung der Ellipsen-Tesselierung (Segmente je Vollkreis). */
-const ELLIPSE_SEGS = 96;
 
 /**
  * Baut den Konturen-Batch aller sichtbaren Vektor-Shapes. `xf` transformiert
@@ -61,37 +59,21 @@ function isClosed(s: Shape): boolean {
  * dreht um die Mitte der ungedrehten Bounding-Box — identisch zum bisherigen
  * 2D-Pfad (drawShape) und zu shapeBBox in core.ts.
  */
-function contourPoints(s: Shape, idx: number, xf: PointXf): [number, number][] {
-  let pts: [number, number][];
+function contourPoints(s: Shape, idx: number, xf: PointXf): Pt[] {
+  let pts: Pt[];
   if ("Rect" in s.geo) {
     const { x, y, w, h } = s.geo.Rect;
-    pts = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    pts = rectPoints(x, y, w, h);
   } else if ("Ellipse" in s.geo) {
     const { cx, cy, rx, ry } = s.geo.Ellipse;
-    pts = Array.from({ length: ELLIPSE_SEGS }, (_, i) => {
-      const a = (i / ELLIPSE_SEGS) * Math.PI * 2;
-      return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)] as [number, number];
-    });
+    pts = ellipsePoints(cx, cy, rx, ry);
   } else if ("Polyline" in s.geo) {
-    pts = s.geo.Polyline.pts.map(([a, b]) => [a, b] as [number, number]);
+    pts = s.geo.Polyline.pts.map(([a, b]) => [a, b] as Pt);
   } else {
     return [];
   }
   // Rotation um die Mitte der ungedrehten Box (wie drawShape/shapeBBox).
-  const rot = s.rotation ?? 0;
-  if (Math.abs(rot) > Number.EPSILON) {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const [x, y] of pts) {
-      x0 = Math.min(x0, x); y0 = Math.min(y0, y);
-      x1 = Math.max(x1, x); y1 = Math.max(y1, y);
-    }
-    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    const rad = (rot * Math.PI) / 180, co = Math.cos(rad), si = Math.sin(rad);
-    pts = pts.map(([x, y]) => [
-      cx + (x - cx) * co - (y - cy) * si,
-      cy + (x - cx) * si + (y - cy) * co,
-    ]);
-  }
+  pts = rotateAroundBBoxCenter(pts, s.rotation ?? 0);
   // Live-Drag-Transform ganz zuletzt (arbeitet im Weltraum wie liveTransformPoint).
   return pts.map(([x, y]) => xf(x, y, idx));
 }
