@@ -120,8 +120,13 @@
     min-width: max-content;
   }
   button {
+    /* Feste 30×30 statt aspect-ratio: aspect-ratio berechnet die Breite aus der
+       (variablen) Zeilenhöhe; ist die Zeile höher als 30px, werden die Buttons
+       breiter als ihre 30px-flex-basis und schieben sich ineinander. */
     flex: 0 0 30px;
-    aspect-ratio: 1;
+    width: 30px;
+    height: 30px;
+    box-sizing: border-box;
     font-size: 14px;
     display: flex;
     align-items: center;
@@ -129,8 +134,8 @@
     padding: 0;
   }
   button.wide {
-    aspect-ratio: auto;
     flex-basis: auto;
+    width: auto;
     height: 30px;
     padding: 0 12px;
     font-size: 12px;

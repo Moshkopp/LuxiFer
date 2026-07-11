@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import Canvas from "./lib/Canvas.svelte";
   import PreviewCanvas from "./lib/PreviewCanvas.svelte";
   import LayerDialog from "./lib/LayerDialog.svelte";
@@ -66,8 +67,12 @@
   // --- Projektverwaltung (ADR 0003) -----------------------------------------
   // saveMode: Projekt-Reiter zeigt das Speichern-Formular (Strg+S bei namenlos).
   let saveMode = $state(false);
-  // Start-Toast „zuletzt gearbeitet an …".
+  // Start-Toast „zuletzt gearbeitet an …". Verschwindet, sobald der Nutzer
+  // irgendetwas tut (Tool/Tab/Aktion) — nicht nur bei Öffnen/Verwerfen.
   let startToast = $state<string | null>(null);
+  // Wird true, sobald der Toast steht; erst dann räumt ihn die erste Interaktion
+  // weg (verhindert, dass der Effect ihn beim Mount sofort wieder schließt).
+  let startToastArmed = false;
   // Unsaved-Guard: geplante Aktion (open/new), die nach Bestaetigung laeuft.
   let pendingAction = $state<null | { kind: "new" } | { kind: "open"; name: string }>(null);
 
@@ -76,6 +81,23 @@
   let activeTab = $state<Tab>("Design");
   let designFitTrigger = $state(0);
   let wasDesignVisible = false;
+
+  // Start-Toast bei der ersten echten Interaktion schließen: jede Tool- oder
+  // Tab-Änderung reicht (nach dem Scharfschalten in load()). Aktionen ohne
+  // Tool-/Tab-Wechsel schließen ihn zusätzlich über dismissStartToast().
+  // WICHTIG: nur tool/activeTab tracken. Würde der Effect `startToast` lesen,
+  // triggerte dessen Setzen in load() ihn erneut und schlösse den Toast sofort.
+  $effect(() => {
+    tool; activeTab; // einzige getrackte Abhängigkeiten
+    untrack(() => {
+      if (startToastArmed && startToast) startToast = null;
+    });
+  });
+  // Explizit aus Aktions-Handlern (Anordnen, Layer, Speichern …), die weder Tool
+  // noch Tab wechseln, aber trotzdem „irgendeine Funktion" sind.
+  function dismissStartToast() {
+    if (startToast) startToast = null;
+  }
   // Zweireihige Topbar (Design, mit Anordnen-Zeile) vs. einreihige (Laser/Monitor).
   const TOPBAR_H = 92;
   const TOPBAR_H1 = 48;
@@ -91,7 +113,12 @@
       settings = await core.getUiSettings();
       applyTheme(settings.theme);
       // Start-Toast: zuletzt geoeffnetes Projekt anbieten (ADR 0003 §3).
-      if (settings.last_project) startToast = settings.last_project;
+      if (settings.last_project) {
+        startToast = settings.last_project;
+        // Nächster Tick: scharf schalten, damit die nächste echte Tool-/Tab-
+        // Änderung (nicht der initiale Effect-Lauf) den Toast schließt.
+        queueMicrotask(() => (startToastArmed = true));
+      }
       await loadLasers();
       // Verbindungs-LED periodisch aktualisieren (nur wenn ein Laser aktiv ist).
       refreshConnection();
@@ -266,6 +293,7 @@
       | "coaster_circle"
       | "bridge",
   ) {
+    dismissStartToast();
     if (a === "text") {
       textOpen = true;
       return;
