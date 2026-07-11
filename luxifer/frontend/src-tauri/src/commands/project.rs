@@ -217,18 +217,28 @@ pub fn project_detail(name: String) -> Result<ProjectDetail, String> {
 }
 
 /// Ein Asset eines Projekts für die Anzeige im Browser (ADR 0004).
+///
+/// Deckt beide Asset-Arten ab: **Bilder** (im Store per Content-Hash, mit
+/// Vorschau + Maßen) und **Fonts** (referenzierte Systemdatei, ohne Bild-Thumb).
+/// `kind` unterscheidet die Darstellung im Frontend.
 #[derive(Serialize)]
 pub struct ProjectAsset {
+    /// Bild: Content-Hash. Font: Dateipfad (dient zugleich als stabile ID).
     id: String,
+    /// `"image"` oder `"font"` — steuert Icon/Layout im Browser.
+    kind: String,
     original_name: String,
+    /// Nur bei Bildern gesetzt; bei Fonts 0.
     width: u32,
     height: u32,
-    /// Kleine Vorschau als PNG-Data-URL (rohes Graustufen-Asset).
+    /// Kleine Vorschau als PNG-Data-URL (nur Bilder; Fonts haben keine).
     thumb: Option<String>,
 }
 
-/// Liefert die Assets eines Projekts (aus `asset_refs`) mit Metadaten und einer
-/// Vorschau-Data-URL — für den Assets-Bereich im Projekt-Browser.
+/// Liefert die Assets eines Projekts: **Bilder** (aus `asset_refs`, mit Vorschau)
+/// und **Fonts** (aus den Text-Shapes der aktuellen Version abgeleitet) — für den
+/// Assets-Bereich im Projekt-Browser. Fonts werden referenziert, nicht kopiert;
+/// darum stammen sie aus der Szene und nicht aus `asset_refs`.
 #[tauri::command]
 pub fn project_assets(name: String) -> Result<Vec<ProjectAsset>, String> {
     let dir = assets_dir();
@@ -245,10 +255,27 @@ pub fn project_assets(name: String) -> Result<Vec<ProjectAsset>, String> {
             .map(|png| format!("data:image/png;base64,{}", base64_encode(&png)));
         out.push(ProjectAsset {
             id: meta.id,
+            kind: "image".into(),
             original_name: meta.original_name,
             width: meta.width,
             height: meta.height,
             thumb,
+        });
+    }
+    // Fonts aus den Text-Shapes ableiten (referenziert, kein Store). Als Name der
+    // Dateiname ohne Pfad; die ID ist der volle Pfad (stabil, eindeutig).
+    for font_path in pf.font_refs() {
+        let file_name = std::path::Path::new(&font_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| font_path.clone());
+        out.push(ProjectAsset {
+            id: font_path,
+            kind: "font".into(),
+            original_name: file_name,
+            width: 0,
+            height: 0,
+            thumb: None,
         });
     }
     Ok(out)

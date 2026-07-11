@@ -143,6 +143,23 @@ impl ProjectFile {
         self.asset_refs = refs;
     }
 
+    /// Leitet die benutzten **Font-Assets** aus den Text-Shapes ab: die
+    /// `font_path`s aller Shapes mit `text_meta` (dedupliziert, in Reihenfolge des
+    /// ersten Auftretens). Fonts werden — anders als Bilder — **referenziert, nicht
+    /// kopiert** (Systempfad); daher stehen sie nicht in `asset_refs`, sondern
+    /// werden bei Bedarf aus der Szene abgeleitet. Leere Pfade werden übersprungen.
+    pub fn font_refs(&self) -> Vec<String> {
+        let mut refs: Vec<String> = Vec::new();
+        for s in &self.shapes {
+            if let Some(tm) = &s.text_meta {
+                if !tm.font_path.is_empty() && !refs.contains(&tm.font_path) {
+                    refs.push(tm.font_path.clone());
+                }
+            }
+        }
+        refs
+    }
+
     /// Nächstes freies Versions-Label („V1", „V2", …). Zählt anhand der bereits
     /// vergebenen numerischen Labels hoch, damit auch nach Löschungen keine Nummer
     /// doppelt vergeben wird.
@@ -836,6 +853,43 @@ mod tests {
         assert_eq!(
             pf.asset_refs,
             vec!["asset-1".to_string(), "asset-2".to_string()]
+        );
+    }
+
+    #[test]
+    fn font_refs_werden_aus_text_shapes_abgeleitet() {
+        use crate::model::{Shape, TextMeta};
+        let mut s = AppState::new();
+        // Zwei Text-Shapes mit gleichem Font, eins mit anderem.
+        let text_shape = |font: &str| {
+            let mut sh = Shape::new(
+                0,
+                Geo::Polyline {
+                    pts: vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)],
+                    closed: true,
+                },
+            );
+            sh.text_meta = Some(TextMeta {
+                text: "Hi".into(),
+                font_path: font.into(),
+                size_mm: 10.0,
+            });
+            sh
+        };
+        s.shapes.push(text_shape("/fonts/a.ttf"));
+        s.shapes.push(text_shape("/fonts/b.ttf"));
+        s.shapes.push(text_shape("/fonts/a.ttf")); // Dublette → nur einmal
+                                                   // Ein Nicht-Text-Shape ohne text_meta zählt nicht.
+        s.add_shape(Geo::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 5.0,
+            h: 5.0,
+        });
+        let pf = ProjectFile::from_state(&s, "P", vec![]);
+        assert_eq!(
+            pf.font_refs(),
+            vec!["/fonts/a.ttf".to_string(), "/fonts/b.ttf".to_string()]
         );
     }
 

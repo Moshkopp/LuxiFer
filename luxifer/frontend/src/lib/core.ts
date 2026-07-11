@@ -226,9 +226,11 @@ export const imageRender = (asset: string, params: ImageParams, invert: boolean)
 export const setImageParams = (index: number, params: ImageParams) =>
   invoke<Scene>("set_image_params", { index, params });
 
-// Ein Asset eines Projekts (Anzeige im Browser).
+// Ein Asset eines Projekts (Anzeige im Browser). `kind` unterscheidet Bilder
+// (mit Vorschau + Maßen) von Fonts (referenzierte Datei, ohne Bild-Thumb).
 export interface ProjectAsset {
   id: string;
+  kind: "image" | "font";
   original_name: string;
   width: number;
   height: number;

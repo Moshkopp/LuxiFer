@@ -338,8 +338,10 @@
         <div class="agrid">
           {#each assets as a (a.id)}
             <div class="acard" title={a.original_name}>
-              <div class="athumb">
-                {#if a.thumb}
+              <div class="athumb" class:font={a.kind === "font"}>
+                {#if a.kind === "font"}
+                  <Icon name="text" />
+                {:else if a.thumb}
                   <img src={a.thumb} alt={a.original_name} />
                 {:else}
                   <span class="no-thumb small">—</span>
@@ -347,13 +349,13 @@
               </div>
               <div class="ameta">
                 <span class="aname">{a.original_name || a.id}</span>
-                <span class="adim">{a.width}×{a.height}</span>
+                <span class="adim">{a.kind === "font" ? "Font" : `${a.width}×${a.height}`}</span>
               </div>
             </div>
           {/each}
         </div>
       {:else}
-        <div class="assets-box">Keine – Bilder/Fonts/DXF/SVG folgen mit dem Import.</div>
+        <div class="assets-box">Keine – importierte Bilder und benutzte Fonts erscheinen hier.</div>
       {/if}
     {:else}
       <div class="placeholder">
@@ -609,6 +611,9 @@
     border-bottom: 1px solid var(--border);
   }
   .athumb img { width: 100%; height: 100%; object-fit: contain; }
+  /* Font-Assets: kein Bild, sondern ein zentriertes Text-Icon. */
+  .athumb.font { color: var(--muted); }
+  .athumb.font :global(svg) { width: 34px; height: 34px; }
   .ameta { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; }
   .aname {
     font-size: 12px;
