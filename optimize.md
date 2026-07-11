@@ -1,202 +1,180 @@
-Gesamturteil
-Das Projekt hat inzwischen eine erstaunlich breite Funktionsbasis, aber die letzten Erweiterungen haben eine kritische Architekturgrenze sichtbar gemacht: Eine Form besitzt mittlerweile mehrere Darstellungen gleichzeitig – etwa geo, Bézier-Metadaten, Rotation und Text-Metadaten. Die Transformationsfunktionen verändern diese Darstellungen nicht zentral und konsistent.
-Das ist aktuell der größte Ausbau-Blocker. Weitere Werkzeuge wie Rotation, Objektinspektor, Pfadoperationen oder präzises Ausrichten würden die Inkonsistenzen verstärken.
+# Optimierungs- und Architektur-Analyse
 
-Was davon bereits umgesetzt ist
+Fortgeschrieben. Der obere Teil ist der **aktuelle** Stand (11.07.2026, zweite
+Analyse). Der untere Teil (§ „Historie") dokumentiert die erste Analyse und
+belegt, was daraus bereits erledigt ist.
 
-Stand 11.07.2026 wurden die ersten kritischen Grundlagen bereits korrigiert:
+---
 
-- Zentrale Shape-Transformationen für Verschieben, Skalieren und Spiegeln sind eingeführt. Die Operationen verändern nicht mehr ausschließlich `geo`, sondern halten auch editierbare Bézier-Metadaten synchron.
-- Bézier-Anker und Tangenten werden bei Verschieben, Skalieren, Spiegeln, Arrange und Nesting gemeinsam mit der sichtbaren Kontur transformiert. Regressionstests sichern dieses Verhalten ab.
-- Arrange bildet anhand von `group_id` echte Einheiten. Gruppierte Konturen und Textgruppen werden beim Ausrichten und Verteilen nicht mehr auseinandergerissen.
-- Horizontale und vertikale Verteilung arbeitet nach Objektmitten. Zusätzlich stehen gleichmäßige horizontale und vertikale Zwischenräume zur Verfügung.
-- Eine rotationskorrekte Welt-Bounding-Box ist im Core umgesetzt. Auswahl, Arrange, Hit-Test und Transformanzeige verwenden damit bei gedrehten Shapes die passende Weltgrenze.
-- Die kanonische Auswahl-Bounding-Box wird direkt im Core berechnet und als Teil der `Scene` ausgeliefert. `App.svelte`, Transform-Leiste und Canvas-Auswahlrahmen setzen die Gruppenbox nicht mehr unabhängig zusammen.
-- Die Transform-Leiste enthält X/Y, Breite/Höhe, Seitenverhältnis-Sperre und einen 3×3-Anker. Position und Skalierung beziehen sich auf den gewählten Ankerpunkt.
-- Nullbreite und Nullhöhe werden bei der Seitenverhältnis-Berechnung abgefangen; horizontale und vertikale Linien erzeugen dort kein `Infinity` oder `NaN` mehr.
-- Editierbare Text-Metadaten besitzen eine feste Transformationsregel: proportionale Skalierung aktualisiert `size_mm`; nichtproportionale Skalierung und Spiegelung entfernen die nicht mehr reproduzierbaren Textparameter und lassen sichere normale Konturen zurück.
-- Die beiden bestehenden Clippy-Warnungen im Pattern-Fill-Beispiel und im UI-Settings-Test sind behoben; das vollständige Clippy-Gate kann wieder als belastbare Prüfung für neue Änderungen dienen.
-- Der Bézier-Segment-Hit-Test liegt im Rust-Core. Das Frontend übergibt nur Weltposition und zoomabhängige Toleranz; Shape, Segment und Kurvenparameter `t` werden zentral und rotationsbewusst bestimmt.
-- Alle Tauri-Aufrufe laufen im Frontend durch eine gemeinsame Invoke-Grenze. Fehler werden als `EditorError` mit Code, Meldung, Command und optionalen Details normalisiert, zentral protokolliert und über einen gemeinsamen UI-Fehlerkanal angezeigt. App, Projektbrowser und Textdialog verwenden dieselbe lesbare Meldung.
-- Die zuvor offenen Änderungen sind in zwei getrennten Commits gesichert:
-  - `ba52247 Stabilisiere Transformationen und Anordnen`
-  - `97823ea Berücksichtige Rotation in Weltgrenzen`
-- Der geprüfte Stand umfasst 211 erfolgreiche Rust-Tests, einen fehlerfreien `svelte-check` und einen erfolgreichen Produktions-Build.
+## Aktueller Stand (Analyse 2)
 
-Als größerer Strukturpunkt bleibt insbesondere die Modulzerlegung offen.
+### Gesamturteil
 
-Bereits vorhandene Probleme
-1. Kritisch: Bézier-Knoten werden bei Transformationen nicht mitgeführt
-Ein Bézier-Shape besitzt:
-die abgeflachte Kontur in shape.geo
-die editierbaren Anker und Tangenten in shape.bezier
-Verschieben, Skalieren, Spiegeln und Arrange verändern momentan nur geo:
-[interact.rs (line 94)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/interact.rs:94)
-[arrange.rs (line 39)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/arrange.rs:39)
-[arrange.rs (line 74)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/arrange.rs:74)
-Der Node-Editor liest danach aber wieder die unveränderten Bézier-Metadaten:
-[Canvas.svelte (line 534)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/frontend/src/lib/Canvas.svelte:534)
-Konkrete Folge:
-Bézier-Kurve zeichnen.
-Kurve verschieben, skalieren, spiegeln oder ausrichten.
-Knotenwerkzeug aktivieren.
-Die Knoten erscheinen an der alten Position.
-Beim ersten Bearbeiten kann die sichtbare Kurve zurückspringen oder neu aus den veralteten Knoten aufgebaut werden.
-Das sollte vor weiteren Transformationsfunktionen behoben werden.
-Empfehlung: Transformationen als Methoden auf Shape umsetzen, die geo, bezier, Rotation und weitere Metadaten gemeinsam aktualisieren.
-2. Kritisch: Gruppierte Formen werden durch Arrange auseinandergerissen
-Die Auswahl wird zwar auf vollständige Gruppen erweitert, Arrange behandelt danach aber jedes Shape einzeln.
-Beim Ausrichten wird für jedes Gruppenmitglied ein eigenes Delta berechnet:
-[arrange.rs (line 53)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/arrange.rs:53)
-Beim Verteilen wird ebenfalls jedes Shape als eigenständiges Element behandelt:
-[arrange.rs (line 102)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/arrange.rs:102)
-Damit kann beispielsweise ein aus mehreren Konturen bestehender Textblock beim Ausrichten oder Verteilen auseinandergezogen werden.
-ThorBurn behandelte eine gemeinsame group_id als eine Arrange-Einheit. LuxiFer sollte im Core ebenfalls zuerst Einheiten bilden:
-gruppierte Shapes → eine gemeinsame Einheit
-ungruppierte Shapes → jeweils eine Einheit
-Erst danach sollten Bounding-Box und Bewegungsdelta berechnet werden.
-3. Hoch: Rotation wird in Bounding-Boxen nicht berücksichtigt
-Shape::bbox() liefert nur geo.bbox():
-[model.rs (line 213)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/model.rs:213)
-Die Eigenschaft rotation wird dabei ignoriert. Der Hit-Test dreht zwar den Prüfpunkt zurück, aber Auswahlbox, Marquee, Arrange, Größenanzeige und Transform-Anker arbeiten weiterhin mit der ungedrehten Box.
-Folgen bei gedrehten Objekten:
-falsche Selektionsbox
-falsche X/Y/B/H-Werte
-falsche Ausrichtung
-unpassende Skaliergriffe
-eventuell fehlerhafte Job- oder Preview-Grenzen
-Bevor Rotation in die neue Transform-Leiste eingebaut wird, braucht Shape eine kanonische Weltkontur oder mindestens eine rotationsbereinigte Welt-Bounding-Box.
-4. Hoch: Die neue Transform-Leiste skaliert über eine Frontend-Bounding-Box
-Die Auswahlbox wird in App.svelte erneut aus den übertragenen Shapes berechnet:
-[App.svelte (line 230)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/frontend/src/App.svelte:230)
-Auch Canvas.svelte besitzt eine eigene Bounding-Box-Berechnung:
-[Canvas.svelte (line 270)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/frontend/src/lib/Canvas.svelte:270)
-Gleichzeitig besitzt der Core bereits selection_bbox():
-[interact.rs (line 80)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/interact.rs:80)
-Damit existieren aktuell mindestens drei Berechnungswege. Sie unterscheiden sich spätestens bei Rotation, Bézier-Metadaten und zukünftigen Formtypen.
-Das verletzt die gewünschte Grenze „Core ist die einzige Wahrheit“.
-Empfehlung: Die Scene sollte die kanonische Auswahlbox direkt mitliefern oder ein read-only Core-Command dafür anbieten.
-5. Hoch: Text-Metadaten passen nach Skalierung nicht mehr zur sichtbaren Form
-Text wird als Konturgruppe gespeichert, trägt aber weiterhin ursprüngliche Angaben wie Font und size_mm.
-Wenn ein Textblock geometrisch skaliert wird, ändern sich nur die Konturen. Die Text-Metadaten bleiben unverändert. Beim späteren Bearbeiten und Neugenerieren kann der Text daher auf seine ursprüngliche Größe zurückfallen.
-Für editierbaren Text braucht es eine klare Entscheidung:
-Skalierung in TextMeta übernehmen, oder
-eine explizite Objekttransformation speichern, oder
-Text beim ersten freien Pfadeingriff dauerhaft in normale Konturen umwandeln.
-Ohne diese Grenze werden Textskalierung, Rotation und erneutes Editieren nicht stabil zusammenspielen.
-6. Mittel: Bézier-Hit-Test und Kurvenberechnung liegen teilweise im Frontend
-Das Frontend enthält eigene kubische Bézier-Auswertung und Segmentabtastung:
-[Canvas.svelte (line 603)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/frontend/src/lib/Canvas.svelte:603)
-[Canvas.svelte (line 614)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/frontend/src/lib/Canvas.svelte:614)
-Das Teilen selbst erfolgt korrekt im Core, aber welches Segment und welcher Parameter t gewählt werden, entscheidet das Frontend über 32 Stichproben.
-Probleme:
-Trefferpräzision hängt vom Zoom und Sampling ab.
-Frontend und Core können verschiedene Kurvenannahmen entwickeln.
-Touch- oder Stiftinteraktion benötigt wieder eigene Logik.
-Eine spätere GPU-Canvas-Umstellung müsste Fachlogik übernehmen.
-Die Vorschau darf lokal bleiben. Der tatsächliche Kurven-Hit-Test sollte mittelfristig in den Core.
-7. Mittel: Canvas.svelte, App.svelte und Tauri lib.rs sind zu großen Sammelmodulen geworden
-Aktuelle Größen:
-frontend/src-tauri/src/lib.rs: etwa 1.680 Zeilen
-Canvas.svelte: etwa 1.510 Zeilen
-App.svelte: etwa 1.290 Zeilen
-core/src/geo_ops.rs: über 1.050 Zeilen
-core/src/state.rs: über 920 Zeilen
-Das ist noch funktionsfähig, erschwert aber sichere Erweiterungen. Besonders Canvas.svelte enthält gleichzeitig:
-Kamera
-Raster und Lineale
-Rendering
-Auswahl
-Resize
-Bézier-Zeichnen
-Knotenbearbeitung
-Messen
-Haltestege
-Fillet-Markierungen
-Bilder
-Tastatursteuerung
-Damit können Änderungen an einem Werkzeug leicht ein anderes beeinflussen.
-Sinnvolle spätere Trennung:
-canvas/camera.ts
-canvas/render.ts
-canvas/selection.ts
-canvas/input.ts
-canvas/tools/bezier.ts
-canvas/tools/node.ts
-canvas/tools/measure.ts
-Im Rust-Core sollten Shape-Transformationen, Pfadoperationen und Arrange ebenfalls getrennte Verantwortlichkeiten bekommen.
-8. Mittel: Transform-Inputs können bei nullbreiten Konturen ungültige Werte erzeugen
-Die Seitenverhältniskopplung rechnet mit:
-bbox[3] / bbox[2]
-bbox[2] / bbox[3]
-Siehe [TransformPanel.svelte (line 31)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/frontend/src/lib/TransformPanel.svelte:31).
-Eine exakt horizontale oder vertikale Linie kann eine Breite beziehungsweise Höhe von null besitzen. Dann entstehen Infinity oder NaN.
-Das sollte vor Freigabe der Transform-Leiste abgefangen werden. Für Linien braucht es eine definierte Semantik: Länge statt Rechteckgröße oder mindestens entkoppelte Skalierung auf der degenerierten Achse.
-9. Mittel: Zwischenraum-Verteilung kann negative Abstände erzeugen
-Bei „Zwischenräume angleichen“ wird der verfügbare Raum minus Gesamtgröße berechnet:
-[arrange.rs (line 116)](/home/moshy/Dokumente/Coding/LuxiFer/luxifer/core/src/arrange.rs:116)
-Überlappen die ausgewählten Objekte oder ist die Gesamtbreite größer als der äußere Bereich, wird der Abstand negativ. Das kann mathematisch gewollt sein, ist in der UI aber nicht erklärt.
-Es sollte entschieden werden:
-Überlappung als negativer Abstand ausdrücklich erlauben, oder
-mindestens auf null begrenzen, oder
-die Operation mit einer verständlichen Meldung ablehnen.
-10. Mittel: Tauri-Commands und Frontend besitzen keine einheitliche Fehlerbehandlung
-Viele Commands liefern direkt Scene, selbst wenn eine Operation ungültig oder wirkungslos ist. Das Frontend kann deshalb nicht unterscheiden zwischen:
-erfolgreicher Änderung
-No-op wegen falscher Auswahl
-ungültiger Geometrie
-internem Fehler
-Gleichzeitig wird in Tauri sehr häufig Mutex::lock().unwrap() verwendet. Ein einzelner Panic während gehaltenem Lock kann den Mutex vergiften und weitere Commands zum Absturz bringen.
-Langfristig sollte sich ein einheitliches Ergebnisformat etablieren:
-Result<Scene, EditorError>
-Dazu gehören stabile Fehlercodes und eine zentrale Toast-/Statusanzeige im Frontend.
-11. Mittel: Clippy ist aktuell nicht vollständig grün
-Die Tests und Frontend-Prüfungen laufen, aber cargo clippy --all-targets --all-features -- -D warnings scheitert bereits an vorhandenen Meldungen:
-unnötiger Clone in core/examples/pf_check.rs
-Feldzuweisung nach Default::default() in ui_settings.rs
-Das sind keine schweren Laufzeitfehler. Problematisch ist aber, dass damit der vereinbarte Qualitäts-Gate nicht mehr zuverlässig zwischen bestehenden und neu eingeführten Warnungen unterscheiden kann.
-12. Niedrig bis mittel: Aktuelle Änderungen sind noch nicht committed
-Der Working Tree enthält derzeit Änderungen an:
-Arrange-Core
-Tauri-Commands
-App-Layout
-Arrange-Panel
-Frontend-Bridge
-neues Transform-Panel
-Damit sind der funktionierende Bézier-Commit und die nachfolgenden Arrange-/Transform-Arbeiten zwar getrennt, die aktuelle zweite Einheit ist aber noch nicht dauerhaft gesichert.
-Vor weiterer Featurearbeit sollte dieser Stand erst nach Korrektur der kritischen Punkte getestet und als eigener Commit abgeschlossen werden.
-Zukünftige Ausbau-Blocker
-Die folgenden Erweiterungen sollten nicht einfach auf den jetzigen Stand aufgesetzt werden:
-Rotation in der Transform-Leiste
-Benötigt rotationskorrekte Welt-Bounding-Boxen und zentrale Shape-Transformationen.
+Die erste Analyse (siehe Historie) ist weitgehend abgearbeitet: zentrale
+Shape-Transformationen, Bézier-Synchronisation, Arrange auf Gruppen-Einheiten,
+rotationskorrekte Welt-Bounding-Box, kanonische `selection_bbox` in der Scene,
+feste Text-Transformregeln, Bézier-Hit-Test im Core, einheitliche
+`EditorError`-Fehlerbehandlung und das wiederhergestellte Clippy-Gate sind
+committet. Geprüfter Stand: 192 Core-Tests.
 
-Freies Drehen per Canvas-Griff
-Benötigt gemeinsamen Pivot, Gruppenbehandlung und korrekte Bézier-/Texttransformation.
+Der Design-Canvas rendert weiterhin auf dem CPU-2D-Context, während das
+GPU-Fundament (ADR 0008) bereits existiert und im Preview läuft. Die Messung
+(unten) hat die Dringlichkeit dieser Weiche allerdings **deutlich relativiert**
+und stattdessen zwei kleinere, konkretere Hebel freigelegt.
 
-Fortgeschrittener Node-Editor
-Benötigt synchronisierte Bézier-Metadaten und Core-basierten Kurven-Hit-Test.
+### Messergebnis (Blocker 1 quantifiziert, 11.07.2026)
 
-Objektinspektor mit X/Y/B/H
-Benötigt eine kanonische Core-Auswahlbox statt mehrfacher Frontend-Berechnung.
+Vor der Umstellung wurde gemessen statt angenommen (vgl.
+[[messen-vor-architektur-weichen]]). Zwei Klärungen ändern das Bild:
 
-Arrange für Gruppen und Text
-Benötigt Arrange-Einheiten auf Basis von group_id.
+1. **Hatch/Fill belastet den Design-Canvas NICHT.** `fill_segments`/`scanline`
+   kommen in `state.rs` nicht vor — Füll-Linien entstehen erst im Job/Preview,
+   nicht als Design-Shapes. Eine gefüllte Form zeichnet der Design-Canvas als
+   *eine* `ctx.fill()`-Fläche (Canvas.svelte:857), nicht als tausende Linien.
+   Der ursprünglich vermutete Haupt-Stress trifft den Design-Canvas also gar
+   nicht.
+2. **Der reale Punktdruck** kommt nur aus importierten Vektoren (SVG/DXF,
+   adaptiv geflattet auf ~10–50 Pkt/Kurve, bezier.rs:135) und Trace-Ergebnissen.
 
-Weitere editierbare Metadatenformen
-Für Text, Bézier, Fillet und zukünftige parametrische Formen braucht es ein einheitliches Transformationsmodell.
+Micro-Benchmark der reinen JS-CPU-Arbeit pro Frame (die im WebView identisch
+anfällt; der GPU-Rasterizer-Teil von `ctx.stroke` ist darin NICHT enthalten):
 
-GPU-Design-Canvas
-Wird unnötig schwer, solange Rendering, Hit-Test und Werkzeugzustände in einer einzigen Canvas-Komponente gekoppelt sind.
+| Szene            | Punkte  | 2D idle | 2D drag | WebGL   |
+|------------------|---------|---------|---------|---------|
+| mittel (100)     |   4.000 | 0,06 ms | 0,08 ms | ~0 ms   |
+| Import-Logo (500)|  20.000 | 0,25 ms | 0,33 ms | ~0 ms   |
+| großer Import    |  80.000 | 0,98 ms | 1,30 ms | ~0 ms   |
+| sehr groß        | 200.000 | 2,29 ms | 3,07 ms | ~0 ms   |
+| extrem           | 800.000 | 9,53 ms | 12,3 ms | ~0 ms   |
 
-Empfohlene Reihenfolge
-Zentrale Shape-Transformationen für Translate, Scale und Mirror einführen.
-Bézier-Metadaten bei allen Transformationen synchron halten.
-Arrange auf echte Gruppen-Einheiten umstellen.
-Rotationskorrekte Weltkontur und Bounding-Box definieren.
-Auswahlbox aus dem Core an das Frontend liefern.
-Verhalten skalierter editierbarer Texte festlegen.
-Nullbreiten- und Nullhöhenfälle im Transform-Panel absichern.
-Erst danach Rotation und Prozent-Skalierung ergänzen.
-Große Frontend- und Tauri-Module schrittweise zerlegen.
-Clippy-Gate wieder vollständig grün machen.
-Der wichtigste nächste Schritt ist nicht zusätzliche UI, sondern eine einheitliche Transformationsschicht im Core. Sie beseitigt mehrere aktuelle Fehler gleichzeitig und schafft eine stabile Grundlage für Rotation, Objektinspektor, Gruppen-Arrange und weitere Pfadwerkzeuge.
+Fazit: Die **JS-Geometrie-Vorbereitung** bleibt bis ~200.000 Punkte unter der
+16,6-ms-Grenze (60 fps) — sie ruckelt heute allein noch nicht. Erst jenseits
+realistischer Projektgrößen wird sie kritisch. WebGL bleibt für sehr große
+Importe/Trace das richtige Ziel, ist aber **kein akuter Blocker**.
+
+Nebenbefund (billiger Sofort-Hebel): `liveTransformPoint` ruft
+`scene.selected.includes(idx)` **pro Punkt** (Canvas.svelte:787/790). Isoliert
+kostet das bei 200.000 Punkten ~2,8 ms/Frame — praktisch der gesamte
+JS-Aufwand. Auswertung **pro Shape** über ein `Set` drückt es auf ~0,3 ms (≈9×),
+ohne die Render-Architektur anzufassen.
+
+### 🟠 Blocker 1 (herabgestuft) — Design-Canvas auf WebGL
+
+ADR 0008 hat `luxifer/frontend/src/lib/gl/renderer.ts` als *die eine*
+GPU-Zeichenschicht etabliert; `PreviewCanvas.svelte` nutzt sie bereits, der
+Design-Canvas (Canvas.svelte:343/809) noch nicht. Laut Messung erst bei sehr
+großen Importen/Trace ein echter Ruckel-Engpass — **nach** Blocker 2 angehen,
+gebündelt mit der Modulzerlegung (Blocker 3). Sofort-Hebel vorab: `Set`-basierte
+`selected`-Prüfung pro Shape (siehe Nebenbefund).
+
+Empfehlung: Basis-Geometrie (Shapes, Grid, Bed) auf `GlRenderer` umstellen wie im
+Preview; Overlays (Lineale, Handles, Text-Labels) dürfen ein transparenter
+2D-Layer darüber bleiben. **Vorher im Release messen** (Test-Szene mit vielen
+Shapes), um die Dringlichkeit zu belegen.
+
+### 🔴 Blocker 2 — `Mutex::lock().unwrap()` 73× im Tauri-Backend
+
+`luxifer/frontend/src-tauri/src/lib.rs` enthält 73 `lock().unwrap()`. Ein
+einziger Panic während gehaltenem Lock **vergiftet den Mutex**; danach schlägt
+jeder weitere Command fehl → App gefühlt eingefroren, obwohl nur eine Operation
+buggy war. Mit wachsender Command-Zahl steigt die Panic-Wahrscheinlichkeit.
+
+Empfehlung: Zentrale Helper-Funktion `with_state(|s| …) -> Result<_, EditorError>`,
+die `lock()` kapselt und einen vergifteten Mutex kontrolliert als `EditorError`
+zurückgibt statt zu panicken. Da `EditorError` bereits existiert, ist das eine
+mechanische, risikoarme Umstellung.
+
+### 🟠 Blocker 3 — Sammelmodule zu groß
+
+- `frontend/src-tauri/src/lib.rs`: ~1.696 Zeilen
+- `Canvas.svelte`: ~1.450 Zeilen
+- `App.svelte`: ~1.303 Zeilen
+- `core/src/geo_ops.rs`: ~1.057 Zeilen
+- `core/src/state.rs` / `core/src/project.rs`: ~920 Zeilen
+
+`Canvas.svelte` mischt Kamera, Raster/Lineale, Rendering, Auswahl, Resize,
+Bézier, Node-Edit, Messen, Haltestege, Fillet, Bilder, Tastatur. Änderung an
+einem Werkzeug kann ein anderes brechen, weil `draw()` alles gemeinsam anfasst.
+Koppelt mit Blocker 1: Die 2D→GL-Umstellung ist ungleich schwerer, solange
+Rendering und Werkzeugzustand in einer Datei verklebt sind.
+
+Empfehlung: Beim Angehen von Blocker 1 gleich `canvas/render.ts` +
+`canvas/camera.ts` herausziehen; Werkzeuge (`tools/bezier.ts`, `tools/node.ts`)
+folgen inkrementell. `lib.rs` nach Command-Gruppen splitten
+(`commands/shapes.rs`, `commands/arrange.rs`, …).
+
+### 🟡 Punkt 4 — Geometrie-Duplizierung Frontend ↔ Core (mittel)
+
+`shapeBBox()` (core.ts:174) reimplementiert die rotationskorrekte Bounding-Box
+(inkl. 64-Punkt-Ellipse-Sampling) in TypeScript, obwohl der Core das jetzt
+kanonisch kann und `selection_bbox` bereits in der Scene liefert. Solange beide
+existieren, driften sie bei neuen Formtypen auseinander (ThorBurn-Fehler,
+CLAUDE.md §1). Kein akuter Bug, aber schleichende Wahrheits-Duplizierung.
+
+Empfehlung: Prüfen, ob `shapeBBox` im Frontend nach Einführung von
+`selection_bbox` noch gebraucht wird; wenn ja, über ein read-only Core-Command
+lösen.
+
+### 🟡 Punkt 5 — Statische Punktdichte bei Ellipsen/N-Ecken (niedrig-mittel)
+
+Ellipsen/Polygone werden mit fester Auflösung als Polyline gespeichert
+(shapes.rs:133, 64 Punkte). Beim starken Hochskalieren wird ein Kreis sichtbar
+kantig; die Punktzahl wächst zudem linear mit der Objektzahl in der
+Scene-Serialisierung. Aktuell unkritisch, relevant sobald „präzise Kurven" oder
+zoom-abhängiges Tessellieren gefordert wird. Notieren, nicht sofort handeln.
+
+### Empfohlene Reihenfolge (nach der Messung aktualisiert)
+
+0. ✅ **Messen erledigt** → Blocker 1 herabgestuft; JS-Anteil ruckelt bis
+   ~200.000 Punkte nicht (Details oben).
+1. **Sofort-Hebel:** `selected.includes(idx)` in `liveTransformPoint` durch eine
+   pro-Shape ausgewertete `Set`-Prüfung ersetzen (~9× auf dem heißen Pfad,
+   winziger Diff, keine Architekturänderung).
+2. **Blocker 2** (Mutex-Kapselung) — klein, risikoarm, verhindert App-weite
+   Abstürze. Guter nächster Schritt.
+3. **Blocker 1 + 3 zusammen** — Design-Canvas auf `GlRenderer`, dabei
+   `render.ts`/`camera.ts` herausziehen. Erst relevant für sehr große
+   Importe/Trace; nicht mehr dringend, aber weiterhin die saubere Zielarchitektur.
+4. Punkt 4/5 als Aufräumarbeiten danach.
+
+---
+
+## Historie (Analyse 1) — überwiegend erledigt
+
+Erste Analyse (11.07.2026, früher am Tag). Die als kritisch/hoch markierten
+Punkte wurden anschließend umgesetzt und committet.
+
+### Was daraus erledigt ist
+
+- Zentrale Shape-Transformationen (Verschieben, Skalieren, Spiegeln) halten
+  editierbare Bézier-Metadaten synchron; Regressionstests sichern das ab.
+- Bézier-Anker/Tangenten werden bei Verschieben, Skalieren, Spiegeln, Arrange und
+  Nesting gemeinsam mit der Kontur transformiert.
+- Arrange bildet über `group_id` echte Einheiten; Gruppen und Textblöcke werden
+  beim Ausrichten/Verteilen nicht mehr auseinandergerissen.
+- Verteilung nach Objektmitten plus gleichmäßige horizontale/vertikale
+  Zwischenräume.
+- Rotationskorrekte Welt-Bounding-Box im Core; Auswahl, Arrange, Hit-Test und
+  Transformanzeige nutzen sie bei gedrehten Shapes.
+- Kanonische Auswahl-Bounding-Box wird im Core berechnet und als Teil der `Scene`
+  ausgeliefert (`selection_bbox`).
+- Transform-Leiste mit X/Y, Breite/Höhe, Seitenverhältnis-Sperre, 3×3-Anker;
+  Null-Breite/-Höhe abgefangen (kein Infinity/NaN mehr).
+- Feste Text-Transformregel: proportionale Skalierung aktualisiert `size_mm`;
+  nichtproportional/Spiegelung entfernt nicht reproduzierbare Textparameter.
+- Beide offenen Clippy-Warnungen behoben; Clippy-Gate wieder belastbar.
+- Bézier-Segment-Hit-Test im Rust-Core (Frontend übergibt nur Weltposition +
+  zoomabhängige Toleranz).
+- Alle Tauri-Aufrufe laufen durch eine gemeinsame Invoke-Grenze; Fehler als
+  `EditorError` normalisiert und zentral angezeigt.
+
+Relevante Commits u. a.: `ba52247`, `97823ea`, `1492957`, `8c787cd`, `3260d5f`,
+`74b3e78`, `e5e2c03`.
+
+### Was aus Analyse 1 offen blieb → in Analyse 2 fortgeführt
+
+- Modulzerlegung der großen Sammelmodule (jetzt Blocker 3).
+- Einheitliche Fehlerbehandlung im Backend war nur teilweise erledigt: der
+  `Mutex::lock().unwrap()`-Umgang ist noch offen (jetzt Blocker 2).
+- Die Render-Architektur (CPU-Canvas im Design) war in Analyse 1 noch nicht als
+  eigener Punkt erfasst — jetzt Blocker 1 und wichtigster nächster Schritt.
