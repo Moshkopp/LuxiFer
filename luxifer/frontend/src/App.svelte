@@ -799,6 +799,14 @@
             <img class="brand-logo" src={logoUrl} alt="LuxiFer" height="26" />
             <span class="brand-name">LuxiFer</span>
           </span>
+          <!-- Aktuell geladenes Projekt: Name + „•" bei ungespeicherten Änderungen.
+               Namenlos ⇒ dezentes „Unbenannt", damit der Slot nie leer wirkt. -->
+          <span class="project-tag" title={scene?.project ? scene.project.name : "Noch nicht gespeichert"}>
+            <span class="project-name" class:unnamed={!scene?.project}>
+              {scene?.project ? scene.project.name : "Unbenannt"}
+            </span>
+            {#if scene?.dirty}<span class="dirty-dot" title="Ungespeicherte Änderungen">•</span>{/if}
+          </span>
           <div class="hgroup">
             <button class="gbtn hbtn" onclick={doUndo} title="Rückgängig (Strg+Z)" aria-label="Rückgängig">
               <Icon name="undo" />
@@ -1141,6 +1149,33 @@
     font-weight: 700;
     letter-spacing: 0.5px;
     font-size: var(--fs-lg);
+  }
+  /* Projekt-Anzeige: durch einen Trenner von der Marke abgesetzt. */
+  .project-tag {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: var(--sp-3);
+    margin-left: var(--sp-1);
+    border-left: 1px solid var(--border-soft);
+    min-width: 0;
+  }
+  .project-name {
+    font-size: var(--fs-md);
+    color: var(--text);
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .project-name.unnamed {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .dirty-dot {
+    color: var(--accent);
+    font-size: 18px;
+    line-height: 1;
   }
   .hgroup {
     display: flex;
