@@ -17,7 +17,12 @@
     // Header-/Panel-Aktionen
     | "undo" | "redo" | "trash" | "gcode" | "pause" | "stop" | "home" | "frame"
     | "contour" | "send" | "power" | "speed" | "wind" | "eye" | "eye-off" | "lock"
-    | "settings" | "logo";
+    | "lock-open" | "settings" | "logo"
+    // Anordnen: Ausrichten / Verteilen / Gruppieren / Nesting
+    | "align-left" | "align-hcenter" | "align-right"
+    | "align-top" | "align-vcenter" | "align-bottom" | "align-center"
+    | "dist-h" | "dist-v" | "space-h" | "space-v"
+    | "group" | "ungroup" | "nest";
 
   export const ICONS: Record<IconName, string> = {
     // ── Werkzeuge ──────────────────────────────────────────────────────────
@@ -71,6 +76,25 @@
     eye: `<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>`,
     "eye-off": `<path d="M9.9 5A9.8 9.8 0 0 1 12 5c6 0 10 7 10 7a13 13 0 0 1-2 2.5M6 6C3 8 2 12 2 12s4 7 10 7a9.6 9.6 0 0 0 4-.9"/><path d="M3 3l18 18"/>`,
     lock: `<rect x="5" y="11" width="14" height="9" rx="1"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>`,
+    "lock-open": `<rect x="5" y="11" width="14" height="9" rx="1"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>`,
+    // ── Ausrichten: eine feste Bezugskante + zwei ausgerichtete Balken ──────
+    "align-left": `<path d="M4 4v16"/><rect x="7" y="6" width="12" height="4" rx="1"/><rect x="7" y="14" width="7" height="4" rx="1"/>`,
+    "align-right": `<path d="M20 4v16"/><rect x="5" y="6" width="12" height="4" rx="1"/><rect x="10" y="14" width="7" height="4" rx="1"/>`,
+    "align-hcenter": `<path d="M12 3v18"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="8.5" y="14" width="7" height="4" rx="1"/>`,
+    "align-top": `<path d="M4 4h16"/><rect x="6" y="7" width="4" height="12" rx="1"/><rect x="14" y="7" width="4" height="7" rx="1"/>`,
+    "align-bottom": `<path d="M4 20h16"/><rect x="6" y="5" width="4" height="12" rx="1"/><rect x="14" y="10" width="4" height="7" rx="1"/>`,
+    "align-vcenter": `<path d="M3 12h18"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="8.5" width="4" height="7" rx="1"/>`,
+    "align-center": `<path d="M12 3v18M3 12h18"/><rect x="8" y="8" width="8" height="8" rx="1"/>`,
+    // ── Verteilen: drei gleichmäßig verteilte Elemente ──────────────────────
+    "dist-h": `<rect x="3" y="7" width="4" height="10" rx="1"/><rect x="10" y="7" width="4" height="10" rx="1"/><rect x="17" y="7" width="4" height="10" rx="1"/>`,
+    "dist-v": `<rect x="7" y="3" width="10" height="4" rx="1"/><rect x="7" y="10" width="10" height="4" rx="1"/><rect x="7" y="17" width="10" height="4" rx="1"/>`,
+    "space-h": `<path d="M3 4v16M21 4v16"/><rect x="7" y="8" width="10" height="8" rx="1"/>`,
+    "space-v": `<path d="M4 3h16M4 21h16"/><rect x="8" y="7" width="8" height="10" rx="1"/>`,
+    // ── Gruppieren: zwei Kacheln mit Eck-Markern; Ungroup = getrennt ────────
+    group: `<rect x="4" y="4" width="9" height="9" rx="1"/><rect x="11" y="11" width="9" height="9" rx="1"/>`,
+    ungroup: `<rect x="3" y="3" width="8" height="8" rx="1" stroke-dasharray="2.5 2.5"/><rect x="13" y="13" width="8" height="8" rx="1" stroke-dasharray="2.5 2.5"/>`,
+    // ── Nesting: verschachtelte Formen aufs Bett gepackt ────────────────────
+    nest: `<rect x="3" y="3" width="18" height="18" rx="2"/><rect x="6" y="6" width="6" height="6" rx="1"/><rect x="13" y="7" width="5" height="5" rx="1"/><rect x="8" y="14" width="8" height="4" rx="1"/>`,
     settings: `<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>`,
     // LuxiFer-Platzhalter-Logo: stilisierter Laser-Funke / Strahl. Leicht ersetzbar.
     logo: `<path d="M12 2v6"/><path d="M12 16v6"/><path d="M2 12h6"/><path d="M16 12h6"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M5.6 5.6l3 3M15.4 15.4l3 3M18.4 5.6l-3 3M8.6 15.4l-3 3"/>`,

@@ -66,13 +66,12 @@ function clamp(v: number, lo: number, hi: number): number {
  */
 export function applyTheme(theme: Theme, root: HTMLElement = document.documentElement): void {
   const a = themeColorHsl(theme.accent);
-  const b = themeColorHsl(theme.button);
   root.style.setProperty("--accent", `hsl(${a.h}, ${a.s}%, ${a.l}%)`);
   root.style.setProperty("--accent-h", `${a.h}`);
   root.style.setProperty("--accent-s", `${a.s}%`);
   root.style.setProperty("--accent-l", `${a.l}%`);
-  root.style.setProperty("--btn", `hsl(${b.h}, ${b.s}%, ${b.l}%)`);
-  root.style.setProperty("--btn-h", `${b.h}`);
-  root.style.setProperty("--btn-s", `${b.s}%`);
-  root.style.setProperty("--btn-l", `${b.l}%`);
+  // Die Bedien-Grundfläche (Toolbar/Buttons) bleibt bewusst FIX neutral-blaugrau
+  // (Werte aus app.css, --btn-*). Die frei wählbare Button-Farbe färbt die
+  // Oberfläche nicht mehr — nur das aktive Element trägt den Akzent. Deshalb
+  // wird theme.button hier nicht mehr auf die CSS-Variablen geschrieben.
 }

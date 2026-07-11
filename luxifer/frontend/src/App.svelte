@@ -1085,8 +1085,8 @@
   .header-arrange::-webkit-scrollbar { display: none; }
   .arrange-separator {
     width: 1px;
-    height: 42px;
-    margin: 0 2px;
+    height: 40px;
+    margin: 0 var(--sp-2);
     background: var(--border);
     flex: 0 0 1px;
   }
@@ -1118,13 +1118,13 @@
   .brand-name {
     font-weight: 700;
     letter-spacing: 0.5px;
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
   .hgroup {
     display: flex;
-    gap: 4px;
-    padding-left: 10px;
-    border-left: 1px solid var(--border);
+    gap: var(--sp-1);
+    padding-left: var(--sp-3);
+    border-left: 1px solid var(--border-soft);
   }
   .hbtn {
     display: flex;
@@ -1132,7 +1132,9 @@
     justify-content: center;
     width: 30px;
     height: 30px;
+    color: var(--muted);
   }
+  .hbtn:hover { color: var(--text); }
   .tabs {
     display: flex;
     gap: 4px;
@@ -1142,10 +1144,11 @@
     background: transparent;
     color: var(--muted);
     border: none;
-    border-radius: 8px;
-    padding: 6px 16px;
+    border-radius: var(--r-md);
+    padding: var(--sp-2) var(--sp-4);
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--fs-md);
+    font-weight: 500;
   }
   .tab:hover {
     color: var(--text);

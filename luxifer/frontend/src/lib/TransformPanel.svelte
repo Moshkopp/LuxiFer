@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from "./Icon.svelte";
   type Anchor = "nw" | "n" | "ne" | "w" | "c" | "e" | "sw" | "s" | "se";
   let { bbox, ontransform }: {
     bbox: [number, number, number, number] | null;
@@ -64,18 +65,20 @@
     <label>B<input type="number" min="0.1" step="0.5" bind:value={w} disabled={!bbox} onchange={applyWidth} onkeydown={(e) => e.key === "Enter" && applyWidth()} /></label>
     <label>H<input type="number" min="0.1" step="0.5" bind:value={h} disabled={!bbox} onchange={applyHeight} onkeydown={(e) => e.key === "Enter" && applyHeight()} /></label>
   </div>
-  <button class="lock gbtn" class:active={locked} onclick={() => (locked = !locked)} title="Seitenverhältnis sperren">{locked ? "🔒" : "🔓"}</button>
+  <button class="lock gbtn" class:active={locked} onclick={() => (locked = !locked)} title="Seitenverhältnis sperren" aria-label="Seitenverhältnis sperren"><Icon name={locked ? "lock" : "lock-open"} size={15} /></button>
 </div>
 
 <style>
-  .transform { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+  .transform { display:flex; align-items:center; gap:var(--sp-2); flex:0 0 auto; }
   .fields { display:grid; grid-template-rows:repeat(2, 20px); gap:2px; }
-  label { display:grid; grid-template-columns:12px 54px; align-items:center; color:var(--muted); font-size:10px; }
-  input { width:54px; height:20px; box-sizing:border-box; border:1px solid var(--border); border-radius:5px; background:rgba(0,0,0,.25); color:var(--text); padding:1px 4px; text-align:right; font-size:11px; }
-  .sep { width:1px; height:38px; background:var(--border); }
+  label { display:grid; grid-template-columns:12px 54px; align-items:center; color:var(--muted); font-size:var(--fs-xs); }
+  input { width:54px; height:20px; box-sizing:border-box; border:1px solid var(--border); border-radius:var(--r-sm); background:rgba(0,0,0,.25); color:var(--text); padding:1px 5px; text-align:right; font-size:var(--fs-xs); font-variant-numeric:tabular-nums; }
+  .sep { width:1px; height:38px; background:var(--border-soft); }
   .anchor9 { display:grid; grid-template-columns:repeat(3, 10px); grid-template-rows:repeat(3, 10px); gap:2px; padding:2px; }
-  .anchor9 button { width:10px; height:10px; min-width:0; padding:0; border:1px solid color-mix(in srgb, var(--text) 45%, transparent); border-radius:50%; background:transparent; }
+  .anchor9 button { width:10px; height:10px; min-width:0; padding:0; border:1px solid color-mix(in srgb, var(--text) 40%, transparent); border-radius:50%; background:transparent; cursor:pointer; }
+  .anchor9 button:hover { border-color:var(--text); }
   .anchor9 button.active { background:var(--accent); border-color:var(--accent); box-shadow:0 0 4px var(--accent); }
-  .lock { width:28px; height:42px; padding:0; font-size:13px; }
-  .lock.active { border-color:var(--accent); }
+  .lock { width:30px; height:42px; padding:0; color:var(--muted); }
+  .lock:hover { color:var(--text); }
+  .lock.active { border-color:var(--accent); color:var(--text); }
 </style>

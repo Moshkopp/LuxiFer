@@ -1,24 +1,59 @@
 :root {
-  --bg: #141518;
-  --panel: #1c1e22;
-  --border: #2a2d33;
-  --text: #edeef0;
-  --muted: #a2a6ad;
-  /* Akzent- und Button-Farbe werden zur Laufzeit aus den GUI-Settings gesetzt
-     (theme.ts / applyTheme, ADR 0002 §3). Hier nur Fallback-Werte — sowohl als
-     fertige Farbe als auch in H/S/L-Kanaelen, damit das Glas-Design beliebige
-     Transparenzen bauen kann: hsl(var(--accent-h) var(--accent-s) …/ alpha). */
+  /* ── Neutraltöne: kühles Blau-Grau (leichter Stich zur Akzentfarbe), nicht
+     reines Grau — wirkt gewählt statt "Default". ──────────────────────────── */
+  --bg: #101216;
+  --panel: #171a20;
+  --panel-2: #1c1f26; /* leicht hellere Fläche (Kacheln, Inputs) */
+  --border: #2a2e36;
+  --border-soft: #23272e;
+  --text: #eceef1;
+  --muted: #9aa0a9;
+  --faint: #6b7178; /* Meta, Hilfstexte */
+
+  /* Akzentfarbe wird zur Laufzeit aus den GUI-Settings gesetzt (theme.ts /
+     applyTheme, ADR 0002 §3). Hier nur Fallback — als fertige Farbe UND in
+     H/S/L-Kanaelen, damit das Glas-Design beliebige Transparenzen bauen kann:
+     hsl(var(--accent-h) var(--accent-s) …/ alpha). */
   --accent: hsl(217, 89%, 63%);
   --accent-h: 217;
   --accent-s: 89%;
   --accent-l: 63%;
-  --btn: hsl(220, 9%, 45%);
-  --btn-h: 220;
-  --btn-s: 9%;
-  --btn-l: 45%;
+  /* NEU: Die Bedien-Grundfläche (Toolbar/Buttons) ist FIX neutral-blaugrau und
+     hängt NICHT mehr an der frei wählbaren Farbe. Die Akzentfarbe erscheint nur
+     noch am AKTIVEN Element. Das beruhigt die ganze Oberfläche. */
+  --btn-h: 222;
+  --btn-s: 12%;
+  --btn-l: 46%;
+  --btn: hsl(var(--btn-h), var(--btn-s), var(--btn-l));
+
+  /* ── Semantische Farben (Status), getrennt vom Akzent ────────────────────── */
+  --good: #3fb27f;
+  --warn: #e0b64c;
+  --bad: #e0685c;
+
+  /* ── Abstands-Skala (4-px-Raster) ────────────────────────────────────────── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ── Schrift-Skala (Rollen, nicht beliebige px) ──────────────────────────── */
+  --fs-xs: 11px; /* Meta, Einheiten */
+  --fs-sm: 12px; /* Labels, Panel-Titel */
+  --fs-md: 14px; /* Fließtext, Bedienelemente */
+  --fs-lg: 16px; /* Abschnittstitel */
+  --fs-xl: 20px; /* Dialog-Überschrift */
+
+  /* ── Radien: 3 statt 16 ──────────────────────────────────────────────────── */
+  --r-sm: 6px; /* Chips, Inputs */
+  --r-md: 10px; /* Buttons, Kacheln */
+  --r-lg: 16px; /* Panels, Dialoge */
 
   color-scheme: dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 14px;
 }
 
@@ -47,7 +82,7 @@ body {
    Theme-Farben, damit Akzent/Button live durchschlagen. */
 :root {
   --glass-base: 20, 22, 27; /* tiefes, kuehles Grundglas (RGB) */
-  --glass-tint: 0.13; /* Deckung des Akzent-Schimmers im Panel-Glas */
+  --glass-tint: 0.05; /* dezenter Akzent-Schimmer — kein Farbstich mehr */
 }
 
 .glass {
@@ -66,70 +101,89 @@ body {
       hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0) 70%
     ),
     rgba(var(--glass-base), 0.55);
-  backdrop-filter: blur(22px) saturate(1.5);
-  -webkit-backdrop-filter: blur(22px) saturate(1.5);
-  border: 1px solid hsl(var(--accent-h) var(--accent-s) 85% / 0.14);
-  border-radius: 16px;
-  /* Aussenschatten (Schwebe) + Akzent-Halo + innere Licht-Kante oben +
-     innerer Dunkelschatten unten = plastische Tiefe. */
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--r-lg);
+  /* Kräftigerer Aussenschatten (klare Abhebung vom Canvas) + heller Licht-Rand
+     oben + tiefer Innenschatten unten = plastische Tiefe, mehr "schwebt". */
   box-shadow:
-    0 18px 50px -12px rgba(0, 0, 0, 0.7),
-    0 2px 8px -2px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    inset 0 -12px 30px -18px rgba(0, 0, 0, 0.6);
+    0 24px 60px -14px rgba(0, 0, 0, 0.78),
+    0 4px 14px -6px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    inset 0 -14px 34px -20px rgba(0, 0, 0, 0.55);
 }
 
-/* Glasiger Bedienelement-Stil: durchscheinend, Licht-Kante oben, weicher
-   Schatten. --btn liefert den Farbton; im Ruhezustand sehr transluzent, beim
-   Hover leuchtet die Flaeche auf. Aktiv = Akzent mit Glow. */
+/* Bedienelement-Stil: neutral-blaugrau mit echtem MATERIAL — Licht-Kante oben,
+   spürbare Fläche, Tiefe-Schatten unten. Nicht matt, sondern wie eine gefräste
+   Metall-/Glasfläche mit Highlight. Hover hebt an (Fläche + Rand leuchten,
+   Button "steigt"), aktiv trägt die Akzentfarbe mit Glow. So bekommt die
+   Oberfläche Tiefe und Leben, bleibt aber ruhig (kein bunter Farbstich). */
 .gbtn {
   position: relative;
-  /* Button traegt die gewaehlte Button-Farbe spuerbar (nicht nur ein Hauch):
-     heller Verlauf oben, satter unten, mit sichtbarer Deckung. Rand nimmt die
-     Farbe leicht auf, damit sie auch am Umriss erkennbar ist. */
-  background: linear-gradient(
-    180deg,
-    hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) + 14%) / 0.42),
-    hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.34)
-  );
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(
+      180deg,
+      hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) + 16%) / 0.5),
+      hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) - 6%) / 0.42)
+    );
   color: var(--text);
-  border: 1px solid hsl(var(--btn-h) var(--btn-s) 80% / 0.28);
-  border-radius: 9px;
+  border: 1px solid hsl(var(--btn-h) var(--btn-s) 82% / 0.22);
+  border-radius: var(--r-md);
   cursor: pointer;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 1px 2px rgba(0, 0, 0, 0.25);
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 2px 5px -1px rgba(0, 0, 0, 0.45);
   transition:
-    background 0.16s ease,
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.08s ease;
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
 }
 .gbtn:hover:not(:disabled) {
-  background: linear-gradient(
-    180deg,
-    hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) + 16%) / 0.6),
-    hsl(var(--btn-h) var(--btn-s) var(--btn-l) / 0.52)
-  );
-  border-color: hsl(var(--btn-h) var(--btn-s) 82% / 0.45);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(
+      180deg,
+      hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) + 22%) / 0.62),
+      hsl(var(--btn-h) var(--btn-s) calc(var(--btn-l) - 2%) / 0.5)
+    );
+  border-color: hsl(var(--accent-h) var(--accent-s) 70% / 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 4px 12px -2px rgba(0, 0, 0, 0.55),
+    0 0 0 1px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.12);
+  transform: translateY(-1px);
 }
 .gbtn:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: translateY(0);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .gbtn:disabled {
-  opacity: 0.3;
+  opacity: 0.32;
   cursor: default;
 }
 .gbtn.active {
-  background: linear-gradient(
-    180deg,
-    hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 8%)),
-    var(--accent)
-  );
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 50%),
+    linear-gradient(
+      180deg,
+      hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 10%)),
+      hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 6%))
+    );
   color: #fff;
-  border-color: hsl(var(--accent-h) var(--accent-s) 80% / 0.6);
+  border-color: hsl(var(--accent-h) var(--accent-s) 82% / 0.7);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 0 0 1px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.3),
-    0 0 16px -2px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.55);
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 6px -2px rgba(0, 0, 0, 0.4),
+    0 0 0 1px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.35),
+    0 3px 16px -3px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.7);
+}
+.gbtn.active:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
