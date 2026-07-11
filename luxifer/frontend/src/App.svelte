@@ -751,7 +751,7 @@
       <div class="header-main">
         <div class="hleft">
           <span class="brand">
-            <img class="brand-logo" src={logoUrl} alt="LuxiFer" width="26" height="26" />
+            <img class="brand-logo" src={logoUrl} alt="LuxiFer" height="26" />
             <span class="brand-name">LuxiFer</span>
           </span>
           <div class="hgroup">
@@ -1083,7 +1083,9 @@
   }
   .brand-logo {
     display: block;
-    width: 26px;
+    /* Querformatiges Logo (3:2): Breite folgt der Höhe, damit nichts gestaucht
+       wird. object-fit: contain hält es zusätzlich proportional im Slot. */
+    width: auto;
     height: 26px;
     object-fit: contain;
     filter: drop-shadow(0 0 5px hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.45));
