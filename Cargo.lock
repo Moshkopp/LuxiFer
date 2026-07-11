@@ -1860,6 +1860,8 @@ dependencies = [
  "env_logger",
  "log",
  "luxifer-core",
+ "luxifer-driver-grbl",
+ "luxifer-driver-ruida",
  "pollster 0.3.0",
  "rfd",
  "wgpu",

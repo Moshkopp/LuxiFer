@@ -4,8 +4,21 @@
 //! Slider. Ohne echten Treiber-Anschluss im Umbau — Aktionen loggen vorerst.
 
 use egui::{Color32, RichText, Sense, Vec2};
+use luxifer_core::{JobAction, StartMode};
 
-use crate::tools::LaserUi;
+use crate::app::App;
+
+/// Was das Panel in diesem Frame auslösen will (nach dem UI-Block ausgeführt,
+/// um Borrow-Konflikte mit `app` zu vermeiden).
+enum PanelAction {
+    Run(JobAction),
+    Export,
+    Jog(f64, f64),
+    Home,
+    Select(String),
+    NewProfile,
+    EditProfile,
+}
 
 /// Farb-Ton der Ampel-Kacheln.
 enum Tone {
@@ -42,34 +55,87 @@ fn tone_colors(t: &Tone) -> (Color32, Color32) {
     }
 }
 
-/// Zeichnet das Panel. Gibt geloggte Aktionen zurück (bis der Treiber dran ist).
-pub fn show(ui: &mut egui::Ui, laser: &mut LaserUi) {
-    // Kopf: Verbindungsstatus (Demo-Umschalter).
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("LASER").small().weak());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (txt, col) = if laser.connected {
-                ("verbunden", Color32::from_rgb(0x3f, 0xb2, 0x7f))
-            } else {
-                ("getrennt", Color32::from_gray(0x9a))
-            };
-            if ui.small_button(RichText::new(txt).color(col)).clicked() {
-                laser.connected = !laser.connected;
+/// Ordnet einer Job-Aktion Label, Ton und Rasterplatz zu (feste 2×3-Reihenfolge
+/// wie im Svelte-Design). None-Slots bleiben leer.
+fn action_meta(a: JobAction) -> (&'static str, Tone) {
+    match a {
+        JobAction::SendJob | JobAction::StreamGcode => ("Start", Tone::Go),
+        JobAction::Pause => ("Pause", Tone::Warn),
+        JobAction::Stop => ("Stopp", Tone::Stop),
+        JobAction::GoOrigin => ("Ursprung", Tone::Nav),
+        JobAction::Frame => ("Rahmen", Tone::Neutral),
+        JobAction::RubberFrame => ("Gummiband", Tone::Neutral),
+        JobAction::Home => ("Home", Tone::Neutral),
+        JobAction::ExportFile => ("Export", Tone::Neutral),
+    }
+}
+
+/// Zeichnet das Panel und führt am Ende die gewählte Aktion über `app` aus.
+pub fn show(ui: &mut egui::Ui, app: &mut App) {
+    let mut pending: Option<PanelAction> = None;
+
+    // Kopf: „LASER" + aktuelles Profil.
+    ui.label(RichText::new("LASER").small().weak());
+    ui.add_space(4.0);
+    let profiles: Vec<(String, String)> = app
+        .laser_backend
+        .registry
+        .profiles
+        .iter()
+        .map(|p| (p.id.clone(), format!("{} · {:?}", p.name, p.kind)))
+        .collect();
+    let active_id = app
+        .laser_backend
+        .active_profile()
+        .map(|p| p.id.clone())
+        .unwrap_or_default();
+    if profiles.is_empty() {
+        if ui.button("+ Laser anlegen").clicked() {
+            pending = Some(PanelAction::NewProfile);
+        }
+    } else {
+        let active_label = profiles
+            .iter()
+            .find(|(id, _)| *id == active_id)
+            .map(|(_, l)| l.clone())
+            .unwrap_or_else(|| "—".into());
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("laser_sel")
+                .selected_text(active_label)
+                .width(ui.available_width() - 34.0)
+                .show_ui(ui, |ui| {
+                    for (id, label) in &profiles {
+                        if ui.selectable_label(*id == active_id, label).clicked() {
+                            pending = Some(PanelAction::Select(id.clone()));
+                        }
+                    }
+                });
+            if ui.button("⚙").on_hover_text("Laser verwalten").clicked() {
+                pending = Some(PanelAction::EditProfile);
             }
         });
-    });
-    ui.add_space(8.0);
+    }
+    ui.add_space(10.0);
 
-    // Ampel-Grid 2×3.
+    // Ampel-Grid aus den ECHTEN Aktionen des aktiven Treibers, feste Slots.
     ui.label(RichText::new("JOB").small().weak());
     ui.add_space(4.0);
-    let cells: [(&str, Tone); 6] = [
-        ("Start", Tone::Go),
-        ("Pause", Tone::Warn),
-        ("Stopp", Tone::Stop),
-        ("Ursprung", Tone::Nav),
-        ("Rahmen", Tone::Neutral),
-        ("Gummiband", Tone::Neutral),
+    let actions = app.laser_backend.actions();
+    let has = |a: JobAction| {
+        actions
+            .iter()
+            .any(|x| std::mem::discriminant(x) == std::mem::discriminant(&a))
+    };
+    // Slot-Reihenfolge; erster passender Treiber-Key füllt den Slot.
+    let slots: [Option<JobAction>; 6] = [
+        [JobAction::SendJob, JobAction::StreamGcode]
+            .into_iter()
+            .find(|a| has(*a)),
+        Some(JobAction::Pause).filter(|a| has(*a)),
+        Some(JobAction::Stop).filter(|a| has(*a)),
+        Some(JobAction::GoOrigin).filter(|a| has(*a)),
+        Some(JobAction::Frame).filter(|a| has(*a)),
+        Some(JobAction::RubberFrame).filter(|a| has(*a)),
     ];
     let avail = ui.available_width();
     let gap = 6.0;
@@ -78,8 +144,18 @@ pub fn show(ui: &mut egui::Ui, laser: &mut LaserUi) {
     egui::Grid::new("ampel")
         .spacing(Vec2::splat(gap))
         .show(ui, |ui| {
-            for (i, (label, tone)) in cells.iter().enumerate() {
-                ampel_cell(ui, label, tone, cell_w, cell_h);
+            for (i, slot) in slots.iter().enumerate() {
+                match slot {
+                    Some(a) => {
+                        let (label, tone) = action_meta(*a);
+                        if ampel_cell(ui, label, &tone, cell_w, cell_h) {
+                            pending = Some(PanelAction::Run(*a));
+                        }
+                    }
+                    None => {
+                        ui.allocate_exact_size(Vec2::new(cell_w, cell_h), Sense::hover());
+                    }
+                }
                 if i % 3 == 2 {
                     ui.end_row();
                 }
@@ -87,16 +163,46 @@ pub fn show(ui: &mut egui::Ui, laser: &mut LaserUi) {
         });
 
     ui.add_space(8.0);
-    ui.checkbox(&mut laser.selection_only, "Nur Auswahl lasern");
+    ui.checkbox(&mut app.laser.selection_only, "Nur Auswahl lasern");
+    if has(JobAction::ExportFile) && ui.button("⬇ Als Datei exportieren").clicked() {
+        pending = Some(PanelAction::Export);
+    }
 
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);
 
-    // Job-Nullpunkt-Anker (3×3, touch-taugliche Felder).
+    // Job-Parameter: Startmodus.
+    ui.label(RichText::new("PARAMETER").small().weak());
+    ui.add_space(4.0);
+    egui::ComboBox::from_id_salt("startmode")
+        .selected_text(match app.laser.start_mode {
+            StartMode::Absolut => "Absolute Koordinaten",
+            StartMode::AktuellePosition => "Aktuelle Position",
+            StartMode::Benutzerursprung => "Benutzerursprung",
+        })
+        .width(ui.available_width() - 8.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(
+                &mut app.laser.start_mode,
+                StartMode::Absolut,
+                "Absolute Koordinaten",
+            );
+            ui.selectable_value(
+                &mut app.laser.start_mode,
+                StartMode::AktuellePosition,
+                "Aktuelle Position",
+            );
+            ui.selectable_value(
+                &mut app.laser.start_mode,
+                StartMode::Benutzerursprung,
+                "Benutzerursprung",
+            );
+        });
+    ui.add_space(8.0);
     ui.label(RichText::new("JOB-NULLPUNKT").small().weak());
     ui.add_space(4.0);
-    anchor_grid(ui, &mut laser.anchor);
+    anchor_grid(ui, &mut app.laser.anchor);
 
     ui.add_space(10.0);
     ui.separator();
@@ -105,15 +211,37 @@ pub fn show(ui: &mut egui::Ui, laser: &mut LaserUi) {
     // Jog-Kreuz.
     ui.label(RichText::new("KOPF").small().weak());
     ui.add_space(4.0);
-    jog_cross(ui);
+    let step = app.laser.jog_step;
+    if let Some(jog) = jog_cross(ui, step) {
+        pending = Some(jog);
+    }
     ui.add_space(8.0);
+    slider_row(ui, "Schritt", "mm", &mut app.laser.jog_step, 0.1, 100.0);
+    slider_row(ui, "Speed", "mm/s", &mut app.laser.jog_speed, 1.0, 1000.0);
 
-    // Slider für Schritt/Speed (Wert antippbar über DragValue).
-    slider_row(ui, "Schritt", "mm", &mut laser.jog_step, 0.1, 100.0);
-    slider_row(ui, "Speed", "mm/s", &mut laser.jog_speed, 1.0, 1000.0);
+    // Statuszeile: letzte Treiber-Rückmeldung.
+    if !app.laser_msg.is_empty() {
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(4.0);
+        ui.label(RichText::new(&app.laser_msg).small().weak());
+    }
+
+    // Gewählte Aktion nach dem UI-Block ausführen.
+    match pending {
+        Some(PanelAction::Run(a)) => app.laser_run(a),
+        Some(PanelAction::Export) => app.laser_export(),
+        Some(PanelAction::Jog(dx, dy)) => app.laser_jog(dx, dy),
+        Some(PanelAction::Home) => app.laser_home(),
+        Some(PanelAction::Select(id)) => app.laser_select(&id),
+        Some(PanelAction::NewProfile) => app.open_laser_settings(false),
+        Some(PanelAction::EditProfile) => app.open_laser_settings(true),
+        None => {}
+    }
 }
 
-fn ampel_cell(ui: &mut egui::Ui, label: &str, tone: &Tone, w: f32, h: f32) {
+/// Zeichnet eine Ampel-Kachel; gibt `true` bei Klick zurück.
+fn ampel_cell(ui: &mut egui::Ui, label: &str, tone: &Tone, w: f32, h: f32) -> bool {
     let (fill, text) = tone_colors(tone);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
     let bg = if resp.hovered() {
@@ -129,9 +257,7 @@ fn ampel_cell(ui: &mut egui::Ui, label: &str, tone: &Tone, w: f32, h: f32) {
         egui::FontId::proportional(13.0),
         text,
     );
-    if resp.clicked() {
-        log::info!("Laser-Aktion: {label}");
-    }
+    resp.clicked()
 }
 
 fn anchor_grid(ui: &mut egui::Ui, anchor: &mut usize) {
@@ -166,10 +292,13 @@ fn anchor_grid(ui: &mut egui::Ui, anchor: &mut usize) {
         });
 }
 
-fn jog_cross(ui: &mut egui::Ui) {
+/// Zeichnet das Jog-Kreuz. Gibt die ausgelöste Bewegung als PanelAction zurück
+/// (Jog um `step` mm bzw. Home).
+fn jog_cross(ui: &mut egui::Ui, step: f64) -> Option<PanelAction> {
     let b = 46.0;
     let gap = 5.0;
     let total = 3.0 * b + 2.0 * gap;
+    let mut result: Option<PanelAction> = None;
     ui.horizontal(|ui| {
         // Zentrieren.
         let pad = (ui.available_width() - total) * 0.5;
@@ -184,7 +313,7 @@ fn jog_cross(ui: &mut egui::Ui) {
         };
         // Richtung als selbstgezeichnetes Dreieck/Symbol — schriftunabhängig
         // (egui-Default-Font hat die Unicode-Pfeile nicht).
-        let btn = |ui: &mut egui::Ui, r: egui::Rect, dir: JogDir| {
+        let mut btn = |ui: &mut egui::Ui, r: egui::Rect, dir: JogDir| {
             let resp = ui.allocate_rect(r, Sense::click());
             let bg = if resp.hovered() {
                 Color32::from_rgb(0x30, 0x36, 0x40)
@@ -238,7 +367,13 @@ fn jog_cross(ui: &mut egui::Ui) {
                 }
             }
             if resp.clicked() {
-                log::info!("Jog: {dir:?}");
+                result = Some(match dir {
+                    JogDir::Up => PanelAction::Jog(0.0, -step),
+                    JogDir::Down => PanelAction::Jog(0.0, step),
+                    JogDir::Left => PanelAction::Jog(-step, 0.0),
+                    JogDir::Right => PanelAction::Jog(step, 0.0),
+                    JogDir::Home => PanelAction::Home,
+                });
             }
         };
         btn(ui, cell(1, 0), JogDir::Up);
@@ -247,6 +382,7 @@ fn jog_cross(ui: &mut egui::Ui) {
         btn(ui, cell(2, 1), JogDir::Right);
         btn(ui, cell(1, 2), JogDir::Down);
     });
+    result
 }
 
 #[derive(Debug, Clone, Copy)]

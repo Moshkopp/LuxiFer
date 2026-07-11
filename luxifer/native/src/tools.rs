@@ -24,8 +24,8 @@ pub struct LaserUi {
     /// Job-Nullpunkt-Anker (0..8, 4 = Mitte).
     pub anchor: usize,
     pub selection_only: bool,
-    /// „Verbunden"-Zustand (Demo-Umschalter, bis der Treiber angebunden ist).
-    pub connected: bool,
+    /// Startmodus des Jobs (Absolut / aktuelle Position / Benutzerursprung).
+    pub start_mode: luxifer_core::StartMode,
 }
 
 impl Default for LaserUi {
@@ -35,7 +35,7 @@ impl Default for LaserUi {
             jog_speed: 100.0,
             anchor: 4,
             selection_only: false,
-            connected: false,
+            start_mode: luxifer_core::StartMode::Absolut,
         }
     }
 }
