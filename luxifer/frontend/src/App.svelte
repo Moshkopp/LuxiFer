@@ -216,10 +216,18 @@
     tool = "polygon";
   }
   async function onselectat(x: number, y: number, additive: boolean) {
-    scene = await core.selectAt(x, y, 2, additive);
+    const selection = await core.selectAt(x, y, 2, additive);
+    if (!scene) return;
+    // Auswahl-only-Antwort darf die Scene-Identität nicht ersetzen: Sonst
+    // bewertet Svelte Geometrie-Effects neu und lädt 125k Punkte erneut hoch.
+    scene.selected = selection.selected;
+    scene.selection_bbox = selection.selection_bbox;
   }
   async function onselectrect(x1: number, y1: number, x2: number, y2: number) {
-    scene = await core.selectRect(x1, y1, x2, y2);
+    const selection = await core.selectRect(x1, y1, x2, y2);
+    if (!scene) return;
+    scene.selected = selection.selected;
+    scene.selection_bbox = selection.selection_bbox;
   }
   async function onmove(dx: number, dy: number) {
     scene = await core.moveSelected(dx, dy);
@@ -817,15 +825,15 @@
             <button
               class="gbtn hbtn"
               onclick={() => fileInput?.click()}
-              title="Bild importieren (PNG, JPG, BMP, WebP)"
-              aria-label="Bild importieren"
+              title="Datei importieren (PNG, JPG, BMP, WebP, SVG, DXF)"
+              aria-label="Bild oder Vektordatei importieren"
             >
               <Icon name="contour" />
             </button>
             <input
               bind:this={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/bmp,image/webp,.svg,.dxf"
+              accept=".png,.jpg,.jpeg,.bmp,.webp,.svg,.dxf"
               style="display:none"
               onchange={onImportFile}
             />

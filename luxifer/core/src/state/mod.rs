@@ -5,6 +5,9 @@
 //! manuell einen Layer an. Er klickt Farben; das System verwaltet Layer
 //! automatisch (`activate_color`) und räumt leere Layer weg (`remove_empty_layers`).
 
+use std::cell::RefCell;
+
+use crate::geometry::BBox;
 use crate::model::{Layer, Shape};
 
 /// Standard-Bettgröße in mm.
@@ -36,6 +39,9 @@ pub struct AppState {
     pub dirty: bool,
     undo_stack: Vec<Snapshot>,
     redo_stack: Vec<Snapshot>,
+    /// Abgeleiteter, nicht persistierter Geometrie-Cache für Interaktion.
+    /// RefCell erlaubt lazy Aufbau in read-only Hit-Test-/BBox-Abfragen.
+    shape_bounds: RefCell<Option<Vec<BBox>>>,
 }
 
 impl Default for AppState {
@@ -51,6 +57,7 @@ impl Default for AppState {
             dirty: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            shape_bounds: RefCell::new(None),
         }
     }
 }
@@ -78,6 +85,7 @@ impl AppState {
         self.shapes = s.shapes;
         self.selected = s.selected;
         self.pending_color = s.pending_color;
+        self.invalidate_shape_bounds();
     }
 
     /// Vor jeder mutierenden Aktion aufrufen: sichert den aktuellen Zustand.
@@ -85,6 +93,22 @@ impl AppState {
         self.undo_stack.push(self.snapshot());
         self.redo_stack.clear();
         self.dirty = true;
+        self.invalidate_shape_bounds();
+    }
+
+    pub(crate) fn invalidate_shape_bounds(&self) {
+        *self.shape_bounds.borrow_mut() = None;
+    }
+
+    pub(crate) fn shape_bbox_cached(&self, index: usize) -> Option<BBox> {
+        if self.shape_bounds.borrow().is_none() {
+            let bounds = self.shapes.iter().map(Shape::bbox).collect();
+            *self.shape_bounds.borrow_mut() = Some(bounds);
+        }
+        self.shape_bounds
+            .borrow()
+            .as_ref()
+            .and_then(|bounds| bounds.get(index).copied())
     }
 
     /// Nach erfolgreichem Speichern: der Zustand gilt als gesichert.

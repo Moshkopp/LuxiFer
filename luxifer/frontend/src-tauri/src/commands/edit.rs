@@ -3,8 +3,22 @@
 //! die Layer-Verwaltung (Parameter, Sichtbarkeit, Reihenfolge).
 
 use tauri::State;
+use serde::Serialize;
 
 use crate::shared::{scene_with, AppData, Scene};
+
+#[derive(Serialize)]
+pub struct SelectionUpdate {
+    selected: Vec<usize>,
+    selection_bbox: Option<[f64; 4]>,
+}
+
+fn selection_update(s: &luxifer_core::AppState) -> SelectionUpdate {
+    SelectionUpdate {
+        selected: s.selected.clone(),
+        selection_bbox: s.selection_bbox().map(|b| [b.x, b.y, b.w, b.h]),
+    }
+}
 
 #[tauri::command]
 pub fn activate_color(data: State<AppData>, color: [u8; 3]) -> Scene {
@@ -14,7 +28,7 @@ pub fn activate_color(data: State<AppData>, color: [u8; 3]) -> Scene {
 }
 
 #[tauri::command]
-pub fn select_at(data: State<AppData>, x: f64, y: f64, tol: f64, additive: bool) -> Scene {
+pub fn select_at(data: State<AppData>, x: f64, y: f64, tol: f64, additive: bool) -> SelectionUpdate {
     let mut s = data.state();
     match s.hit_test(x, y, tol) {
         Some(idx) => {
@@ -37,16 +51,16 @@ pub fn select_at(data: State<AppData>, x: f64, y: f64, tol: f64, additive: bool)
     }
     // Gruppen sind eine Einheit: Auswahl auf ganze Gruppen erweitern.
     s.expand_selection_to_groups();
-    scene_with(&s, &data)
+    selection_update(&s)
 }
 
 /// Marquee-Auswahl: alle Shapes, deren BBox vollständig im Rechteck liegt.
 #[tauri::command]
-pub fn select_rect(data: State<AppData>, x1: f64, y1: f64, x2: f64, y2: f64) -> Scene {
+pub fn select_rect(data: State<AppData>, x1: f64, y1: f64, x2: f64, y2: f64) -> SelectionUpdate {
     let mut s = data.state();
     s.select_in_rect(x1, y1, x2, y2);
     s.expand_selection_to_groups();
-    scene_with(&s, &data)
+    selection_update(&s)
 }
 
 /// Gruppiert die Auswahl (Shapes verhalten sich danach als Einheit).

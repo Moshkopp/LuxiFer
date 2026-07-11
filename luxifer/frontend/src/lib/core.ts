@@ -170,6 +170,11 @@ export interface Scene {
   project: ProjectMeta | null;
 }
 
+export interface SelectionUpdate {
+  selected: number[];
+  selection_bbox: [number, number, number, number] | null;
+}
+
 // Welt-BBox einschließlich Rotation, analog zu Shape::bbox im Core.
 export function shapeBBox(s: Shape): [number, number, number, number] {
   let points: Pt[];
@@ -332,10 +337,10 @@ export const activateColor = (color: [number, number, number]) =>
   invoke<Scene>("activate_color", { color });
 
 export const selectAt = (x: number, y: number, tol: number, additive: boolean) =>
-  invoke<Scene>("select_at", { x, y, tol, additive });
+  invoke<SelectionUpdate>("select_at", { x, y, tol, additive });
 
 export const selectRect = (x1: number, y1: number, x2: number, y2: number) =>
-  invoke<Scene>("select_rect", { x1, y1, x2, y2 });
+  invoke<SelectionUpdate>("select_rect", { x1, y1, x2, y2 });
 
 export const moveSelected = (dx: number, dy: number) =>
   invoke<Scene>("move_selected", { dx, dy });

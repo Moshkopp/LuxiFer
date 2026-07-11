@@ -17,6 +17,14 @@ impl super::AppState {
                     continue;
                 }
             }
+            // Grober, billiger Vorfilter vor dem exakten Segment-Hit-Test.
+            // Große DXFs enthalten zehntausende Segmente über viele Konturen;
+            // ohne BBox-Test wird für jedes davon der Punkt-Segment-Abstand
+            // berechnet, obwohl fast alle Shapes weit vom Klick entfernt sind.
+            let b = self.shape_bbox_cached(i)?;
+            if px < b.x - tol || px > b.x + b.w + tol || py < b.y - tol || py > b.y + b.h + tol {
+                continue;
+            }
             if s.hit_test(px, py, tol) {
                 return Some(i);
             }

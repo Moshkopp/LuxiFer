@@ -83,8 +83,7 @@ impl AppState {
         BBox::union_all(
             self.selected
                 .iter()
-                .filter_map(|&i| self.shapes.get(i))
-                .map(|s| s.bbox()),
+                .filter_map(|&i| self.shape_bbox_cached(i)),
         )
     }
 
@@ -121,6 +120,8 @@ impl AppState {
                 s.set_bbox(nx, ny, b.w * sw, b.h * sh);
             }
         }
+        // Geänderte Geometrie macht abgeleitete Shape-Bounds ungültig.
+        self.invalidate_shape_bounds();
         self.dirty = true;
     }
 
@@ -148,6 +149,9 @@ impl AppState {
                 s.rotation = (s.rotation + degrees).rem_euclid(360.0);
             }
         }
+        // Die Pivot-Abfrage oben hat den Bounds-Cache für den alten Zustand
+        // aufgebaut. Nach der Rotation muss Scene die neue Auswahlbox erhalten.
+        self.invalidate_shape_bounds();
         self.dirty = true;
     }
 
@@ -251,9 +255,14 @@ mod tests {
         let before = s.selection_bbox().unwrap().center();
         s.rotate_selection(90.0);
         // Zentrum der Gruppe bleibt bei 90°-Drehung erhalten.
-        let after = s.selection_bbox().unwrap().center();
+        let after_box = s.selection_bbox().unwrap();
+        let after = after_box.center();
         assert!((before.0 - after.0).abs() < 1e-6);
         assert!((before.1 - after.1).abs() < 1e-6);
+        // Regression: Die nach rotate_selection zurückgegebene Box muss bereits
+        // den gedrehten Zustand spiegeln, nicht erst nach erneuter Auswahl.
+        assert!((after_box.w - 10.0).abs() < 1e-6);
+        assert!((after_box.h - 40.0).abs() < 1e-6);
         // Jede Form trägt jetzt die 90°-Eigenrotation.
         assert!((s.shapes[0].rotation - 90.0).abs() < 1e-6);
         assert!((s.shapes[1].rotation - 90.0).abs() < 1e-6);

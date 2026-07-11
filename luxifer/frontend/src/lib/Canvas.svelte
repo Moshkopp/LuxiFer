@@ -5,9 +5,14 @@
   // WebGL-Geometrie-Ebene (ADR 0008): Konturen/Grid/Bett/Bilder auf der GPU.
   // Die Overlays (Handles, Lineale, Mess-/Node-Griffe) bleiben auf dem 2D-Canvas
   // DARÜBER — der trägt weiterhin alle Pointer-Handler.
-  import { GlRenderer, type LineBatch, type GlBatch } from "./gl/renderer";
+  import { GlRenderer, type LineBatch, type GlBatch, type GlStencilFill } from "./gl/renderer";
   import { type Camera } from "./gl/camera";
-  import { shapesToBatch, type PointXf } from "./gl/design-render";
+  import {
+    groupOutlinesToBatch,
+    fillLayersToData,
+    shapesToBatch,
+    type ShapeFilter,
+  } from "./gl/design-render";
   import { type HandleId, handlePositions, resizeBox, hxOffset, hyOffset } from "./canvas/handles";
   import { type BNode, bezFlatten } from "./canvas/bezier-draft";
 
@@ -71,7 +76,7 @@
     ondrawpolyline: (pts: [number, number][], closed: boolean) => void;
     // Polygon: Form-`id`, Zentrum, Aussenradius, Drehung (Grad).
     ondrawpolygon: (shape: string, cx: number, cy: number, r: number, rot: number) => void;
-    onselectat: (x: number, y: number, additive: boolean) => void;
+    onselectat: (x: number, y: number, additive: boolean) => void | Promise<void>;
     onselectrect: (x1: number, y1: number, x2: number, y2: number) => void;
     // Geben ein Promise zurueck, damit der Canvas die Live-Vorschau erst nach
     // dem Core-Update loesen kann (verhindert das Aufblitzen an der alten Stelle).
@@ -118,6 +123,26 @@
   // die Kamera-Matrix — kein Neu-Upload. Bilder liegen als Texturen an ihrer Box.
   let gl: GlRenderer | null = null;
   let shapeBatch: GlBatch | null = null;
+  // Statischer Teil während einer Live-Geste: alle NICHT selektierten Konturen,
+  // einmal hochgeladen und über die ganze Geste gehalten. So wandert pro Frame
+  // nur der selektierte (kleine) Teil durch die Pipeline — entscheidend bei
+  // punktreichen Shapes (schnörkelige Schrift). Wird bei rebuildGeo invalidiert.
+  let staticBatch: GlBatch | null = null;
+  // Selektierter Teil in Ruhelage (ohne Transform), einmal pro Geste gebaut. Bei
+  // MOVE reicht es, diesen Batch per u_offset zu verschieben — kein Rebuild pro
+  // Frame (das war bei 92 Textkonturen die 16-ms-Bremse). Scale/Rotate bauen
+  // weiter pro Frame (nicht rein translatorisch), nutzen movedBatch also nicht.
+  let movedBatch: GlBatch | null = null;
+  // Eigene Konturenmarkierung für ausgewählte echte Gruppen. Dieser Batch
+  // ersetzt drawGroupOutlines auf dem CPU-Canvas (gemessen: 221,20 ms/Frame).
+  let groupOutlineBatch: GlBatch | null = null;
+  let groupOutlineUsesShapeBatch = false;
+  let nodeLineBatch: GlBatch | null = null;
+  let nodePointBatch: GlBatch | null = null;
+  let fillBatches: GlStencilFill[] = [];
+  let observedShapes: Scene["shapes"] | null = null;
+  let observedLayers: Scene["layers"] | null = null;
+  let geometryDirty = true;
 
   // ---- Bild-Cache (ADR 0004 §3a) --------------------------------------------
   // Gerenderte Bild-Bitmaps (asset+params → HTMLImageElement). Move/Resize
@@ -347,45 +372,99 @@
     });
   }
 
-  // Während einer Pointer-Geste synchron zeichnen (kein rAF-Hop). Seit der
-  // WebGL-Umstellung ist ein Redraw billig, ein eingeplanter rAF wird entwertet.
-  function drawSync() {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    renderNow();
+  // Pointer-Ereignisse können deutlich häufiger als die Bildwiederholrate
+  // eintreffen. Deshalb auch während einer Geste nur den letzten Zustand im
+  // nächsten Animation-Frame zeichnen. Ein synchroner Full-Redraw pro Event
+  // würde WebGL UND das komplette 2D-Overlay mehrfach pro sichtbarem Frame
+  // ausführen und erzeugt genau das wahrgenommene Hinterherhinken.
+  function drawGestureFrame() {
+    draw();
   }
 
   function renderNow() {
     if (!canvasEl) return;
+    const frameStart = PERF_LOG && gesturePerf.active ? performance.now() : 0;
     renderGeo();      // untere WebGL-Ebene: Konturen, Grid, Bett, Bilder
+    const geoMs = frameStart ? performance.now() - frameStart : 0;
+    const t0 = PERF_LOG && drag ? performance.now() : 0;
     renderOverlay();  // obere 2D-Ebene: Füllungen + alle Overlays (transparent)
+    if (PERF_LOG && drag) perfOverlay(performance.now() - t0);
+    if (frameStart) noteGestureFrame(geoMs, performance.now() - frameStart);
+  }
+
+  const gesturePerf = {
+    active: false, kind: "pointer", started: 0, frames: 0,
+    firstGeo: 0, maxGeo: 0, sumGeo: 0, firstTotal: 0, maxTotal: 0, sumTotal: 0,
+  };
+  function beginGesturePerf(kind = "pointer") {
+    if (!PERF_LOG) return;
+    Object.assign(gesturePerf, {
+      active: true, kind, started: performance.now(), frames: 0,
+      firstGeo: 0, maxGeo: 0, sumGeo: 0, firstTotal: 0, maxTotal: 0, sumTotal: 0,
+    });
+  }
+  function noteGestureFrame(geoMs: number, totalMs: number) {
+    if (!gesturePerf.active) return;
+    if (gesturePerf.frames === 0) {
+      gesturePerf.firstGeo = geoMs;
+      gesturePerf.firstTotal = totalMs;
+    }
+    gesturePerf.frames++;
+    gesturePerf.maxGeo = Math.max(gesturePerf.maxGeo, geoMs);
+    gesturePerf.maxTotal = Math.max(gesturePerf.maxTotal, totalMs);
+    gesturePerf.sumGeo += geoMs;
+    gesturePerf.sumTotal += totalMs;
+  }
+  function queueGesturePerfFlush() {
+    if (!PERF_LOG || !gesturePerf.active) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!gesturePerf.active) return;
+      const n = gesturePerf.frames;
+      console.log(
+        "[gesture " + gesturePerf.kind + "] " + n + " Frames · Dauer " +
+        (performance.now() - gesturePerf.started).toFixed(2) + " ms · Geo first/max/avg " +
+        gesturePerf.firstGeo.toFixed(2) + "/" + gesturePerf.maxGeo.toFixed(2) + "/" +
+        (n ? gesturePerf.sumGeo / n : 0).toFixed(2) + " ms · Total first/max/avg " +
+        gesturePerf.firstTotal.toFixed(2) + "/" + gesturePerf.maxTotal.toFixed(2) + "/" +
+        (n ? gesturePerf.sumTotal / n : 0).toFixed(2) + " ms",
+      );
+      gesturePerf.active = false;
+    }));
+  }
+  // Dev-Messung des 2D-Overlays während einer Geste (Gegenstück zu perfNote).
+  let ovMs = 0, ovN = 0;
+  function perfOverlay(ms: number) {
+    ovMs += ms; ovN++;
+    if (ovN >= 20) {
+      console.log(`[renderOverlay] 2D ⌀ ${(ovMs / ovN).toFixed(2)} ms/Frame`);
+      flushOverlayParts();
+      ovMs = 0; ovN = 0;
+    }
   }
 
   // ---- WebGL-Ebene: Geometrie (ADR 0008) ------------------------------------
-  // Der aktuelle Live-Drag-Transformer: während move/scale wandern selektierte
-  // Konturen mit. Ist er gesetzt, wird der Shape-Batch pro Frame neu gebaut
-  // (nur so lange die Geste läuft); sonst bleibt der einmal hochgeladene Batch.
-  function liveXf(): PointXf | null {
-    if (drag?.kind === "move") {
-      const sel = new Set(scene.selected);
-      const dx = drag.dx, dy = drag.dy;
-      return (x, y, idx) => (sel.has(idx) ? [x + dx, y + dy] : [x, y]);
-    }
+  function liveModel(): Float32Array | null {
     if (drag?.kind === "scale") {
-      const sel = new Set(scene.selected);
       const [sx, sy, sw, sh] = drag.start;
       const [tx, ty, tw, th] = drag.cur;
       const fx = sw > 0 ? tw / sw : 1, fy = sh > 0 ? th / sh : 1;
-      return (x, y, idx) => (sel.has(idx) ? [tx + (x - sx) * fx, ty + (y - sy) * fy] : [x, y]);
+      return new Float32Array([
+        fx, 0, 0,
+        0, fy, 0,
+        tx - sx * fx, ty - sy * fy, 1,
+      ]);
     }
     if (drag?.kind === "rotate") {
-      const sel = new Set(scene.selected);
-      const [pvx, pvy] = drag.pivot;
-      const rad = (drag.deg * Math.PI) / 180;
+      const [px, py] = drag.pivot;
+      const rad = drag.deg * Math.PI / 180;
       const co = Math.cos(rad), si = Math.sin(rad);
-      return (x, y, idx) =>
-        sel.has(idx)
-          ? [pvx + (x - pvx) * co - (y - pvy) * si, pvy + (x - pvx) * si + (y - pvy) * co]
-          : [x, y];
+      return new Float32Array([
+        co, si, 0,
+        -si, co, 0,
+        px - co * px + si * py,
+        py - si * px - co * py,
+        1,
+      ]);
     }
     return null;
   }
@@ -395,8 +474,107 @@
   function rebuildGeo() {
     if (!gl) return;
     if (shapeBatch) { gl.free(shapeBatch); shapeBatch = null; }
+    // Die Gesten-Caches gehören zu einer vergangenen Geste — verwerfen, sonst
+    // zeigt die nächste Geste einen veralteten „Rest der Szene" / Auswahlteil.
+    if (staticBatch) { gl.free(staticBatch); staticBatch = null; }
+    if (movedBatch) { gl.free(movedBatch); movedBatch = null; }
     const batch = shapesToBatch(scene);
     if (batch.positions.length) shapeBatch = gl.upload(batch.positions, batch.colors);
+    rebuildFills();
+    rebuildGroupOutlines();
+    rebuildNodeBatches();
+  }
+
+  function rebuildFills() {
+    if (!gl) return;
+    for (const fill of fillBatches) gl.freeStencilFill(fill);
+    fillBatches = fillLayersToData(scene).map((fill) =>
+      gl!.uploadStencilFill(fill.positions, fill.ranges, fill.bounds, fill.color, fill.allSelected, fill.layerId)
+    );
+  }
+
+  function updateFillSelection() {
+    const selected = new Set(scene.selected);
+    for (const fill of fillBatches) {
+      let hasFillShape = false;
+      let allSelected = true;
+      scene.shapes.forEach((shape, idx) => {
+        if (shape.layer_id !== fill.layerId || "Image" in shape.geo) return;
+        const layer = scene.layers[shape.layer_id];
+        if (!layer || (layer.mode !== "Fill" && layer.mode !== "Raster")) return;
+        hasFillShape = true;
+        allSelected &&= selected.has(idx);
+      });
+      fill.allSelected = hasFillShape && allSelected;
+    }
+  }
+
+  function rebuildGroupOutlines() {
+    if (!gl) return;
+    if (groupOutlineBatch) { gl.free(groupOutlineBatch); groupOutlineBatch = null; }
+    groupOutlineUsesShapeBatch =
+      scene.selected.length === scene.shapes.length &&
+      scene.shapes.length > 0 &&
+      scene.shapes.every((shape) => shape.group_id != null && !("Image" in shape.geo));
+    // Vollständig ausgewählte Gruppe: Positionen sind exakt der vorhandene
+    // shapeBatch. Nur die blaue Farbe wird beim Draw konstant überschrieben.
+    if (groupOutlineUsesShapeBatch) return;
+    const batch = groupOutlinesToBatch(scene);
+    if (batch.positions.length) {
+      groupOutlineBatch = gl.upload(batch.positions, batch.colors);
+    }
+  }
+
+  function rebuildNodeBatches() {
+    if (!gl) return;
+    if (nodeLineBatch) { gl.free(nodeLineBatch); nodeLineBatch = null; }
+    if (nodePointBatch) { gl.free(nodePointBatch); nodePointBatch = null; }
+    if (tool !== "node") return;
+    const linePos: number[] = [], lineCol: number[] = [];
+    const pointPos: number[] = [], pointCol: number[] = [];
+    const lineColor = [120 / 255, 160 / 255, 230 / 255, 0.8];
+    for (const idx of scene.selected) {
+      const shape = scene.shapes[idx];
+      if (!shape) continue;
+      const nodes = editNodes(shape);
+      nodes.forEach((node, nodeIdx) => {
+        const anchorColor = nodeIdx === 0 ? [1, 92 / 255, 98 / 255, 1] : [1, 1, 1, 1];
+        pointPos.push(node.p[0], node.p[1]);
+        pointCol.push(...anchorColor);
+        for (const handle of [node.hIn, node.hOut]) {
+          if (!handle) continue;
+          linePos.push(node.p[0], node.p[1], handle[0], handle[1]);
+          lineCol.push(...lineColor, ...lineColor);
+          pointPos.push(handle[0], handle[1]);
+          pointCol.push(122 / 255, 168 / 255, 1, 1);
+        }
+      });
+    }
+    if (linePos.length) {
+      nodeLineBatch = gl.upload(new Float32Array(linePos), new Float32Array(lineCol));
+    }
+    if (pointPos.length) {
+      nodePointBatch = gl.upload(new Float32Array(pointPos), new Float32Array(pointCol));
+    }
+  }
+
+  // Frame-Zeit-Messung der Konturen-Pipeline (Batch-Bau + Upload) während einer
+  // Geste. Gibt alle 20 Frames den Mittelwert aus — so lässt sich der Effekt des
+  // Batch-Splits nachmessen statt behaupten. Über PERF_LOG scharfgeschaltet
+  // (temporär true zum Messen; vor dem Commit wieder auf false).
+  // Diagnoseinstrumentierung bleibt für künftige Regressionen im Quelltext,
+  // ist nach Abschluss von ADR 0009 im normalen Betrieb jedoch vollständig aus.
+  const PERF_LOG = false;
+  let perfMs = 0, perfN = 0;
+  function perfNote(ms: number) {
+    if (!PERF_LOG) return;
+    perfMs += ms; perfN++;
+    if (perfN >= 20) {
+      console.log(
+        `[renderGeo] Kontur ⌀ ${(perfMs / perfN).toFixed(2)} ms/Frame · ${scene.selected.length} sel · ${scene.shapes.length} Shapes`,
+      );
+      perfMs = 0; perfN = 0;
+    }
   }
 
   function renderGeo() {
@@ -414,18 +592,115 @@
     const bb = gl.upload(bed.positions, bed.colors);
     gl.drawBatch(bb, "lines"); gl.free(bb);
 
+    // Füllung liegt vollständig auf der GPU. Vollständig ausgewählte Fill-Layer
+    // folgen Move über dieselbe Offset-Uniform wie ihre Konturen. Bei partieller
+    // Layer-Auswahl sowie Scale/Rotate bleibt die Füllung bis zum Split-/Transform-
+    // Schritt bewusst ausgeblendet, statt eine geometrisch falsche Lage zu zeigen.
+    const transforming =
+      drag?.kind === "move" || drag?.kind === "scale" || drag?.kind === "rotate";
+    if (drag?.kind === "move" || drag?.kind === "scale" || drag?.kind === "rotate") {
+      const selected = new Set(scene.selected);
+      const model = drag.kind === "move" ? null : liveModel();
+      const dx = drag.kind === "move" ? drag.dx : 0;
+      const dy = drag.kind === "move" ? drag.dy : 0;
+      for (const fill of fillBatches) {
+        gl.drawStencilFillParts(fill, selected, model, dx, dy);
+      }
+    } else if (!transforming) {
+      for (const fill of fillBatches) gl.drawStencilFill(fill);
+    }
+
     // Konturen: bei Live-Drag pro Frame neu (Geste), sonst der Cache-Batch.
     // Bilder liegen NICHT hier — sie bleiben auf der 2D-Ebene (drawImage-Quad,
     // ohnehin billig; kein WebGL-Textur-Umweg nötig).
-    const xf = liveXf();
-    if (xf) {
-      const b = shapesToBatch(scene, xf);
-      if (b.positions.length) {
-        const tmp = gl.upload(b.positions, b.colors);
-        gl.drawBatch(tmp, "lines"); gl.free(tmp);
+    if (drag?.kind === "move" || drag?.kind === "scale" || drag?.kind === "rotate") {
+      // Live-Geste: Szene in statisch (unselektiert) + bewegt (selektiert) teilen.
+      // Der statische Teil wird EINMAL pro Geste hochgeladen und gehalten.
+      const sel = new Set(scene.selected);
+      const isSel: ShapeFilter = (idx) => sel.has(idx);
+      const isStatic: ShapeFilter = (idx) => !sel.has(idx);
+      const allSelected = scene.selected.length === scene.shapes.length;
+      // Statischen Rest lazily einmal bauen (erster Frame der Geste).
+      if (!allSelected && !staticBatch) {
+        const s = shapesToBatch(scene, undefined, isStatic);
+        if (s.positions.length) staticBatch = gl.upload(s.positions, s.colors);
       }
+      if (staticBatch) gl.drawBatch(staticBatch, "lines");
+
+      const t0 = performance.now();
+      if (drag.kind === "move") {
+        if (allSelected && shapeBatch) {
+          // Ganze Szene ausgewählt (typisch importiertes DXF/Text): Der bereits
+          // vorhandene Szenenbatch IST der bewegte Batch. Weder statischen
+          // Leer-Batch suchen noch 125k Punkte ein zweites Mal aufbauen.
+          gl.setOffset(drag.dx, drag.dy);
+          gl.drawBatch(shapeBatch, "lines");
+          gl.setOffset(0, 0);
+        } else {
+          // MOVE-Fastpath: selektierten Batch EINMAL in Ruhelage bauen, danach nur
+          // per u_offset verschieben — kein Rebuild/Upload pro Frame.
+          if (!movedBatch) {
+            const m = shapesToBatch(scene, undefined, isSel);
+            if (m.positions.length) movedBatch = gl.upload(m.positions, m.colors);
+          }
+          if (movedBatch) {
+            gl.setOffset(drag.dx, drag.dy);
+            gl.drawBatch(movedBatch, "lines");
+            gl.setOffset(0, 0);
+          }
+        }
+      } else {
+        // Scale/Rotate laufen als Model-Matrix über den einmaligen Auswahlbatch.
+        if (!allSelected && !movedBatch) {
+          const moved = shapesToBatch(scene, undefined, isSel);
+          if (moved.positions.length) movedBatch = gl.upload(moved.positions, moved.colors);
+        }
+        const batch = allSelected ? shapeBatch : movedBatch;
+        const model = liveModel();
+        if (batch && model) {
+          gl.setModel(model);
+          gl.drawBatch(batch, "lines");
+          gl.resetModel();
+        }
+      }
+      perfNote(performance.now() - t0);
     } else if (shapeBatch) {
       gl.drawBatch(shapeBatch, "lines");
+    }
+
+    // Auswahl-Gruppenumrisse: in Ruhe gecacht, bei Move nur per Offset-Uniform.
+    // Scale/Rotate transformieren vorerst nur den selektierten Umriss-Batch neu;
+    // die spätere bildschirmkonstante Strichelung bleibt ein eigener ADR-Schritt.
+    if (drag?.kind === "move") {
+      if (groupOutlineUsesShapeBatch && shapeBatch) {
+        gl.setOffset(drag.dx, drag.dy);
+        gl.drawBatchColor(shapeBatch, "lines", [76 / 255, 130 / 255, 247 / 255, 0.9]);
+        gl.setOffset(0, 0);
+      } else if (groupOutlineBatch) {
+        gl.setOffset(drag.dx, drag.dy);
+        gl.drawBatch(groupOutlineBatch, "lines");
+        gl.setOffset(0, 0);
+      }
+    } else if (drag?.kind === "scale" || drag?.kind === "rotate") {
+      const model = liveModel();
+      if (model) {
+        gl.setModel(model);
+        if (groupOutlineUsesShapeBatch && shapeBatch) {
+          gl.drawBatchColor(shapeBatch, "lines", [76 / 255, 130 / 255, 247 / 255, 0.9]);
+        } else if (groupOutlineBatch) {
+          gl.drawBatch(groupOutlineBatch, "lines");
+        }
+        gl.resetModel();
+      }
+    } else if (groupOutlineUsesShapeBatch && shapeBatch) {
+      gl.drawBatchColor(shapeBatch, "lines", [76 / 255, 130 / 255, 247 / 255, 0.9]);
+    } else if (groupOutlineBatch) {
+      gl.drawBatch(groupOutlineBatch, "lines");
+    }
+
+    if (tool === "node") {
+      if (nodeLineBatch) gl.drawBatch(nodeLineBatch, "lines");
+      if (nodePointBatch) gl.drawBatch(nodePointBatch, "points");
     }
   }
 
@@ -473,12 +748,22 @@
     const ctx = canvasEl.getContext("2d");
     if (!ctx) return;
     const w = canvasEl.width, h = canvasEl.height;
+    const profile = PERF_LOG && !!drag;
+    let mark = profile ? performance.now() : 0;
+    const note = (slot: OverlayPerfSlot) => {
+      if (!profile) return;
+      const now = performance.now();
+      overlayParts[slot] += now - mark;
+      mark = now;
+    };
     ctx.clearRect(0, 0, w, h); // transparent — die WebGL-Ebene scheint durch
-    // Füllungen gefüllter Layer (die Kontur selbst kommt aus WebGL). Bilder je
-    // Form, Vektor-Flächen je Layer gemeinsam (Even-Odd → Löcher bleiben frei).
+    note("clear");
+    // Bilder bleiben vorerst auf 2D; Vektorfüllungen liegen im WebGL-Stencil.
     scene.shapes.forEach((s, i) => drawImageShape(ctx, s, i));
-    drawLayerFills(ctx);
+    note("images");
+    note("fills");
     drawSelection(ctx);
+    note("selection");
     drawGesturePreview(ctx);
     drawPolyPreview(ctx);
     drawBezierDraft(ctx);
@@ -486,8 +771,27 @@
     drawMeasure(ctx);
     drawBridgePreview(ctx);
     drawFilletMarkers(ctx);
-    drawNodes(ctx);
+    // Knoten und Tangenten werden vom WebGL-Punkt-/Linienbatch gezeichnet.
+    note("tools");
     drawRulers(ctx, w, h);
+    note("rulers");
+    if (profile) overlayPartsN++;
+  }
+
+  type OverlayPerfSlot = "clear" | "images" | "fills" | "selection" | "tools" | "rulers";
+  const overlayParts: Record<OverlayPerfSlot, number> = {
+    clear: 0, images: 0, fills: 0, selection: 0, tools: 0, rulers: 0,
+  };
+  let overlayPartsN = 0;
+
+  function flushOverlayParts() {
+    if (overlayPartsN === 0) return;
+    const avg = (slot: OverlayPerfSlot) => (overlayParts[slot] / overlayPartsN).toFixed(2);
+    console.log(
+      `[renderOverlay parts] clear ${avg("clear")} · images ${avg("images")} · fills ${avg("fills")} · selection ${avg("selection")} · tools ${avg("tools")} · rulers ${avg("rulers")} ms`,
+    );
+    for (const slot of Object.keys(overlayParts) as OverlayPerfSlot[]) overlayParts[slot] = 0;
+    overlayPartsN = 0;
   }
 
   // ---- Lineale (mm) oben + links ------------------------------------------
@@ -610,7 +914,6 @@
   }
 
   // ---- Node-Editor: Knoten + Tangenten der selektierten Shapes ----------------
-  const NODE_ACCENT = "#4c82f7";
   // Editier-Knoten einer Shape: aus dem Bézier-Meta ODER (Fallback) aus den
   // Konturpunkten der Polyline/Rect. So ist JEDE Vektor-Shape node-editierbar.
   function editNodes(s: Shape): { p: [number, number]; hIn: [number, number] | null; hOut: [number, number] | null }[] {
@@ -622,44 +925,6 @@
     }
     return [];
   }
-  function drawNodes(ctx: CanvasRenderingContext2D) {
-    if (tool !== "node") return;
-    for (const idx of scene.selected) {
-      const s = scene.shapes[idx];
-      if (!s) continue;
-      const nodes = editNodes(s);
-      if (nodes.length === 0) continue;
-      const bp = { nodes };
-      // Tangenten-Linien zuerst (unter den Quadraten).
-      ctx.strokeStyle = "rgba(120,160,230,0.8)";
-      ctx.lineWidth = 1;
-      for (const nd of bp.nodes) {
-        const [ax, ay] = toScreen(nd.p[0], nd.p[1]);
-        for (const h of [nd.hIn, nd.hOut]) {
-          if (!h) continue;
-          const [hx, hy] = toScreen(h[0], h[1]);
-          ctx.beginPath();
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(hx, hy);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
-          ctx.fillStyle = "#7aa8ff";
-          ctx.fill();
-        }
-      }
-      // Anker-Quadrate (erster Knoten rot, wie v3).
-      bp.nodes.forEach((nd, i) => {
-        const [ax, ay] = toScreen(nd.p[0], nd.p[1]);
-        ctx.fillStyle = "#ffffff";
-        ctx.strokeStyle = i === 0 ? "#ff5c62" : NODE_ACCENT;
-        ctx.lineWidth = 1.5;
-        ctx.fillRect(ax - 3.5, ay - 3.5, 7, 7);
-        ctx.strokeRect(ax - 3.5, ay - 3.5, 7, 7);
-      });
-    }
-  }
-
   // Trifft ein Bildschirmpunkt einen Knoten/Handle? Liefert {shape,node,part}.
   function hitNode(px: number, py: number): { shape: number; node: number; part: "anchor" | "in" | "out" } | null {
     const tol = 7;
@@ -866,12 +1131,6 @@
     const [r, g, b] = l ? l.color : [255, 92, 98];
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
-  function layerFilled(s: Shape): boolean {
-    const l = scene.layers[s.layer_id];
-    // Image-Layer nicht flaechig einfaerben — das Bild wird selbst gezeichnet.
-    return !!l && (l.mode === "Fill" || l.mode === "Raster");
-  }
-
   // Wendet das laufende Move-/Scale-Delta (nur visuell, waehrend der Geste) auf
   // EINEN Weltpunkt der Form `idx` an. So wandert die eigentliche Geometrie
   // (auch Polylinien-Punkte) live mit — nicht nur die Bounding-Box.
@@ -906,7 +1165,7 @@
 
   // 2D-Ebene, Bilder: gecachtes Bitmap in die (live transformierte) Box zeichnen
   // (volle Aufloesung, ADR 0004). Move/Resize aendern nur die Box — kein
-  // Neurendern. Die KONTUR/Fläche kommt NICHT hierher (das macht drawLayerFills).
+  // Neurendern. Die Vektor-Kontur/-Fläche kommt aus WebGL.
   function drawImageShape(ctx: CanvasRenderingContext2D, s: Shape, idx: number) {
     if (!("Image" in s.geo)) return;
     const [bx, by, bw, bh] = shapeDrawBox(s, idx);
@@ -923,55 +1182,6 @@
     ctx.strokeStyle = layerColor(s); ctx.lineWidth = 1;
     ctx.strokeRect(sx, sy, bw * zoom, bh * zoom);
     ctx.restore();
-  }
-
-  // Kontur EINER gefüllten Vektor-Form in Welt-mm (Live-Move/Scale + Rotation
-  // eingerechnet), als geschlossener Polygonzug. Basis für die Even-Odd-Füllung.
-  function shapeFillOutline(s: Shape, idx: number): Pt[] {
-    let pts: Pt[];
-    if ("Rect" in s.geo) {
-      const { x, y, w, h } = s.geo.Rect;
-      pts = rectPoints(x, y, w, h);
-    } else if ("Ellipse" in s.geo) {
-      const { cx, cy, rx, ry } = s.geo.Ellipse;
-      pts = ellipsePoints(cx, cy, rx, ry);
-    } else if ("Polyline" in s.geo) {
-      pts = s.geo.Polyline.pts.map(([a, b]) => [a, b] as Pt);
-    } else {
-      return [];
-    }
-    if (s.rotation) pts = rotateAroundBBoxCenter(pts, s.rotation);
-    return pts.map(([x, y]) => liveTransformPoint(x, y, idx));
-  }
-
-  // Flächen gefüllter Layer. Alle Formen EINES Layers werden in EINEN Pfad
-  // gelegt und mit "evenodd" gefüllt — so bleiben verschachtelte Konturen
-  // (innere Ringe, Buchstaben-Innenräume) korrekt ausgespart, statt sich beim
-  // Einzel-Füllen gegenseitig zu übermalen. Die KONTUR selbst kommt aus WebGL.
-  function drawLayerFills(ctx: CanvasRenderingContext2D) {
-    // Formen je gefülltem Layer sammeln (Reihenfolge wie in scene.shapes).
-    const byLayer = new Map<number, Pt[][]>();
-    scene.shapes.forEach((s, i) => {
-      if ("Image" in s.geo || !layerFilled(s)) return;
-      const outline = shapeFillOutline(s, i);
-      if (outline.length < 2) return;
-      const g = byLayer.get(s.layer_id);
-      if (g) g.push(outline); else byLayer.set(s.layer_id, [outline]);
-    });
-    for (const [layerId, outlines] of byLayer) {
-      const l = scene.layers[layerId];
-      const [r, g, b] = l ? l.color : [255, 92, 98];
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.32)`;
-      ctx.beginPath();
-      for (const outline of outlines) {
-        outline.forEach(([wx, wy], i) => {
-          const [px, py] = toScreen(wx, wy);
-          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        });
-        ctx.closePath();
-      }
-      ctx.fill("evenodd");
-    }
   }
 
   // Ecken einer Vektor-Shape in mm (Rotation eingerechnet) für den Fillet-Pick.
@@ -1034,47 +1244,17 @@
     return toScreen(mx, my);
   }
 
-  // Kontur EINER Form in Bildschirm-Koordinaten (Rotation + Live-Geste drin) +
-  // ob sie geschlossen ist. Bilder liefern ihre (mit-transformierte) Box.
-  function shapeOutlineScreen(s: Shape, idx: number): { pts: [number, number][]; closed: boolean } {
-    if ("Image" in s.geo) {
-      const [bx, by, bw, bh] = shapeDrawBox(s, idx);
-      let corners: Pt[] = rectPoints(bx, by, bw, bh);
-      if (s.rotation) corners = rotateAroundBBoxCenter(corners, s.rotation);
-      return { pts: corners.map(([x, y]) => toScreen(x, y)), closed: true };
-    }
-    const closed = "Polyline" in s.geo ? s.geo.Polyline.closed : true;
-    return { pts: shapeFillOutline(s, idx).map(([x, y]) => toScreen(x, y)), closed };
-  }
-
-  // Gestrichelte Markierung JEDER Kontur einer echten Gruppe (group_id) in der
-  // Auswahl — so sieht man sofort, was zum Block gehört. Lose Mehrfachauswahl
-  // (ohne group_id) bekommt nur die gemeinsame Box.
-  function drawGroupOutlines(ctx: CanvasRenderingContext2D) {
-    ctx.strokeStyle = "rgba(76,130,247,0.9)";
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([5, 3]);
-    for (const idx of scene.selected) {
-      const s = scene.shapes[idx];
-      if (!s || s.group_id == null) continue;
-      const { pts, closed } = shapeOutlineScreen(s, idx);
-      if (pts.length < 2) continue;
-      ctx.beginPath();
-      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      if (closed) ctx.closePath();
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-  }
-
   function drawSelection(ctx: CanvasRenderingContext2D) {
     if (!scene.selected.length) return;
+    // Im Node-Werkzeug sind Anker und Bézier-Handles die Affordances. Die
+    // gemeinsame Transform-Box samt Scale-/Rotate-Griffen liegt dort nur im Weg
+    // und wird deshalb vollständig ausgeblendet.
+    if (tool === "node") return;
     const box = selectionBBox();
     if (!box) return;
     const [bx, by, bw, bh] = box;
 
-    // Gruppen-Konturen zuerst (liegen unter Box/Griffen).
-    drawGroupOutlines(ctx);
+    // Punktzahlabhängige Gruppenumrisse werden vom WebGL-Batch gezeichnet.
 
     // EINE gemeinsame Auswahl-Box um die ganze Auswahl (Text = ein Block), die
     // der Live-Geste folgt. Bei Rotation dreht die Box als Vierkant mit.
@@ -1184,6 +1364,7 @@
   }
 
   async function onPointerDown(ev: PointerEvent) {
+    beginGesturePerf("pointer");
     canvasEl.setPointerCapture(ev.pointerId);
     const [px, py] = localXY(ev);
     // Mittel-Maus oder Space = Pan.
@@ -1312,7 +1493,11 @@
       return;
     }
     // Erst selektieren (Command), dann ggf. Marquee wenn nichts getroffen.
-    onselectat(mx, my, additive);
+    const selectStarted = PERF_LOG ? performance.now() : 0;
+    await onselectat(mx, my, additive);
+    if (PERF_LOG) {
+      console.log("[select_at] Core + Scene " + (performance.now() - selectStarted).toFixed(2) + " ms");
+    }
     // Marquee vorbereiten (falls ins Leere geklickt wurde, greift es beim Ziehen).
     drag = { kind: "marquee", sx: mx, sy: my, cx: mx, cy: my };
   }
@@ -1344,14 +1529,14 @@
       } else {
         bez.cursor = [mx, my]; // Gummiband
       }
-      drawSync();
+      drawGestureFrame();
       return;
     }
     // Polylinien-Gummiband: Cursor verfolgen, auch ohne aktiven Drag.
     if ((tool === "polyline" || tool === "spline") && polyPts.length > 0) {
       polyCursor = [mx, my];
       polyNearStart = nearFirstPoint(px, py);
-      drawSync();
+      drawGestureFrame();
     }
     if (!drag) return;
     if (drag.kind === "pan") {
@@ -1380,8 +1565,9 @@
       if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
       drag = { ...drag, deg };
     }
-    // Während der Geste synchron zeichnen — kein Frame-Versatz ("Cursor klebt").
-    drawSync();
+    // Auf den nächsten sichtbaren Frame begrenzen. `drag` enthält dabei immer
+    // schon die jüngste (ggf. von WebKit coalescte) Pointer-Position.
+    drawGestureFrame();
   }
 
   // Referenz-Kante des Handles in der Startbox (für konsistentes Delta).
@@ -1394,6 +1580,8 @@
     }
     if (!drag) return;
     const g = drag;
+    gesturePerf.kind = g.kind;
+    queueGesturePerfFlush();
     // WICHTIG: Bei move/scale bleibt `drag` (und damit die Live-Vorschau an der
     // NEUEN Stelle) bestehen, bis der Core die aktualisierte Scene liefert.
     // Sonst zeigt ein Frame die Form kurz an der alten Position ("aufblitzen"),
@@ -1626,15 +1814,43 @@
   // NUR wenn keine Live-Drag-Geste läuft — während move/scale baut renderGeo den
   // Batch pro Frame selbst (mit Transform), ein zusätzliches rebuild wäre doppelt.
   $effect(() => {
-    scene.shapes; scene.layers;
+    const shapes = scene.shapes;
+    const layers = scene.layers;
+    if (shapes !== observedShapes || layers !== observedLayers) {
+      observedShapes = shapes;
+      observedLayers = layers;
+      geometryDirty = true;
+    }
     const live = drag && (drag.kind === "move" || drag.kind === "scale" || drag.kind === "rotate");
-    if (!live) rebuildGeo();
+    if (!live && geometryDirty) {
+      rebuildGeo();
+      geometryDirty = false;
+    }
+  });
+  // Auswahlwechsel ändert nur den GPU-Gruppenumriss, nicht die Szenengeometrie.
+  $effect(() => {
+    scene.selected;
+    const live = drag && (drag.kind === "move" || drag.kind === "scale" || drag.kind === "rotate");
+    if (!live) {
+      rebuildGroupOutlines();
+      updateFillSelection();
+    }
+  });
+  $effect(() => {
+    scene.shapes;
+    scene.selected;
+    tool;
+    rebuildNodeBatches();
   });
   // rAF beim Unmount abbrechen (kein Redraw auf totem Canvas) + GPU-Buffer frei.
   $effect(() => () => {
     if (rafId) cancelAnimationFrame(rafId);
     clearScheduledFit();
     if (gl && shapeBatch) gl.free(shapeBatch);
+    if (gl && groupOutlineBatch) gl.free(groupOutlineBatch);
+    if (gl && nodeLineBatch) gl.free(nodeLineBatch);
+    if (gl && nodePointBatch) gl.free(nodePointBatch);
+    if (gl) for (const fill of fillBatches) gl.freeStencilFill(fill);
   });
   // Werkzeugwechsel bricht einen laufenden Polylinien-Zug ab.
   $effect(() => {

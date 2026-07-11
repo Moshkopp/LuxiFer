@@ -21,9 +21,11 @@ const VS = `
 attribute vec2 a_pos;
 attribute vec4 a_col;
 uniform mat3 u_mvp;
+uniform mat3 u_model;
+uniform vec2 u_offset;   // mm-Verschiebung (Live-Move); sonst (0,0)
 varying vec4 v_col;
 void main() {
-  vec3 p = u_mvp * vec3(a_pos, 1.0);
+  vec3 p = u_mvp * u_model * vec3(a_pos + u_offset, 1.0);
   gl_Position = vec4(p.xy, 0.0, 1.0);
   gl_PointSize = 9.0;
   v_col = a_col;
@@ -47,6 +49,12 @@ void main() {
   v_uv = a_uv;
 }`;
 
+const IDENTITY_MODEL = new Float32Array([
+  1, 0, 0,
+  0, 1, 0,
+  0, 0, 1,
+]);
+
 const TFS = `
 precision mediump float;
 uniform sampler2D u_tex;
@@ -68,6 +76,8 @@ export class GlRenderer {
   private locPos: number;
   private locCol: number;
   private locMvp: WebGLUniformLocation;
+  private locModel: WebGLUniformLocation;
+  private locOffset: WebGLUniformLocation;
   // Textur-Programm
   private tprog: WebGLProgram;
   private tPos: number;
@@ -77,13 +87,15 @@ export class GlRenderer {
   private mvp = new Float32Array(9);
 
   constructor(canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
+    const gl = canvas.getContext("webgl", { antialias: true, alpha: false, stencil: true });
     if (!gl) throw new Error("WebGL nicht verfügbar");
     this.gl = gl;
     this.prog = linkProgram(gl, VS, FS);
     this.locPos = gl.getAttribLocation(this.prog, "a_pos");
     this.locCol = gl.getAttribLocation(this.prog, "a_col");
     this.locMvp = gl.getUniformLocation(this.prog, "u_mvp")!;
+    this.locModel = gl.getUniformLocation(this.prog, "u_model")!;
+    this.locOffset = gl.getUniformLocation(this.prog, "u_offset")!;
     this.tprog = linkProgram(gl, TVS, TFS);
     this.tPos = gl.getAttribLocation(this.tprog, "a_pos");
     this.tUv = gl.getAttribLocation(this.tprog, "a_uv");
@@ -100,9 +112,32 @@ export class GlRenderer {
     this.mvp.set(mmToClipMatrix(cam, w, h));
     gl.useProgram(this.prog);
     gl.uniformMatrix3fv(this.locMvp, false, this.mvp);
+    gl.uniformMatrix3fv(this.locModel, false, IDENTITY_MODEL);
+    gl.uniform2f(this.locOffset, 0, 0); // Frame startet ohne Live-Verschiebung
     // Alpha-Blending für halbtransparente Linien (Grid/Travel) + Texturen.
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
+  /**
+   * Setzt die mm-Verschiebung für nachfolgende `drawBatch`-Aufrufe. Kern des
+   * schnellen Live-Move: der Batch liegt EINMAL auf der GPU, pro Frame ändert
+   * sich nur dieses Uniform — kein Neu-Bauen/Hochladen der Vertices. Nach dem
+   * verschobenen Draw wieder auf (0,0) zurücksetzen, damit statische Batches
+   * (Grid, Bett, unbewegte Konturen) an ihrer Stelle bleiben.
+   */
+  setOffset(dx: number, dy: number) {
+    this.gl.useProgram(this.prog);
+    this.gl.uniform2f(this.locOffset, dx, dy);
+  }
+
+  setModel(model: Float32Array) {
+    this.gl.useProgram(this.prog);
+    this.gl.uniformMatrix3fv(this.locModel, false, model);
+  }
+
+  resetModel() {
+    this.setModel(IDENTITY_MODEL);
   }
 
   /**
@@ -133,6 +168,132 @@ export class GlRenderer {
     gl.enableVertexAttribArray(this.locCol);
     gl.vertexAttribPointer(this.locCol, 4, gl.FLOAT, false, 0, 0);
     gl.drawArrays(mode === "lines" ? gl.LINES : gl.POINTS, 0, b.count);
+  }
+
+  /** Vorhandenen Positionsbuffer mit einer konstanten Farbe zeichnen. */
+  drawBatchColor(
+    b: GlBatch,
+    mode: "lines" | "points",
+    color: [number, number, number, number],
+  ) {
+    const gl = this.gl;
+    if (b.count === 0) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, b.pos);
+    gl.enableVertexAttribArray(this.locPos);
+    gl.vertexAttribPointer(this.locPos, 2, gl.FLOAT, false, 0, 0);
+    gl.disableVertexAttribArray(this.locCol);
+    gl.vertexAttrib4f(this.locCol, color[0], color[1], color[2], color[3]);
+    gl.drawArrays(mode === "lines" ? gl.LINES : gl.POINTS, 0, b.count);
+    gl.enableVertexAttribArray(this.locCol);
+  }
+
+  uploadStencilFill(
+    positions: Float32Array,
+    ranges: FillRange[],
+    bounds: [number, number, number, number],
+    color: [number, number, number, number],
+    allSelected: boolean,
+    layerId: number,
+  ): GlStencilFill {
+    const gl = this.gl;
+    const pos = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, pos);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    const [x, y, w, h] = bounds;
+    const quad = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      x, y, x + w, y, x, y + h, x + w, y + h,
+    ]), gl.STATIC_DRAW);
+    return { pos, quad, count: positions.length / 2, ranges, color, allSelected, layerId };
+  }
+
+  /**
+   * Even-Odd ohne Ringanalyse: Jeder Kontur-Fan invertiert Bit 0 im Stencil.
+   * Überlappende Fan-Dreiecke löschen sich per Parität; anschließend wird nur
+   * die gesetzte Layerfläche mit einem Bounding-Quad eingefärbt.
+   */
+  drawStencilFill(fill: GlStencilFill) {
+    this.drawStencilFillParts(fill, new Set<number>(), null, 0, 0);
+  }
+
+  drawStencilFillParts(
+    fill: GlStencilFill,
+    selected: Set<number>,
+    selectedModel: Float32Array | null,
+    offsetX: number,
+    offsetY: number,
+  ) {
+    const gl = this.gl;
+    gl.useProgram(this.prog);
+    gl.clearStencil(0);
+    gl.clear(gl.STENCIL_BUFFER_BIT);
+    gl.enable(gl.STENCIL_TEST);
+    gl.stencilMask(0x1);
+    gl.stencilFunc(gl.ALWAYS, 1, 0x1);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+    gl.colorMask(false, false, false, false);
+    gl.disable(gl.BLEND);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, fill.pos);
+    gl.enableVertexAttribArray(this.locPos);
+    gl.vertexAttribPointer(this.locPos, 2, gl.FLOAT, false, 0, 0);
+    gl.disableVertexAttribArray(this.locCol);
+    gl.vertexAttrib4f(this.locCol, 0, 0, 0, 0);
+    const runs: { start: number; count: number; moving: boolean }[] = [];
+    for (const range of fill.ranges) {
+      const moving = selected.has(range.shapeIdx);
+      const prev = runs[runs.length - 1];
+      if (prev && prev.moving === moving && prev.start + prev.count === range.start) {
+        prev.count += range.count;
+      } else {
+        runs.push({ start: range.start, count: range.count, moving });
+      }
+    }
+    const drawRanges = () => {
+      for (const run of runs) {
+        const moving = run.moving;
+        if (moving) {
+          if (selectedModel) this.setModel(selectedModel); else this.resetModel();
+          this.setOffset(offsetX, offsetY);
+        } else {
+          this.resetModel();
+          this.setOffset(0, 0);
+        }
+        gl.drawArrays(gl.TRIANGLES, run.start, run.count);
+      }
+    };
+    drawRanges();
+
+    gl.colorMask(true, true, true, true);
+    gl.stencilMask(0);
+    gl.stencilFunc(gl.EQUAL, 1, 0x1);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.vertexAttrib4f(
+      this.locCol,
+      fill.color[0],
+      fill.color[1],
+      fill.color[2],
+      fill.color[3],
+    );
+    // Dieselben Dreiecke erneut zeichnen. Der erste Treffer färbt und setzt
+    // das Stencilbit auf 0; dadurch wird jedes Even-Odd-Innenpixel genau einmal
+    // geblendet, ohne ein transformabhängiges Bounding-Quad.
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.ZERO);
+    drawRanges();
+
+    this.resetModel();
+    this.setOffset(0, 0);
+    gl.disable(gl.STENCIL_TEST);
+    gl.stencilMask(0xff);
+    gl.enableVertexAttribArray(this.locCol);
+  }
+
+  freeStencilFill(fill: GlStencilFill) {
+    this.gl.deleteBuffer(fill.pos);
+    this.gl.deleteBuffer(fill.quad);
   }
 
   /** GPU-Buffer eines Batches freigeben (beim Neu-Aufbau der Daten). */
@@ -208,6 +369,22 @@ export class GlRenderer {
 export interface GlBatch {
   pos: WebGLBuffer;
   col: WebGLBuffer;
+  count: number;
+}
+
+export interface GlStencilFill {
+  pos: WebGLBuffer;
+  quad: WebGLBuffer;
+  count: number;
+  ranges: FillRange[];
+  color: [number, number, number, number];
+  allSelected: boolean;
+  layerId: number;
+}
+
+export interface FillRange {
+  shapeIdx: number;
+  start: number;
   count: number;
 }
 
