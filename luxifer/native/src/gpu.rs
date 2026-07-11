@@ -1,0 +1,227 @@
+//! wgpu-Canvas: rendert die Linien-Vertices (Welt-mm) mit Kamera-Projektion.
+//! Ein Pipeline, LineList, Vertex trägt Farbe. egui rendert danach obendrauf
+//! (siehe `App::render`).
+
+use crate::camera::Camera;
+use crate::scene_geo::Vertex;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Uniforms {
+    center: [f32; 2],
+    scale: f32,
+    _pad: f32,
+    viewport: [f32; 2],
+    _pad2: [f32; 2],
+}
+
+/// Kapselt Device/Queue/Surface + die Canvas-Pipeline. egui-State liegt separat.
+pub struct Gpu {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub surface: wgpu::Surface<'static>,
+    pub config: wgpu::SurfaceConfiguration,
+    pipeline: wgpu::RenderPipeline,
+    uniform_buf: wgpu::Buffer,
+    bind: wgpu::BindGroup,
+    // Dynamischer Vertex-Buffer; wächst bei Bedarf.
+    vbuf: wgpu::Buffer,
+    vbuf_cap: u64,
+}
+
+impl Gpu {
+    pub async fn new(window: std::sync::Arc<winit::window::Window>) -> Self {
+        let size = window.inner_size();
+        let instance = wgpu::Instance::default();
+        let surface = instance.create_surface(window.clone()).unwrap();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .expect("kein GPU-Adapter");
+        log::info!("GPU: {}", adapter.get_info().name);
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default(), None)
+            .await
+            .unwrap();
+
+        let caps = surface.get_capabilities(&adapter);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(caps.formats[0]);
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("canvas"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uniforms"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bind_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buf.as_entire_binding(),
+            }],
+        });
+        let pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bind_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lines"),
+            layout: Some(&pl_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let vbuf_cap = 1 << 16;
+        let vbuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vertices"),
+            size: vbuf_cap * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Self {
+            device,
+            queue,
+            surface,
+            config,
+            pipeline,
+            uniform_buf,
+            bind,
+            vbuf,
+            vbuf_cap,
+        }
+    }
+
+    pub fn resize(&mut self, w: u32, h: u32) {
+        self.config.width = w.max(1);
+        self.config.height = h.max(1);
+        self.surface.configure(&self.device, &self.config);
+    }
+
+    /// Lädt die Vertices in den (ggf. vergrößerten) Buffer und schreibt die
+    /// Kamera-Uniforms. Gibt die Vertex-Anzahl zurück.
+    pub fn upload(&mut self, verts: &[Vertex], cam: &Camera) -> u32 {
+        let uni = Uniforms {
+            center: cam.center,
+            scale: cam.scale,
+            _pad: 0.0,
+            viewport: cam.viewport,
+            _pad2: [0.0, 0.0],
+        };
+        self.queue
+            .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&uni));
+
+        let need = verts.len() as u64;
+        if need > self.vbuf_cap {
+            self.vbuf_cap = need.next_power_of_two();
+            self.vbuf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("vertices"),
+                size: self.vbuf_cap * std::mem::size_of::<Vertex>() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if !verts.is_empty() {
+            self.queue
+                .write_buffer(&self.vbuf, 0, bytemuck::cast_slice(verts));
+        }
+        verts.len() as u32
+    }
+
+    /// Zeichnet die hochgeladenen Linien in den Render-Pass (Clear + Canvas).
+    /// egui zeichnet danach in denselben Encoder (siehe App).
+    pub fn draw_canvas<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>, count: u32) {
+        if count == 0 {
+            return;
+        }
+        rp.set_pipeline(&self.pipeline);
+        rp.set_bind_group(0, &self.bind, &[]);
+        rp.set_vertex_buffer(0, self.vbuf.slice(..));
+        rp.draw(0..count, 0..1);
+    }
+}
+
+const SHADER: &str = r#"
+struct U { center: vec2<f32>, scale: f32, _p: f32, viewport: vec2<f32>, _p2: vec2<f32> };
+@group(0) @binding(0) var<uniform> u: U;
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32> };
+
+@vertex
+fn vs(@location(0) p: vec2<f32>, @location(1) c: vec4<f32>) -> VOut {
+    let px = (p - u.center) * u.scale;
+    // Pixel → NDC; Y nach unten (Bildkonvention).
+    let ndc = vec2<f32>(px.x / (u.viewport.x * 0.5), -px.y / (u.viewport.y * 0.5));
+    var o: VOut;
+    o.pos = vec4<f32>(ndc, 0.0, 1.0);
+    o.col = c;
+    return o;
+}
+
+@fragment
+fn fs(v: VOut) -> @location(0) vec4<f32> { return v.col; }
+"#;

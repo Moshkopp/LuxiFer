@@ -1,0 +1,25 @@
+[package]
+name = "luxifer-native"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Nativer Renderer (ADR 0010): winit + wgpu (Canvas) + egui (Panels), direkt an
+# luxifer-core gelinkt — kein WebView, kein IPC. Löst die Zeichen-/UI-Schicht von
+# Tauri/Svelte ab; der Core bleibt die einzige Quelle der Wahrheit.
+
+[dependencies]
+luxifer-core = { path = "../core" }
+
+winit = "0.30"
+wgpu = "22"
+pollster = "0.3"
+bytemuck = { version = "1", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+
+# egui-Stack für die Panels, gerendert über wgpu in denselben Frame.
+egui = "0.29"
+egui-wgpu = "0.29"
+egui-winit = "0.29"
