@@ -428,6 +428,7 @@ fn align(data: State<AppData>, kind: String) -> Scene {
         "top" => Align::Top,
         "vcenter" => Align::VCenter,
         "bottom" => Align::Bottom,
+        "center" => Align::Center,
         _ => return scene_with(&s, &data),
     };
     s.align_selection(k);
@@ -441,6 +442,8 @@ fn distribute(data: State<AppData>, kind: String) -> Scene {
     let k = match kind.as_str() {
         "h" => Distribute::Horizontal,
         "v" => Distribute::Vertical,
+        "space-h" => Distribute::SpaceHorizontal,
+        "space-v" => Distribute::SpaceVertical,
         _ => return scene_with(&s, &data),
     };
     s.distribute_selection(k);

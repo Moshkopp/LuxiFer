@@ -81,7 +81,7 @@ impl AppState {
                 continue;
             };
             let b = s.bbox();
-            s.geo.translate(tx - b.x, ty - b.y);
+            s.translate(tx - b.x, ty - b.y);
         }
         self.dirty = true;
     }
@@ -123,7 +123,7 @@ impl AppState {
                 // Das Original an die erste Position schieben.
                 if let Some(s) = self.shapes.get_mut(first) {
                     let bb = s.bbox();
-                    s.geo.translate(tx - bb.x, ty - bb.y);
+                    s.translate(tx - bb.x, ty - bb.y);
                 }
                 self.selected.push(first);
                 placed_first = true;
@@ -132,7 +132,7 @@ impl AppState {
                 copy.group_id = None;
                 copy.text_meta = None;
                 let bb = copy.bbox();
-                copy.geo.translate(tx - bb.x, ty - bb.y);
+                copy.translate(tx - bb.x, ty - bb.y);
                 let idx = self.shapes.len();
                 self.shapes.push(copy);
                 self.selected.push(idx);

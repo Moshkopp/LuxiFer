@@ -11,8 +11,6 @@
     onnestfill,
     ongroup,
     onungroup,
-    selBBox,
-    onresize,
   }: {
     selCount: number;
     onalign: (k: AlignKind) => void;
@@ -21,10 +19,6 @@
     onnestfill: (gap: number) => void;
     ongroup: () => void;
     onungroup: () => void;
-    // BBox der Auswahl (x,y,w,h in mm) oder null.
-    selBBox: [number, number, number, number] | null;
-    // Auswahl auf neue Breite/Höhe skalieren (Anker = linke Oberkante).
-    onresize: (w: number, h: number) => void;
   } = $props();
 
   // Nest-Abstand (mm).
@@ -32,28 +26,6 @@
   let nestOpen = $state(false);
   let nestMode = $state<"pack" | "fill">("pack");
 
-  // Größe der Auswahl per Eingabe (mit Seitenverhältnis-Sperre).
-  let ratioLock = $state(true);
-  let wIn = $state(0);
-  let hIn = $state(0);
-  // Eingaben folgen der Auswahl (aber nicht während man tippt — Werte werden
-  // beim Auswahlwechsel gesetzt).
-  $effect(() => {
-    if (selBBox) {
-      wIn = Math.round(selBBox[2] * 100) / 100;
-      hIn = Math.round(selBBox[3] * 100) / 100;
-    }
-  });
-  function applyW() {
-    if (!selBBox || wIn <= 0) return;
-    const h = ratioLock ? wIn * (selBBox[3] / selBBox[2]) : hIn;
-    onresize(wIn, h);
-  }
-  function applyH() {
-    if (!selBBox || hIn <= 0) return;
-    const w = ratioLock ? hIn * (selBBox[2] / selBBox[3]) : wIn;
-    onresize(w, hIn);
-  }
   function canApplyNest(): boolean {
     return nestMode === "fill" ? selCount >= 1 : selCount >= 2;
   }
@@ -66,34 +38,38 @@
 </script>
 
 <div class="toolbar">
-  <div class="group">
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onalign("left")} title="Links ausrichten">⇤</button>
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onalign("hcenter")} title="Horizontal zentrieren">⇔</button>
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onalign("right")} title="Rechts ausrichten">⇥</button>
-    <div class="vsep"></div>
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onalign("top")} title="Oben ausrichten">⤒</button>
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onalign("vcenter")} title="Vertikal zentrieren">⇕</button>
-    <button class="gbtn" disabled={selCount < 2} onclick={() => onalign("bottom")} title="Unten ausrichten">⤓</button>
-    <div class="vsep"></div>
-    <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("h")} title="Horizontal verteilen">⋯</button>
-    <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("v")} title="Vertikal verteilen">⋮</button>
-    <div class="vsep"></div>
-    <button class="gbtn" disabled={selCount < 2} onclick={ongroup} title="Gruppieren (Strg+G)">⧉</button>
-    <button class="gbtn" disabled={selCount < 1} onclick={onungroup} title="Gruppierung lösen (Strg+Umschalt+G)">⧎</button>
+  <div class="section">
+    <div class="group">
+      <button class="gbtn" disabled={selCount < 1} onclick={() => onalign("left")} title="Links ausrichten">⇤</button>
+      <button class="gbtn" disabled={selCount < 1} onclick={() => onalign("hcenter")} title="Horizontal zentrieren">⇔</button>
+      <button class="gbtn" disabled={selCount < 1} onclick={() => onalign("right")} title="Rechts ausrichten">⇥</button>
+      <span class="mini-sep"></span>
+      <button class="gbtn" disabled={selCount < 1} onclick={() => onalign("top")} title="Oben ausrichten">⤒</button>
+      <button class="gbtn" disabled={selCount < 1} onclick={() => onalign("vcenter")} title="Vertikal zentrieren">⇕</button>
+      <button class="gbtn" disabled={selCount < 1} onclick={() => onalign("bottom")} title="Unten ausrichten">⤓</button>
+      <button class="gbtn" disabled={selCount < 1} onclick={() => onalign("center")} title="Auf beiden Achsen zentrieren">◎</button>
+    </div>
   </div>
 
-  <!-- Größe der Auswahl numerisch setzen (Ratio-Lock koppelt B/H). -->
-  <div class="group size-group">
-    <span class="lbl">B</span>
-    <input class="mm" type="number" step="0.5" min="0.1" bind:value={wIn}
-      disabled={!selBBox} onchange={applyW} onkeydown={(e) => e.key === "Enter" && applyW()} title="Breite in mm" />
-    <button class="gbtn" class:on={ratioLock} onclick={() => (ratioLock = !ratioLock)}
-      title={ratioLock ? "Seitenverhältnis gesperrt" : "Seitenverhältnis frei"}>{ratioLock ? "🔒" : "🔓"}</button>
-    <span class="lbl">H</span>
-    <input class="mm" type="number" step="0.5" min="0.1" bind:value={hIn}
-      disabled={!selBBox} onchange={applyH} onkeydown={(e) => e.key === "Enter" && applyH()} title="Höhe in mm" />
+  <div class="vsep"></div>
+  <div class="section">
+    <div class="group">
+      <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("h")} title="Mitten horizontal gleichmäßig verteilen">⋯</button>
+      <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("space-h")} title="Horizontale Zwischenräume angleichen">↔</button>
+      <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("v")} title="Mitten vertikal gleichmäßig verteilen">⋮</button>
+      <button class="gbtn" disabled={selCount < 3} onclick={() => ondistribute("space-v")} title="Vertikale Zwischenräume angleichen">↕</button>
+    </div>
   </div>
 
+  <div class="vsep"></div>
+  <div class="section">
+    <div class="group">
+      <button class="gbtn" disabled={selCount < 2} onclick={ongroup} title="Gruppieren (Strg+G)">⧉</button>
+      <button class="gbtn" disabled={selCount < 1} onclick={onungroup} title="Gruppierung lösen (Strg+Umschalt+G)">⧎</button>
+    </div>
+  </div>
+
+  <div class="vsep"></div>
   <div class="nest-wrap">
     <button class="gbtn wide" disabled={selCount < 1} onclick={() => (nestOpen = !nestOpen)} title="Nesting-Optionen">
       Nesting
@@ -123,21 +99,25 @@
     align-items: center;
     gap: 8px;
     width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    padding-bottom: 1px;
     min-width: 0;
   }
   .group {
     display: flex;
     align-items: center;
-    gap: 4px;
-    min-width: 0;
-    container-type: inline-size;
-  }
-  .size-group {
-    margin-left: auto;
-    display: grid;
-    grid-template-columns: auto 58px 30px auto 58px;
-    gap: 4px;
+    gap: 5px;
     flex: 0 0 auto;
+    min-width: max-content;
+  }
+  .section {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    min-width: max-content;
   }
   button {
     flex: 0 0 30px;
@@ -157,7 +137,7 @@
   }
   .mm {
     min-width: 34px;
-    width: 58px;
+    width: 52px;
     background: rgba(0, 0, 0, 0.25);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -165,15 +145,6 @@
     font-size: 12px;
     padding: 4px 4px;
     text-align: right;
-  }
-  .lbl {
-    font-size: 11px;
-    color: var(--muted);
-    flex: none;
-    padding: 0 2px;
-  }
-  button.on {
-    border-color: var(--accent);
   }
   button.primary {
     width: 100%;
@@ -187,12 +158,19 @@
     flex: 0 0 1px;
     height: 24px;
     background: var(--border);
-    margin: 3px 4px;
+    margin: 3px 3px;
+  }
+  .mini-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    margin: 0 1px;
   }
   .nest-wrap {
     position: relative;
     flex: 0 0 auto;
   }
+  .toolbar::-webkit-scrollbar { display: none; }
   .nest-menu {
     position: absolute;
     top: calc(100% + 8px);

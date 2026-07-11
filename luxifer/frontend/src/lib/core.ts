@@ -288,8 +288,8 @@ export const scaleSelected = (
     tx: t[0], ty: t[1], tw: t[2], th: t[3],
   });
 
-export type AlignKind = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom";
-export type DistributeKind = "h" | "v";
+export type AlignKind = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "center";
+export type DistributeKind = "h" | "v" | "space-h" | "space-v";
 export const align = (kind: AlignKind) => invoke<Scene>("align", { kind });
 export const distribute = (kind: DistributeKind) => invoke<Scene>("distribute", { kind });
 

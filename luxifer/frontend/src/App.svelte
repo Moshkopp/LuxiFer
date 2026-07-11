@@ -10,6 +10,7 @@
   import PalettePanel from "./lib/PalettePanel.svelte";
   import ShapesPanel from "./lib/ShapesPanel.svelte";
   import ArrangePanel from "./lib/ArrangePanel.svelte";
+  import TransformPanel from "./lib/TransformPanel.svelte";
   import ProjectBrowser from "./lib/ProjectBrowser.svelte";
   import ImageEditor from "./lib/ImageEditor.svelte";
   import TextDialog from "./lib/TextDialog.svelte";
@@ -239,9 +240,8 @@
     }
     return isFinite(a) ? [a, b, c - a, d - b] : null;
   });
-  async function doResize(w: number, h: number) {
-    if (!selBBox) return;
-    scene = await core.scaleSelected(selBBox, [selBBox[0], selBBox[1], w, h]);
+  async function doTransform(start: [number, number, number, number], target: [number, number, number, number]) {
+    scene = await core.scaleSelected(start, target);
   }
   // Bild vektorisieren (aus dem Bild-Editor). Schließt den Dialog bei Erfolg.
   async function doTraceImage(threshold: number, invert: boolean) {
@@ -766,6 +766,8 @@
       {#if scene && activeTab === "Design"}
         <div class="header-divider"></div>
         <div class="header-arrange">
+          <TransformPanel bbox={selBBox} ontransform={doTransform} />
+          <div class="arrange-separator"></div>
           <ArrangePanel
             {selCount}
             onalign={doAlign}
@@ -774,8 +776,6 @@
             onnestfill={async (g) => (scene = await core.nestFillOp(g))}
             ongroup={async () => (scene = await core.groupOp())}
             onungroup={async () => (scene = await core.ungroupOp())}
-            {selBBox}
-            onresize={doResize}
           />
         </div>
       {/if}
@@ -976,7 +976,9 @@
   main {
     position: absolute;
     inset: 0;
-    --topbar-h: 92px;
+    /* 6px oben + 34px Hauptzeile + 12px Trenner + 42px Kontextzeile +
+       8px unten. Diese Kante teilen Canvas, Lineal und beide Seitendocks. */
+    --topbar-h: 102px;
     /* Einreihige Topbar (Laser/Monitor): nur header-main, ohne Anordnen-Zeile. */
     --topbar-h1: 48px;
     --left-dock-w: 96px;
@@ -1015,6 +1017,19 @@
   }
   .header-arrange {
     min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .header-arrange::-webkit-scrollbar { display: none; }
+  .arrange-separator {
+    width: 1px;
+    height: 42px;
+    margin: 0 2px;
+    background: var(--border);
+    flex: 0 0 1px;
   }
   .hleft {
     display: flex;

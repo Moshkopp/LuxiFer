@@ -1,8 +1,7 @@
 //! Anordnen: Ausrichten und Verteilen der Auswahl. Reine Core-Logik.
 //!
-//! Ausrichten braucht ≥ 2, Verteilen ≥ 3 Objekte. Die Funktionen liefern je
-//! Auswahl-Objekt ein Verschiebe-Delta (dx, dy) in mm; das Anwenden übernimmt
-//! `AppState`.
+//! Ausrichten wirkt bei einer Form relativ zum Bett und bei mehreren Formen
+//! relativ zur gemeinsamen Auswahl. Verteilen braucht mindestens drei Formen.
 
 use crate::geometry::{Axis, BBox};
 use crate::state::AppState;
@@ -16,6 +15,7 @@ pub enum Align {
     Top,
     VCenter,
     Bottom,
+    Center,
 }
 
 /// Verteil-Art (gleiche Abstände der Startkanten).
@@ -23,14 +23,48 @@ pub enum Align {
 pub enum Distribute {
     Horizontal,
     Vertical,
+    SpaceHorizontal,
+    SpaceVertical,
 }
 
 impl AppState {
     pub fn can_align(&self) -> bool {
-        self.selected.len() >= 2
+        !self.selected.is_empty()
     }
     pub fn can_distribute(&self) -> bool {
-        self.selected.len() >= 3
+        self.arrange_units().len() >= 3
+    }
+
+    /// Gruppierte Shapes zählen beim Anordnen als eine unteilbare Einheit.
+    fn arrange_units(&self) -> Vec<Vec<usize>> {
+        let mut units: Vec<Vec<usize>> = Vec::new();
+        for &idx in &self.selected {
+            let Some(shape) = self.shapes.get(idx) else {
+                continue;
+            };
+            if let Some(gid) = shape.group_id {
+                if let Some(unit) = units.iter_mut().find(|unit| {
+                    unit.first().is_some_and(|&i| {
+                        self.shapes.get(i).is_some_and(|s| s.group_id == Some(gid))
+                    })
+                }) {
+                    unit.push(idx);
+                } else {
+                    units.push(vec![idx]);
+                }
+            } else {
+                units.push(vec![idx]);
+            }
+        }
+        units
+    }
+
+    fn unit_bbox(&self, unit: &[usize]) -> Option<BBox> {
+        BBox::union_all(
+            unit.iter()
+                .filter_map(|&i| self.shapes.get(i))
+                .map(|s| s.bbox()),
+        )
     }
 
     /// Richtet die Auswahl an der gemeinsamen Kante/Mitte aus (ein Undo-Punkt).
@@ -38,18 +72,28 @@ impl AppState {
         if !self.can_align() {
             return;
         }
-        let Some(g) = self.selection_bbox() else {
+        let units = self.arrange_units();
+        let Some(selection) = self.selection_bbox() else {
             return;
         };
+        // Eine einzelne Einheit wird wie in der Referenz am Bett ausgerichtet;
+        // mehrere Formen richten sich an ihrer gemeinsamen Auswahlbox aus.
+        let g = if units.len() == 1 {
+            BBox::new(0.0, 0.0, self.bed_w_mm, self.bed_h_mm)
+        } else {
+            selection
+        };
         self.push_undo();
-        let sel = self.selected.clone();
-        for idx in sel {
-            let Some(s) = self.shapes.get_mut(idx) else {
+        for unit in units {
+            let Some(b) = self.unit_bbox(&unit) else {
                 continue;
             };
-            let b = s.bbox();
             let (dx, dy) = align_delta(kind, &g, &b);
-            s.geo.translate(dx, dy);
+            for idx in unit {
+                if let Some(s) = self.shapes.get_mut(idx) {
+                    s.translate(dx, dy);
+                }
+            }
         }
         self.dirty = true;
     }
@@ -77,7 +121,7 @@ impl AppState {
         let sel = self.selected.clone();
         for idx in sel {
             if let Some(s) = self.shapes.get_mut(idx) {
-                s.geo.mirror(axis, coord);
+                s.mirror(axis, coord);
             }
         }
         self.dirty = true;
@@ -90,40 +134,85 @@ impl AppState {
         }
         self.push_undo();
 
-        // (Index, Startkante) nach Startkante sortieren.
-        let mut items: Vec<(usize, f64)> = self
-            .selected
-            .iter()
-            .filter_map(|&i| self.shapes.get(i).map(|s| (i, start_edge(kind, &s.bbox()))))
+        let mut items: Vec<(Vec<usize>, BBox)> = self
+            .arrange_units()
+            .into_iter()
+            .filter_map(|unit| self.unit_bbox(&unit).map(|b| (unit, b)))
             .collect();
-        items.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        items.sort_by(|a, b| {
+            distribute_pos(kind, &a.1)
+                .partial_cmp(&distribute_pos(kind, &b.1))
+                .unwrap()
+        });
 
         let n = items.len();
-        let first = items[0].1;
-        let last = items[n - 1].1;
+        let first = distribute_pos(kind, &items[0].1);
+        let last = distribute_pos(kind, &items[n - 1].1);
+        let total_size: f64 = items.iter().map(|(_, b)| distribute_size(kind, b)).sum();
+        let gap = match kind {
+            Distribute::SpaceHorizontal | Distribute::SpaceVertical => {
+                let outer =
+                    distribute_end(kind, &items[n - 1].1) - distribute_start(kind, &items[0].1);
+                (outer - total_size) / (n as f64 - 1.0)
+            }
+            _ => 0.0,
+        };
         let step = (last - first) / (n as f64 - 1.0);
+        let mut cursor = distribute_start(kind, &items[0].1);
 
-        for (k, &(idx, cur)) in items.iter().enumerate() {
+        for (k, (unit, b)) in items.iter().enumerate() {
             if k == 0 || k == n - 1 {
+                cursor += distribute_size(kind, b) + gap;
                 continue; // Ränder bleiben stehen
             }
-            let target = first + step * k as f64;
-            let delta = target - cur;
-            if let Some(s) = self.shapes.get_mut(idx) {
-                match kind {
-                    Distribute::Horizontal => s.geo.translate(delta, 0.0),
-                    Distribute::Vertical => s.geo.translate(0.0, delta),
+            let target = match kind {
+                Distribute::SpaceHorizontal | Distribute::SpaceVertical => cursor,
+                _ => first + step * k as f64,
+            };
+            let current = match kind {
+                Distribute::SpaceHorizontal | Distribute::SpaceVertical => {
+                    distribute_start(kind, b)
+                }
+                _ => distribute_pos(kind, b),
+            };
+            let delta = target - current;
+            for &idx in unit {
+                if let Some(s) = self.shapes.get_mut(idx) {
+                    match kind {
+                        Distribute::Horizontal | Distribute::SpaceHorizontal => {
+                            s.translate(delta, 0.0)
+                        }
+                        Distribute::Vertical | Distribute::SpaceVertical => s.translate(0.0, delta),
+                    }
                 }
             }
+            cursor += distribute_size(kind, b) + gap;
         }
         self.dirty = true;
     }
 }
 
-fn start_edge(kind: Distribute, b: &BBox) -> f64 {
+fn distribute_pos(kind: Distribute, b: &BBox) -> f64 {
     match kind {
-        Distribute::Horizontal => b.x,
-        Distribute::Vertical => b.y,
+        Distribute::Horizontal => b.x + b.w / 2.0,
+        Distribute::Vertical => b.y + b.h / 2.0,
+        Distribute::SpaceHorizontal => b.x,
+        Distribute::SpaceVertical => b.y,
+    }
+}
+fn distribute_start(kind: Distribute, b: &BBox) -> f64 {
+    match kind {
+        Distribute::Horizontal | Distribute::SpaceHorizontal => b.x,
+        _ => b.y,
+    }
+}
+fn distribute_end(kind: Distribute, b: &BBox) -> f64 {
+    distribute_start(kind, b) + distribute_size(kind, b)
+}
+fn distribute_size(kind: Distribute, b: &BBox) -> f64 {
+    match kind {
+        Distribute::Horizontal | Distribute::SpaceHorizontal => b.w,
+        _ => b.h,
     }
 }
 
@@ -135,6 +224,10 @@ fn align_delta(kind: Align, g: &BBox, b: &BBox) -> (f64, f64) {
         Align::Top => (0.0, g.y - b.y),
         Align::Bottom => (0.0, g.y + g.h - (b.y + b.h)),
         Align::VCenter => (0.0, g.y + g.h / 2.0 - (b.y + b.h / 2.0)),
+        Align::Center => (
+            g.x + g.w / 2.0 - (b.x + b.w / 2.0),
+            g.y + g.h / 2.0 - (b.y + b.h / 2.0),
+        ),
     }
 }
 
@@ -225,12 +318,62 @@ mod tests {
     }
 
     #[test]
-    fn align_braucht_mindestens_zwei() {
+    fn einzelne_auswahl_richtet_sich_am_bett_aus() {
         let mut s = AppState::new();
         s.add_shape(rect(0.0, 0.0, 5.0, 5.0));
         s.selected = vec![0];
-        assert!(!s.can_align());
-        s.align_selection(Align::Left); // no-op
-        assert_eq!(s.shapes[0].bbox().x, 0.0);
+        assert!(s.can_align());
+        s.align_selection(Align::Right);
+        assert_eq!(s.shapes[0].bbox().x, s.bed_w_mm - 5.0);
+    }
+
+    #[test]
+    fn verteilen_nach_mitten_beruecksichtigt_unterschiedliche_breiten() {
+        let mut s = AppState::new();
+        s.add_shape(rect(0.0, 0.0, 10.0, 5.0)); // Mitte 5
+        s.add_shape(rect(20.0, 0.0, 30.0, 5.0)); // Mitte 35
+        s.add_shape(rect(90.0, 0.0, 10.0, 5.0)); // Mitte 95
+        s.selected = vec![0, 1, 2];
+        s.distribute_selection(Distribute::Horizontal);
+        assert!((s.shapes[1].bbox().center().0 - 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn verteilen_gleicher_zwischenraeume() {
+        let mut s = AppState::new();
+        s.add_shape(rect(0.0, 0.0, 10.0, 5.0));
+        s.add_shape(rect(20.0, 0.0, 30.0, 5.0));
+        s.add_shape(rect(90.0, 0.0, 10.0, 5.0));
+        s.selected = vec![0, 1, 2];
+        s.distribute_selection(Distribute::SpaceHorizontal);
+        assert!((s.shapes[1].bbox().x - 35.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ausrichten_bewegt_gruppe_als_unteilbare_einheit() {
+        let mut s = AppState::new();
+        s.add_shape(rect(10.0, 10.0, 5.0, 5.0));
+        s.add_shape(rect(20.0, 10.0, 5.0, 5.0));
+        s.add_shape(rect(50.0, 30.0, 5.0, 5.0));
+        s.shapes[0].group_id = Some(1);
+        s.shapes[1].group_id = Some(1);
+        s.selected = vec![0, 1, 2];
+        let internal_gap = s.shapes[1].bbox().x - s.shapes[0].bbox().x;
+        s.align_selection(Align::Left);
+        assert_eq!(s.shapes[1].bbox().x - s.shapes[0].bbox().x, internal_gap);
+        assert_eq!(s.shapes[0].bbox().x, s.shapes[2].bbox().x);
+    }
+
+    #[test]
+    fn eine_gruppe_aus_drei_shapes_ist_nicht_verteilbar() {
+        let mut s = AppState::new();
+        for x in [0.0, 10.0, 20.0] {
+            s.add_shape(rect(x, 0.0, 5.0, 5.0));
+        }
+        for shape in &mut s.shapes {
+            shape.group_id = Some(1);
+        }
+        s.selected = vec![0, 1, 2];
+        assert!(!s.can_distribute());
     }
 }

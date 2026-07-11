@@ -214,6 +214,67 @@ impl Shape {
         self.geo.bbox()
     }
 
+    /// Verschiebt alle Darstellungen der Form gemeinsam. `geo` ist die
+    /// render-/laserbare Kontur, `bezier` die editierbare Pfad-Wahrheit.
+    pub fn translate(&mut self, dx: f64, dy: f64) {
+        self.geo.translate(dx, dy);
+        if let Some(bp) = self.bezier.as_mut() {
+            for n in &mut bp.nodes {
+                n.p = (n.p.0 + dx, n.p.1 + dy);
+                if let Some(h) = n.h_in.as_mut() {
+                    *h = (h.0 + dx, h.1 + dy);
+                }
+                if let Some(h) = n.h_out.as_mut() {
+                    *h = (h.0 + dx, h.1 + dy);
+                }
+            }
+        }
+    }
+
+    /// Skaliert die Form auf eine Zielbox und hält editierbare Bézier-Knoten
+    /// samt Tangenten mit der abgeflachten Kontur synchron.
+    pub fn set_bbox(&mut self, nx: f64, ny: f64, nw: f64, nh: f64) {
+        let old = self.geo.bbox();
+        self.geo.set_bbox(nx, ny, nw, nh);
+        let target = self.geo.bbox();
+        if let Some(bp) = self.bezier.as_mut() {
+            let map = |p: (f64, f64)| {
+                let rx = if old.w.abs() > f64::EPSILON {
+                    (p.0 - old.x) / old.w
+                } else {
+                    0.0
+                };
+                let ry = if old.h.abs() > f64::EPSILON {
+                    (p.1 - old.y) / old.h
+                } else {
+                    0.0
+                };
+                (target.x + rx * target.w, target.y + ry * target.h)
+            };
+            for n in &mut bp.nodes {
+                n.p = map(n.p);
+                n.h_in = n.h_in.map(map);
+                n.h_out = n.h_out.map(map);
+            }
+        }
+    }
+
+    /// Spiegelt Kontur und editierbare Bézier-Wahrheit an derselben Achse.
+    pub fn mirror(&mut self, axis: crate::geometry::Axis, coord: f64) {
+        self.geo.mirror(axis, coord);
+        if let Some(bp) = self.bezier.as_mut() {
+            let flip = |p: (f64, f64)| match axis {
+                crate::geometry::Axis::Vertical => (2.0 * coord - p.0, p.1),
+                crate::geometry::Axis::Horizontal => (p.0, 2.0 * coord - p.1),
+            };
+            for n in &mut bp.nodes {
+                n.p = flip(n.p);
+                n.h_in = n.h_in.map(flip);
+                n.h_out = n.h_out.map(flip);
+            }
+        }
+    }
+
     /// Trifft ein Punkt die Form? Berücksichtigt die Rotation (Punkt wird in den
     /// ungedrehten Objektraum zurückgedreht).
     pub fn hit_test(&self, px: f64, py: f64, tol: f64) -> bool {

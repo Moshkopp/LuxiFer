@@ -542,6 +542,43 @@ mod tests {
     }
 
     #[test]
+    fn shape_transformationen_halten_bezier_meta_synchron() {
+        let mut app = AppState::new();
+        let i = app.add_bezier_nodes(
+            vec![
+                BezierNode {
+                    p: (0.0, 0.0),
+                    h_in: None,
+                    h_out: Some((2.0, 3.0)),
+                },
+                BezierNode {
+                    p: (10.0, 10.0),
+                    h_in: Some((8.0, 7.0)),
+                    h_out: None,
+                },
+            ],
+            false,
+        );
+
+        app.shapes[i].translate(5.0, 4.0);
+        let bp = app.shapes[i].bezier.as_ref().unwrap();
+        assert_eq!(bp.nodes[0].p, (5.0, 4.0));
+        assert_eq!(bp.nodes[0].h_out, Some((7.0, 7.0)));
+
+        app.shapes[i].set_bbox(0.0, 0.0, 20.0, 20.0);
+        let bp = app.shapes[i].bezier.as_ref().unwrap();
+        assert_eq!(bp.nodes[0].p, (0.0, 0.0));
+        assert_eq!(bp.nodes[1].p, (20.0, 20.0));
+        assert_eq!(bp.nodes[0].h_out, Some((4.0, 6.0)));
+
+        app.shapes[i].mirror(crate::geometry::Axis::Vertical, 10.0);
+        let bp = app.shapes[i].bezier.as_ref().unwrap();
+        assert_eq!(bp.nodes[0].p, (20.0, 0.0));
+        assert_eq!(bp.nodes[1].p, (0.0, 20.0));
+        assert_eq!(bp.nodes[0].h_out, Some((16.0, 6.0)));
+    }
+
+    #[test]
     fn flatten_toleranz_wirkt() {
         let a = BezierNode {
             p: (0.0, 0.0),

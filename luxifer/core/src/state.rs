@@ -390,7 +390,7 @@ impl AppState {
     pub fn translate_selected(&mut self, dx: f64, dy: f64) {
         for &idx in &self.selected {
             if let Some(s) = self.shapes.get_mut(idx) {
-                s.geo.translate(dx, dy);
+                s.translate(dx, dy);
             }
         }
         self.dirty = true;

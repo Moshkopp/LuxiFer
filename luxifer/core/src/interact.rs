@@ -118,7 +118,7 @@ impl AppState {
                 };
                 let nx = target.x + rx * target.w;
                 let ny = target.y + ry * target.h;
-                s.geo.set_bbox(nx, ny, b.w * sw, b.h * sh);
+                s.set_bbox(nx, ny, b.w * sw, b.h * sh);
             }
         }
         self.dirty = true;
