@@ -29,6 +29,7 @@
     onselectrect,
     onmove,
     onscale,
+    onrotate,
     oneditimage,
     onedittext,
     filletpick = false,
@@ -72,6 +73,8 @@
       start: [number, number, number, number],
       target: [number, number, number, number],
     ) => void | Promise<void>;
+    // Drehung der Auswahl um den Gruppen-Mittelpunkt (Gesamtwinkel in Grad).
+    onrotate: (degrees: number) => void | Promise<void>;
     // Doppelklick auf ein Bild-Shape: Editor oeffnen (Shape-Index).
     oneditimage?: (index: number) => void;
     onedittext?: (index: number) => void;
@@ -247,6 +250,15 @@
         start: [number, number, number, number];
         cur: [number, number, number, number];
       }
+    | {
+        // Drehung der Auswahl: Pivot = Mittelpunkt der Gruppen-Box (mm),
+        // `start` = Ausgangswinkel Pivot→Maus (rad), `deg` = bisheriger Gesamt-
+        // Drehwinkel (Grad) für Live-Vorschau + Commit.
+        kind: "rotate";
+        pivot: [number, number];
+        start: number;
+        deg: number;
+      }
     | { kind: "pan"; px: number; py: number; ox: number; oy: number }
     | null;
   let drag = $state<Drag>(null);
@@ -288,7 +300,7 @@
   }
 
   function hitHandle(px: number, py: number): HandleId | null {
-    if (scene.selected.length !== 1) return null;
+    if (!scene.selected.length) return null;
     const box = selectionBBox();
     if (!box) return null;
     for (const [id, hx, hy] of handlePositions(box)) {
@@ -296,6 +308,21 @@
       if (Math.abs(px - sx) <= HANDLE_PX && Math.abs(py - sy) <= HANDLE_PX) return id;
     }
     return null;
+  }
+
+  // Bildschirmposition des Dreh-Greifers: mittig über der oberen Kante der
+  // Gruppen-Box, ROT_OFFSET_PX Pixel darüber. Pivot = Box-Mittelpunkt.
+  const ROT_OFFSET_PX = 26;
+  function rotateHandleScreen(box: [number, number, number, number]): [number, number] {
+    const [tx, ty] = toScreen(box[0] + box[2] / 2, box[1]);
+    return [tx, ty - ROT_OFFSET_PX];
+  }
+  function hitRotate(px: number, py: number): boolean {
+    if (!scene.selected.length) return false;
+    const box = selectionBBox();
+    if (!box) return false;
+    const [rx, ry] = rotateHandleScreen(box);
+    return Math.hypot(px - rx, py - ry) <= HANDLE_PX;
   }
 
   // ---- Zeichnen -------------------------------------------------------------
@@ -341,6 +368,16 @@
       const [tx, ty, tw, th] = drag.cur;
       const fx = sw > 0 ? tw / sw : 1, fy = sh > 0 ? th / sh : 1;
       return (x, y, idx) => (sel.has(idx) ? [tx + (x - sx) * fx, ty + (y - sy) * fy] : [x, y]);
+    }
+    if (drag?.kind === "rotate") {
+      const sel = new Set(scene.selected);
+      const [pvx, pvy] = drag.pivot;
+      const rad = (drag.deg * Math.PI) / 180;
+      const co = Math.cos(rad), si = Math.sin(rad);
+      return (x, y, idx) =>
+        sel.has(idx)
+          ? [pvx + (x - pvx) * co - (y - pvy) * si, pvy + (x - pvx) * si + (y - pvy) * co]
+          : [x, y];
     }
     return null;
   }
@@ -825,6 +862,12 @@
       const fx = sw > 0 ? tw / sw : 1, fy = sh > 0 ? th / sh : 1;
       return [tx + (px - sx) * fx, ty + (py - sy) * fy];
     }
+    if (drag?.kind === "rotate" && scene.selected.includes(idx)) {
+      const [pvx, pvy] = drag.pivot;
+      const rad = (drag.deg * Math.PI) / 180;
+      const co = Math.cos(rad), si = Math.sin(rad);
+      return [pvx + (px - pvx) * co - (py - pvy) * si, pvy + (px - pvx) * si + (py - pvy) * co];
+    }
     return [px, py];
   }
 
@@ -946,33 +989,114 @@
     });
   }
 
+  // Einen mm-Punkt der Gruppen-Box unter der laufenden Geste (Scale/Rotate) auf
+  // den Bildschirm bringen. Scale: proportional in der Zielbox; Rotate: um den
+  // Pivot gedreht. So folgt die Auswahl-Box live der Vorschau der Formen.
+  function selBoxPointScreen(mx: number, my: number): [number, number] {
+    if (drag?.kind === "move") {
+      return toScreen(mx + drag.dx, my + drag.dy);
+    }
+    if (drag?.kind === "scale") {
+      const [sx, sy, sw, sh] = drag.start;
+      const [tx, ty, tw, th] = drag.cur;
+      const fx = sw > 0 ? tw / sw : 1, fy = sh > 0 ? th / sh : 1;
+      return toScreen(tx + (mx - sx) * fx, ty + (my - sy) * fy);
+    }
+    if (drag?.kind === "rotate") {
+      const [pvx, pvy] = drag.pivot;
+      const rad = (drag.deg * Math.PI) / 180;
+      const co = Math.cos(rad), si = Math.sin(rad);
+      return toScreen(pvx + (mx - pvx) * co - (my - pvy) * si, pvy + (mx - pvx) * si + (my - pvy) * co);
+    }
+    return toScreen(mx, my);
+  }
+
+  // Kontur EINER Form in Bildschirm-Koordinaten (Rotation + Live-Geste drin) +
+  // ob sie geschlossen ist. Bilder liefern ihre (mit-transformierte) Box.
+  function shapeOutlineScreen(s: Shape, idx: number): { pts: [number, number][]; closed: boolean } {
+    if ("Image" in s.geo) {
+      const [bx, by, bw, bh] = shapeDrawBox(s, idx);
+      let corners: Pt[] = rectPoints(bx, by, bw, bh);
+      if (s.rotation) corners = rotateAroundBBoxCenter(corners, s.rotation);
+      return { pts: corners.map(([x, y]) => toScreen(x, y)), closed: true };
+    }
+    const closed = "Polyline" in s.geo ? s.geo.Polyline.closed : true;
+    return { pts: shapeFillOutline(s, idx).map(([x, y]) => toScreen(x, y)), closed };
+  }
+
+  // Gestrichelte Markierung JEDER Kontur einer echten Gruppe (group_id) in der
+  // Auswahl — so sieht man sofort, was zum Block gehört. Lose Mehrfachauswahl
+  // (ohne group_id) bekommt nur die gemeinsame Box.
+  function drawGroupOutlines(ctx: CanvasRenderingContext2D) {
+    ctx.strokeStyle = "rgba(76,130,247,0.9)";
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([5, 3]);
+    for (const idx of scene.selected) {
+      const s = scene.shapes[idx];
+      if (!s || s.group_id == null) continue;
+      const { pts, closed } = shapeOutlineScreen(s, idx);
+      if (pts.length < 2) continue;
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      if (closed) ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
   function drawSelection(ctx: CanvasRenderingContext2D) {
     if (!scene.selected.length) return;
+    const box = selectionBBox();
+    if (!box) return;
+    const [bx, by, bw, bh] = box;
+
+    // Gruppen-Konturen zuerst (liegen unter Box/Griffen).
+    drawGroupOutlines(ctx);
+
+    // EINE gemeinsame Auswahl-Box um die ganze Auswahl (Text = ein Block), die
+    // der Live-Geste folgt. Bei Rotation dreht die Box als Vierkant mit.
+    const p = handlePositions(box).map(([id, hx, hy]) => [id, ...selBoxPointScreen(hx, hy)] as const);
+    const corners = [
+      selBoxPointScreen(bx, by), selBoxPointScreen(bx + bw, by),
+      selBoxPointScreen(bx + bw, by + bh), selBoxPointScreen(bx, by + bh),
+    ];
     ctx.strokeStyle = "#4c82f7";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
-    for (const idx of scene.selected) {
-      const s = scene.shapes[idx];
-      if (!s) continue;
-      const [bx, by, bw, bh] = shapeDrawBox(s, idx);
-      const [x, y] = toScreen(bx, by);
-      ctx.strokeRect(x - 3, y - 3, bw * zoom + 6, bh * zoom + 6);
-    }
+    ctx.beginPath();
+    corners.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.closePath();
+    ctx.stroke();
     ctx.setLineDash([]);
-    // Handles bei genau einem Objekt.
-    if (scene.selected.length === 1) {
-      const s = scene.shapes[scene.selected[0]];
-      if (s && !s.rotation) {
-        const box = shapeDrawBox(s, scene.selected[0]);
-        ctx.fillStyle = "#fff";
-        ctx.strokeStyle = "#4c82f7";
-        for (const [, hx, hy] of handlePositions(box)) {
-          const [px, py] = toScreen(hx, hy);
-          ctx.fillRect(px - 4, py - 4, 8, 8);
-          ctx.strokeRect(px - 4, py - 4, 8, 8);
-        }
-      }
+
+    // 8 Skalier-Griffe an den (mit-transformierten) Kanten/Ecken.
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#4c82f7";
+    for (const [, px, py] of p) {
+      ctx.fillRect(px - 4, py - 4, 8, 8);
+      ctx.strokeRect(px - 4, py - 4, 8, 8);
     }
+
+    // Dreh-Greifer: Kreis ROT_OFFSET_PX über der (mit-transformierten) oberen
+    // Mittelkante, entlang der Normalen weg vom Box-Zentrum. Folgt so jeder
+    // Geste (Move/Scale/Rotate) statt an der Ausgangsbox zu kleben.
+    const topMid = selBoxPointScreen(bx + bw / 2, by);
+    const mid = selBoxPointScreen(bx + bw / 2, by + bh / 2);
+    const ndx = topMid[0] - mid[0], ndy = topMid[1] - mid[1];
+    const nlen = Math.hypot(ndx, ndy) || 1;
+    const [rhx, rhy] = [
+      topMid[0] + (ndx / nlen) * ROT_OFFSET_PX,
+      topMid[1] + (ndy / nlen) * ROT_OFFSET_PX,
+    ];
+    ctx.beginPath();
+    ctx.moveTo(topMid[0], topMid[1]);
+    ctx.lineTo(rhx, rhy);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(rhx, rhy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.stroke();
   }
 
   function drawGesturePreview(ctx: CanvasRenderingContext2D) {
@@ -1129,7 +1253,14 @@
       draw();
       return;
     }
-    // select-Werkzeug
+    // select-Werkzeug — Dreh-Greifer hat Vorrang (liegt über der Box).
+    if (hitRotate(px, py)) {
+      const box = selectionBBox()!;
+      const pivot: [number, number] = [box[0] + box[2] / 2, box[1] + box[3] / 2];
+      const start = Math.atan2(my - pivot[1], mx - pivot[0]);
+      drag = { kind: "rotate", pivot, start, deg: 0 };
+      return;
+    }
     const h = hitHandle(px, py);
     if (h) {
       const box = selectionBBox()!;
@@ -1208,6 +1339,13 @@
       const dx = mx - (drag.start[0] + hxOffset(drag.handle, drag.start));
       const dy = my - (drag.start[1] + hyOffset(drag.handle, drag.start));
       drag = { ...drag, cur: resizeBox(drag.start, drag.handle, dx, dy) };
+    } else if (drag.kind === "rotate") {
+      // Winkeldifferenz Pivot→Maus gegenüber dem Gestenstart. Shift rastet in
+      // 15°-Schritten ein (bequemes Ausrichten).
+      const ang = Math.atan2(my - drag.pivot[1], mx - drag.pivot[0]);
+      let deg = ((ang - drag.start) * 180) / Math.PI;
+      if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+      drag = { ...drag, deg };
     }
     // Während der Geste synchron zeichnen — kein Frame-Versatz ("Cursor klebt").
     drawSync();
@@ -1269,6 +1407,9 @@
       drag = null;
     } else if (g.kind === "scale") {
       await onscale(g.start, g.cur);
+      drag = null;
+    } else if (g.kind === "rotate") {
+      if (g.deg !== 0) await onrotate(g.deg);
       drag = null;
     } else {
       drag = null;
@@ -1452,7 +1593,8 @@
   // Batch pro Frame selbst (mit Transform), ein zusätzliches rebuild wäre doppelt.
   $effect(() => {
     scene.shapes; scene.layers;
-    if (!drag || (drag.kind !== "move" && drag.kind !== "scale")) rebuildGeo();
+    const live = drag && (drag.kind === "move" || drag.kind === "scale" || drag.kind === "rotate");
+    if (!live) rebuildGeo();
   });
   // rAF beim Unmount abbrechen (kein Redraw auf totem Canvas) + GPU-Buffer frei.
   $effect(() => () => {
