@@ -247,6 +247,25 @@ impl Shape {
         let old = self.geo.bbox();
         self.geo.set_bbox(nx, ny, nw, nh);
         let target = self.geo.bbox();
+        let sx = if old.w.abs() > f64::EPSILON {
+            target.w / old.w
+        } else {
+            1.0
+        };
+        let sy = if old.h.abs() > f64::EPSILON {
+            target.h / old.h
+        } else {
+            1.0
+        };
+        if let Some(meta) = self.text_meta.as_mut() {
+            if (sx - sy).abs() <= 1e-6 {
+                meta.size_mm *= sx.abs();
+            } else {
+                // Nichtproportional verzerrte Glyphen sind aus Font+Größe nicht
+                // mehr reproduzierbar und werden deshalb normale Konturen.
+                self.text_meta = None;
+            }
+        }
         if let Some(bp) = self.bezier.as_mut() {
             let map = |p: (f64, f64)| {
                 let rx = if old.w.abs() > f64::EPSILON {
@@ -272,6 +291,9 @@ impl Shape {
     /// Spiegelt Kontur und editierbare Bézier-Wahrheit an derselben Achse.
     pub fn mirror(&mut self, axis: crate::geometry::Axis, coord: f64) {
         self.geo.mirror(axis, coord);
+        // Gespiegelter Text kann aus den ursprünglichen Textparametern nicht
+        // wiederhergestellt werden; ab hier ist er bewusst ein Konturpfad.
+        self.text_meta = None;
         if let Some(bp) = self.bezier.as_mut() {
             let flip = |p: (f64, f64)| match axis {
                 crate::geometry::Axis::Vertical => (2.0 * coord - p.0, p.1),
@@ -374,5 +396,61 @@ mod tests {
         assert!((b.y + 5.0).abs() < 1e-9);
         assert!((b.w - 10.0).abs() < 1e-9);
         assert!((b.h - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn proportionale_textskalierung_aktualisiert_schriftgroesse() {
+        let mut s = Shape::new(
+            0,
+            Geo::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 20.0,
+            },
+        );
+        s.text_meta = Some(TextMeta {
+            text: "A".into(),
+            font_path: "font.ttf".into(),
+            size_mm: 10.0,
+        });
+        s.set_bbox(0.0, 0.0, 20.0, 40.0);
+        assert_eq!(s.text_meta.unwrap().size_mm, 20.0);
+    }
+
+    #[test]
+    fn verzerrter_oder_gespiegelter_text_wird_kontur() {
+        let meta = || {
+            Some(TextMeta {
+                text: "A".into(),
+                font_path: "font.ttf".into(),
+                size_mm: 10.0,
+            })
+        };
+        let mut stretched = Shape::new(
+            0,
+            Geo::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 20.0,
+            },
+        );
+        stretched.text_meta = meta();
+        stretched.set_bbox(0.0, 0.0, 30.0, 40.0);
+        assert!(stretched.text_meta.is_none());
+
+        let mut mirrored = Shape::new(
+            0,
+            Geo::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 20.0,
+            },
+        );
+        mirrored.text_meta = meta();
+        mirrored.mirror(crate::geometry::Axis::Vertical, 5.0);
+        assert!(mirrored.text_meta.is_none());
     }
 }

@@ -14,12 +14,13 @@ Stand 11.07.2026 wurden die ersten kritischen Grundlagen bereits korrigiert:
 - Die kanonische Auswahl-Bounding-Box wird direkt im Core berechnet und als Teil der `Scene` ausgeliefert. `App.svelte`, Transform-Leiste und Canvas-Auswahlrahmen setzen die Gruppenbox nicht mehr unabhängig zusammen.
 - Die Transform-Leiste enthält X/Y, Breite/Höhe, Seitenverhältnis-Sperre und einen 3×3-Anker. Position und Skalierung beziehen sich auf den gewählten Ankerpunkt.
 - Nullbreite und Nullhöhe werden bei der Seitenverhältnis-Berechnung abgefangen; horizontale und vertikale Linien erzeugen dort kein `Infinity` oder `NaN` mehr.
+- Editierbare Text-Metadaten besitzen eine feste Transformationsregel: proportionale Skalierung aktualisiert `size_mm`; nichtproportionale Skalierung und Spiegelung entfernen die nicht mehr reproduzierbaren Textparameter und lassen sichere normale Konturen zurück.
 - Die zuvor offenen Änderungen sind in zwei getrennten Commits gesichert:
   - `ba52247 Stabilisiere Transformationen und Anordnen`
   - `97823ea Berücksichtige Rotation in Weltgrenzen`
 - Der geprüfte Stand umfasst 211 erfolgreiche Rust-Tests, einen fehlerfreien `svelte-check` und einen erfolgreichen Produktions-Build.
 
-Noch offen bleiben insbesondere die Text-Metadaten bei Skalierung, der Core-basierte Bézier-Hit-Test, die einheitliche Fehlerbehandlung, die Modulzerlegung und ein vollständig grünes Clippy-Gate.
+Noch offen bleiben insbesondere der Core-basierte Bézier-Hit-Test, die einheitliche Fehlerbehandlung, die Modulzerlegung und ein vollständig grünes Clippy-Gate.
 
 Bereits vorhandene Probleme
 1. Kritisch: Bézier-Knoten werden bei Transformationen nicht mitgeführt
