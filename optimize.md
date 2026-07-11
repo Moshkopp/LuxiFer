@@ -58,14 +58,36 @@ kostet das bei 200.000 Punkten ~2,8 ms/Frame — praktisch der gesamte
 JS-Aufwand. Auswertung **pro Shape** über ein `Set` drückt es auf ~0,3 ms (≈9×),
 ohne die Render-Architektur anzufassen.
 
-### 🟠 Blocker 1 (herabgestuft) — Design-Canvas auf WebGL
+### ✅ Blocker 1 — Design-Canvas auf WebGL (ERLEDIGT 2026-07-11)
 
-ADR 0008 hat `luxifer/frontend/src/lib/gl/renderer.ts` als *die eine*
-GPU-Zeichenschicht etabliert; `PreviewCanvas.svelte` nutzt sie bereits, der
-Design-Canvas (Canvas.svelte:343/809) noch nicht. Laut Messung erst bei sehr
-großen Importen/Trace ein echter Ruckel-Engpass — **nach** Blocker 2 angehen,
-gebündelt mit der Modulzerlegung (Blocker 3). Sofort-Hebel vorab: `Set`-basierte
-`selected`-Prüfung pro Shape (siehe Nebenbefund).
+Umgesetzt auf Branch `webgl-design-canvas` (Commit „Design-Canvas auf
+WebGL-Hybrid umstellen"). Der Design-Canvas rendert Geometrie (Konturen, Grid,
+Bett) jetzt über `GlRenderer` wie der Preview; Overlays (Lineale, Handles, Node-/
+Mess-/Fillet-Griffe, Draft-Vorschauen), Flächen-Füllungen und Bilder bleiben auf
+einer transparenten 2D-Ebene darüber, die auch alle Pointer-Handler trägt.
+Live-Drag baut nur die selektierten Konturen pro Frame neu (`liveXf`). Neuer
+Batch-Builder `gl/design-render.ts` (UI-frei, Segment-/Rotationslogik gegen den
+alten 2D-Pfad geprüft). Verifiziert: svelte-check + Release-Build grün, Grid/Bett/
+Shape-Kontur via WebGL im Release sichtbar.
+
+Hinweis: Der WebGL-Umbau war **nicht** die Ursache der gefühlten Latenz (siehe
+unten) — er ist die saubere Zielarchitektur, kein Performance-Notfall.
+
+### ✅ Eingabe-Latenz („Cursor klebt") — GELÖST auf Umgebungsebene (2026-07-11)
+
+Getrennte Baustelle, beim WebGL-Test aufgefallen. Symptom: Ziehen/Bewegen wirkte
+träge, Form hinkte dem Cursor nach. Diagnose per rohem Cursor-Kreuz (nur
+Event→Pixel, keine App-Logik): Das Kreuz hinkte **ebenfalls** hinterher →
+Latenz lag **unter JS**, in der WebKitGTK/Wayland-Present-Pipeline, nicht im Code.
+Bestätigt: kein Unterschied synchron vs. rAF; unverändert unter nativem Wayland
+UND XWayland — bis der Flag `WEBKIT_DISABLE_COMPOSITING_MODE` (Wayland-Blank-
+Window-Workaround, erzwingt Software-Present) entfiel.
+
+Fix: `dev.sh` startet über `GDK_BACKEND=x11` (XWayland), volles HW-Compositing
+ohne die WebKit-Flags → Versatz deutlich geringer, Ziehen direkt (Rest-Latenz =
+normale Compositor/VSync, „nah an flüssig"). Zusätzlich: synchrones Zeichnen
+während Gesten + aktuellste Position aus `getCoalescedEvents`. Siehe Memory
+`tauri-wayland-start`.
 
 Empfehlung: Basis-Geometrie (Shapes, Grid, Bed) auf `GlRenderer` umstellen wie im
 Preview; Overlays (Lineale, Handles, Text-Labels) dürfen ein transparenter
@@ -123,19 +145,18 @@ kantig; die Punktzahl wächst zudem linear mit der Objektzahl in der
 Scene-Serialisierung. Aktuell unkritisch, relevant sobald „präzise Kurven" oder
 zoom-abhängiges Tessellieren gefordert wird. Notieren, nicht sofort handeln.
 
-### Empfohlene Reihenfolge (nach der Messung aktualisiert)
+### Empfohlene Reihenfolge (Stand 2026-07-11 abends)
 
-0. ✅ **Messen erledigt** → Blocker 1 herabgestuft; JS-Anteil ruckelt bis
-   ~200.000 Punkte nicht (Details oben).
-1. **Sofort-Hebel:** `selected.includes(idx)` in `liveTransformPoint` durch eine
-   pro-Shape ausgewertete `Set`-Prüfung ersetzen (~9× auf dem heißen Pfad,
-   winziger Diff, keine Architekturänderung).
-2. **Blocker 2** (Mutex-Kapselung) — klein, risikoarm, verhindert App-weite
-   Abstürze. Guter nächster Schritt.
-3. **Blocker 1 + 3 zusammen** — Design-Canvas auf `GlRenderer`, dabei
-   `render.ts`/`camera.ts` herausziehen. Erst relevant für sehr große
-   Importe/Trace; nicht mehr dringend, aber weiterhin die saubere Zielarchitektur.
-4. Punkt 4/5 als Aufräumarbeiten danach.
+0. ✅ **Messen erledigt** → Blocker 1 quantifiziert.
+1. ✅ **Blocker 1 (WebGL-Hybrid) erledigt** auf Branch `webgl-design-canvas`.
+2. ✅ **Eingabe-Latenz gelöst** (GDK_BACKEND=x11, siehe oben).
+3. **Offen — Blocker 2** (Mutex-Kapselung): 73× `lock().unwrap()` durch
+   `with_state()`-Helper mit `EditorError` ersetzen. Klein, risikoarm.
+4. **Offen — Blocker 3** (Modulzerlegung): Canvas.svelte / lib.rs schrittweise
+   aufteilen. Jetzt teils vorbereitet (`gl/design-render.ts` ausgelagert).
+5. Punkt 4/5 (Geometrie-Duplizierung, Ellipsen-Punktdichte) als Aufräumarbeiten.
+
+Merge-Status: `webgl-design-canvas` wartet auf Merge-Entscheidung nach `main`.
 
 ---
 
