@@ -8,7 +8,7 @@ fn main() {
         angle_deg: 0.0,
         size: 2.5,
     };
-    let out = fill_pattern(&[sq.clone()], &p);
+    let out = fill_pattern(std::slice::from_ref(&sq), &p);
     let sc = 8.0;
     let mut img = image::GrayImage::from_pixel(400, 300, image::Luma([245]));
     let mut line = |a: (f64, f64), b: (f64, f64), v: u8| {

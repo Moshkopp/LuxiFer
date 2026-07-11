@@ -189,8 +189,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("luxifer_ui_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
-        let mut s = UiSettings::default();
-        s.workplace = "Werkstatt-PC".into();
+        let s = UiSettings {
+            workplace: "Werkstatt-PC".into(),
+            ..UiSettings::default()
+        };
         let path = s.save_to(&dir).unwrap();
         assert!(path.exists());
 
