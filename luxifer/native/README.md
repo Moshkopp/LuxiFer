@@ -31,47 +31,57 @@ GDK_BACKEND=x11 cargo run -p luxifer-native --release -- /pfad/zu/datei.svg
 
 ## Was läuft (Stand: Umbau-Branch)
 
-- **Canvas** (wgpu, LineList): Shapes aus dem echten `AppState`, Tisch-Rahmen,
-  Auswahl-Hervorhebung, Auswahl-BBox. Pan (mittlere Maus / Leertaste+links),
-  Zoom (Mausrad, auf den Cursor).
+- **Canvas** (wgpu): Shapes aus dem echten `AppState`, Tisch-Rahmen, Auswahl-
+  Hervorhebung + BBox, **Transform-Handles** (8 Skalier + Rotate). Pan (mittlere
+  Maus / Leertaste+links), Zoom (Mausrad, auf den Cursor).
+- **Dicke Linien**: Konturen/Fill/Handles als bildschirm-konstant dicke Linien
+  (Segment→Quad, Dicke im Screen-Space-Shader), nicht mehr 1px-aliast.
 - **Flächen-Fill** über `scanline::fill_segments` (derselbe Even-Odd-Fill wie die
-  Laser-Vorschau), als horizontale Linien pro fillbarem Layer.
-- **Vertex-Cache**: Geometrie wird nur bei Szenen-Änderung neu gebaut
-  (Fingerprint), Pan/Zoom projiziert allein der Shader. Aztec (1810 Shapes,
-  ~73k Fill-Segmente) → **146 fps**.
-- **Import**: SVG/DXF über `import_vector` + nativer Datei-Dialog (rfd).
+  Laser-Vorschau). **Vertex-Cache** (Fingerprint): nur bei Szenen-Änderung neu,
+  Pan/Zoom projiziert allein der Shader → Aztec (1810 Shapes, ~73k Segmente)
+  lief mit **146 fps** (vor der Linien-Verdickung; die verdoppelt die Vertexzahl).
+- **Import**: SVG/DXF (`import_vector`) + **Bilder** (`import_image`, als
+  GPU-Textur gerendert) + **Text→Pfad** (`text_to_contours`, System-Font-Wahl).
 - **Interaktion** über den Core: Rechteck/Ellipse/Polygon zeichnen, Auswahl +
-  Hit-Test, Verschieben, Marquee-Auswahl, Farbe/Layer, Undo/Redo, Löschen.
-- **Panels** (egui): Werkzeuge links; rechts per Tab Design (Ebenen + Palette
-  mit aktiver-Farbe-Markierung) oder **Laser** (Ampel-Grid Start/Pause/Stopp/
-  Ursprung/Rahmen/Gummiband, Nullpunkt-Anker, Jog-Kreuz, Schritt/Speed-Slider).
-- Tastatur: V/R/E/P Werkzeuge, Z/Y Undo/Redo, Entf löschen, Esc abbrechen,
-  Enter Polygon schließen.
+  Hit-Test, Verschieben, **Resize/Rotate** über Handles, Marquee, Farbe/Layer,
+  Undo/Redo, Löschen.
+- **Panels** (egui, Tauri-nahes Theme): Werkzeuge links; rechts Ebenen + Palette
+  (aktive-Farbe-Markierung) bzw. **Laser** (Ampel-Grid, echter Treiber Ruida/GRBL:
+  Start/Pause/Stopp/Frame/Export, Jog/Home, Job-Parameter, Profil-Dialog).
+- **Reiterleiste** oben (Projekt / Design / Laser). **Projekt-Browser**: Liste,
+  Neu, Öffnen, Speichern (Strg+S) / neue Version (Shift+Strg+S) — Core-Projekt-API.
+- Tastatur: V/R/E/P Werkzeuge, Z/Y Undo/Redo, Strg+S speichern, Entf löschen,
+  Esc abbrechen, Enter Polygon schließen.
 
-## Was noch fehlt (nächste Schritte)
+## Was noch fehlt / offen
 
-1. **Laser-Treiber anbinden** — das Laserpanel loggt Aktionen nur; die echte
-   Treiber-/Job-Logik (Ruida etc.) muss verdrahtet werden.
-2. **Transform-Handles** (Resize/Rotate der Auswahl) — der Core kann es
-   (`interact::resize_bbox`, `scale_selection_to`, `rotate_selection`), das UI
-   fehlt.
-3. **Text, Bild-Import-Vorschau, Laser-Vorschau-Reiter, Projekt-Browser** — alles
-   im Core vorhanden, UI muss nativ nachgebaut werden.
-4. **Fill-Darstellung** verfeinern (aktuell Hatch-Linien; ggf. echte Flächen via
-   Stencil, s. ADR 0009 §1).
-5. **Konturen mit Dicke** (aktuell 1px-LineList) + Anti-Aliasing (MSAA).
+- **Fenster-Sichtbarkeit**: Erster Frame wird sofort präsentiert (Wayland-Fix);
+  vom Nutzer als funktionierend bestätigt. Falls das Fenster mal leer bleibt,
+  hilft `WGPU_BACKEND=vulkan`.
+- **Echtes MSAA** (aktuell dicke Quads statt Anti-Aliasing der Kanten).
+- **Laser-Vorschau-Reiter** (Bahnen-Simulation) und **Monitor-Reiter** — in der
+  Tauri-App vorhanden, hier noch nicht.
+- **Bild-Parameter-Dialog** (Dithering/Schwellwert), **Geometrie-Ops**
+  (Boolean/Offset/Fillet/Trace/Hatch/Nesting) — alles im Core, UI fehlt nativ.
+- **Version-Thumbnails / Versionsliste** im Projekt-Browser (nur Basis da).
 
 ## Architektur (Module)
 
 - `main.rs` — winit-Loop.
-- `app.rs` — hält `AppState` + Kamera + Tool/Tab-Zustand, verbindet Eingaben mit
-  Core-Aufrufen, rendert Canvas + egui in einen Frame. Vertex-Cache.
-- `gpu.rs` — wgpu-Setup, Canvas-Pipeline (LineList), Kamera-Uniforms.
+- `app.rs` — hält `AppState` + Kamera + View/Tool-Zustand, verbindet Eingaben mit
+  Core-Aufrufen, rendert Canvas + Bilder + Overlay + egui in einen Frame.
+  Vertex-Cache, Transform-Handles, Import/Text/Projekt-Methoden.
+- `gpu.rs` — wgpu-Setup, Linien-Pipeline (dicke Quads), Kamera-Uniforms, Overlay.
+- `image_gpu.rs` — Bild-Textur-Pipeline (Assets als texturierte Quads).
 - `camera.rs` — Welt(mm)↔Bildschirm(px), Pan/Zoom/Fit.
-- `scene_geo.rs` — `AppState` → Vertices (Konturen + Scanline-Fill).
-- `ui.rs` — egui-Panels (Werkzeuge, Ebenen, Palette, Tabs).
-- `laserpanel.rs` — Laser-Bedienpanel (egui).
-- `tools.rs` — Werkzeug-/Tab-/Laser-UI-Zustand.
+- `scene_geo.rs` — `AppState` → Vertices (Konturen, Scanline-Fill, Handles).
+- `ui.rs` — egui-Panels (Reiterleiste, Werkzeuge, Ebenen, Palette, Projekt-
+  Browser, Laser-/Text-Dialoge, Theme).
+- `laserpanel.rs` — Laser-Bedienpanel (Ampel-Grid, echter Treiber).
+- `laser.rs` — Laser-Backend (Registry + Treiber, Aktionen, Export).
+- `project.rs` — Projekt-Backend (öffnen/speichern/Versionen).
+- `fonts.rs` — System-Font-Scan fürs Text-Werkzeug.
+- `tools.rs` — Werkzeug-/View-/Laser-UI-Zustand.
 
 **Invariante bleibt gewahrt:** keine Fachlogik hier — alles Mutierende geht durch
-`luxifer-core`.
+`luxifer-core` (199 Core-Tests unberührt; native Verdrahtung mit 8 eigenen Tests).
