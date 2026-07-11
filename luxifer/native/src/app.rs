@@ -14,7 +14,7 @@ use winit::window::Window;
 use crate::camera::Camera;
 use crate::gpu::Gpu;
 use crate::scene_geo::{self, Vertex};
-use crate::tools::{Drag, LaserUi, Tab, Tool};
+use crate::tools::{Drag, LaserUi, Tool};
 use crate::ui;
 
 /// Ziel-Box beim Ziehen eines Skalier-Handles: die vom Handle bewegte(n)
@@ -57,7 +57,10 @@ pub struct App {
     pub state: AppState,
     pub cam: Camera,
     pub tool: Tool,
-    pub tab: Tab,
+    pub view: crate::tools::View,
+    pub project: crate::project::ProjectBackend,
+    /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
+    pub new_project_name: String,
     pub laser: LaserUi,
     pub laser_backend: crate::laser::LaserBackend,
     /// Letzte Laser-Rückmeldung (Statuszeile im Panel).
@@ -69,6 +72,8 @@ pub struct App {
     pub accent: [u8; 3],
     cursor: [f32; 2],
     space_down: bool,
+    ctrl_down: bool,
+    shift_down: bool,
     // Polygon-Zug (Welt-Punkte), bis Doppelklick/Enter schließt.
     poly_pts: Vec<(f64, f64)>,
     // egui.
@@ -157,12 +162,14 @@ impl App {
             state,
             cam,
             tool: Tool::Select,
-            // Start-Reiter per Env (Testhilfe): LUXI_TAB=laser.
-            tab: if std::env::var("LUXI_TAB").as_deref() == Ok("laser") {
-                Tab::Laser
+            // Start-Ansicht per Env (Testhilfe): LUXI_TAB=laser.
+            view: if std::env::var("LUXI_TAB").as_deref() == Ok("laser") {
+                crate::tools::View::Laser
             } else {
-                Tab::Design
+                crate::tools::View::Design
             },
+            project: crate::project::ProjectBackend::default(),
+            new_project_name: String::new(),
             laser: LaserUi::default(),
             laser_backend: crate::laser::LaserBackend::load(),
             laser_msg: String::new(),
@@ -171,6 +178,8 @@ impl App {
             accent,
             cursor: [0.0, 0.0],
             space_down: false,
+            ctrl_down: false,
+            shift_down: false,
             poly_pts: Vec::new(),
             egui_ctx,
             egui_state,
@@ -213,9 +222,22 @@ impl App {
                 self.gpu.resize(sz.width, sz.height);
                 self.cam.viewport = [sz.width as f32, sz.height as f32];
             }
+            WindowEvent::ModifiersChanged(m) => {
+                self.ctrl_down = m.state().control_key();
+                self.shift_down = m.state().shift_key();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
+                    // Strg+S / Shift+Strg+S: speichern bzw. neue Version.
+                    if pressed && self.ctrl_down && code == KeyCode::KeyS {
+                        if self.shift_down {
+                            self.project_save_version();
+                        } else {
+                            self.project_save();
+                        }
+                        return true;
+                    }
                     match code {
                         KeyCode::Space => self.space_down = pressed,
                         KeyCode::Delete | KeyCode::Backspace if pressed => {
@@ -411,6 +433,40 @@ impl App {
     pub fn pick_color(&mut self, c: [u8; 3]) {
         self.state.activate_color(c);
         self.refresh_accent();
+    }
+
+    // ---- Projekt (README-3c) -------------------------------------------------
+
+    /// Projekt öffnen: ersetzt den Canvas-Zustand durch den geladenen.
+    pub fn project_open(&mut self, name: &str) {
+        if let Some(state) = self.project.open(name) {
+            self.state = state;
+            self.refresh_accent();
+            self.image_dirty = true;
+            self.fit_all();
+            self.view = crate::tools::View::Design;
+        }
+    }
+
+    /// Neues Projekt aus dem aktuellen Canvas anlegen und in-place speichern.
+    pub fn project_new(&mut self, name: &str) {
+        if name.trim().is_empty() {
+            self.project.msg = "Bitte einen Namen angeben.".into();
+            return;
+        }
+        self.project.new_from_state(&self.state, name.trim());
+        self.project.save(&self.state);
+        self.view = crate::tools::View::Design;
+    }
+
+    /// In-place speichern (Strg+S).
+    pub fn project_save(&mut self) {
+        self.project.save(&self.state);
+    }
+
+    /// Als neue Version speichern (Shift+Strg+S).
+    pub fn project_save_version(&mut self) {
+        self.project.save_version(&self.state);
     }
 
     /// Öffnet den Text-Dialog und scannt bei Bedarf die System-Fonts.
@@ -1020,5 +1076,32 @@ mod tests {
             },
         );
         assert!(!idxs.is_empty(), "Text-Block sollte Shapes anlegen");
+    }
+
+    /// Projekt-Round-Trip: from_state → save_to_dir → load_by_name → into_state.
+    /// Deckt die Kette ab, die ProjectBackend nutzt.
+    #[test]
+    fn projekt_speichern_und_laden() {
+        use luxifer_core::{project::ProjectFile, AppState, Geo};
+        let mut s = AppState::new();
+        s.add_shape(Geo::Rect {
+            x: 5.0,
+            y: 5.0,
+            w: 30.0,
+            h: 20.0,
+        });
+        let n_shapes = s.shapes.len();
+
+        let dir = std::env::temp_dir().join("luxifer_proj_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut pf = ProjectFile::from_state(&s, "TestProj", Vec::new());
+        pf.save_to_dir(&dir).expect("save_to_dir");
+        pf.save_current(&dir, &[]).expect("save_current");
+
+        let loaded = ProjectFile::load_by_name(&dir, "TestProj").expect("load_by_name");
+        assert_eq!(loaded.name, "TestProj");
+        let restored = loaded.into_state();
+        assert_eq!(restored.shapes.len(), n_shapes);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -8,59 +8,41 @@ use luxifer_core::model::SWATCH_COLORS;
 
 use crate::app::App;
 use crate::laserpanel;
-use crate::tools::{Tab, Tool};
+use crate::tools::Tool;
 
 fn c32(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
 pub fn build(ctx: &egui::Context, app: &mut App) {
+    use crate::tools::View;
     apply_theme(ctx);
 
-    let left = egui::SidePanel::left("tools")
-        .exact_width(96.0)
-        .resizable(false)
-        .show(ctx, |ui| tools_panel(ui, app));
-    app.left_w = left.response.rect.width();
-
-    let right = egui::SidePanel::right("inspector")
-        .exact_width(260.0)
-        .resizable(false)
-        .show(ctx, |ui| {
-            // Reiter-Umschalter: Design-Inspektor ↔ Laser-Bedienung.
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
+    // Oben: Haupt-Reiterleiste (Projekt / Design / Laser) + offenes Projekt.
+    egui::TopBottomPanel::top("topbar").show(ctx, |ui| {
+        ui.add_space(3.0);
+        ui.horizontal(|ui| {
+            for v in [View::Projekt, View::Design, View::Laser] {
                 if ui
-                    .selectable_label(app.tab == Tab::Design, "  Design  ")
+                    .selectable_label(app.view == v, format!("  {}  ", v.label()))
                     .clicked()
                 {
-                    app.tab = Tab::Design;
+                    app.view = v;
                 }
-                if ui
-                    .selectable_label(app.tab == Tab::Laser, "  Laser  ")
-                    .clicked()
-                {
-                    app.tab = Tab::Laser;
-                }
-            });
-            ui.add_space(6.0);
-            ui.separator();
-            ui.add_space(8.0);
-
-            match app.tab {
-                Tab::Design => {
-                    layers_panel(ui, app);
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-                    palette_panel(ui, app);
-                }
-                Tab::Laser => laserpanel::show(ui, app),
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let name = app
+                    .project
+                    .open_name()
+                    .unwrap_or("— (ungespeichert)")
+                    .to_string();
+                ui.label(RichText::new(name).weak());
+            });
         });
-    app.right_w = right.response.rect.width();
+        ui.add_space(3.0);
+    });
 
-    // Statuszeile unten: FPS + aktives Tool (der native Perf-Beleg live).
+    // Statuszeile unten.
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{:.0} fps", app.fps)).monospace());
@@ -68,11 +50,110 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             ui.label(format!("Werkzeug: {}", app.tool.label()));
             ui.separator();
             ui.label(format!("{} Objekte", app.state.shapes.len()));
+            if !app.project.msg.is_empty() {
+                ui.separator();
+                ui.label(RichText::new(&app.project.msg).weak());
+            }
         });
     });
 
+    match app.view {
+        View::Projekt => {
+            app.left_w = 0.0;
+            app.right_w = 0.0;
+            egui::CentralPanel::default().show(ctx, |ui| project_browser(ui, app));
+        }
+        View::Design | View::Laser => {
+            let left = egui::SidePanel::left("tools")
+                .exact_width(96.0)
+                .resizable(false)
+                .show(ctx, |ui| tools_panel(ui, app));
+            app.left_w = left.response.rect.width();
+
+            let is_laser = app.view == View::Laser;
+            let right = egui::SidePanel::right("inspector")
+                .exact_width(260.0)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.add_space(6.0);
+                    if is_laser {
+                        laserpanel::show(ui, app);
+                    } else {
+                        layers_panel(ui, app);
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        palette_panel(ui, app);
+                    }
+                });
+            app.right_w = right.response.rect.width();
+        }
+    }
+
     laser_settings_window(ctx, app);
     text_dialog_window(ctx, app);
+}
+
+/// Projekt-Browser (Reiter „Projekt"): Liste + Neu/Öffnen/Speichern.
+fn project_browser(ui: &mut egui::Ui, app: &mut App) {
+    ui.add_space(8.0);
+    ui.heading("Projekte");
+    ui.add_space(8.0);
+
+    // Aktionszeile: Neu + Speichern.
+    ui.horizontal(|ui| {
+        ui.label("Neu:");
+        ui.add(
+            egui::TextEdit::singleline(&mut app.new_project_name)
+                .hint_text("Projektname")
+                .desired_width(200.0),
+        );
+        if ui.button("Anlegen").clicked() {
+            let name = app.new_project_name.clone();
+            app.project_new(&name);
+            app.new_project_name.clear();
+        }
+        ui.separator();
+        if ui.button("💾 Speichern").clicked() {
+            app.project_save();
+        }
+        if ui.button("＋ Version").clicked() {
+            app.project_save_version();
+        }
+    });
+    ui.add_space(10.0);
+    ui.separator();
+    ui.add_space(10.0);
+
+    // Projektliste.
+    let projects = app.project.list();
+    if projects.is_empty() {
+        ui.weak("Noch keine Projekte gespeichert.");
+        return;
+    }
+    let open_name = app.project.open_name().map(|s| s.to_string());
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for p in &projects {
+            let is_open = open_name.as_deref() == Some(p.name.as_str());
+            ui.horizontal(|ui| {
+                let title = if is_open {
+                    RichText::new(&p.name).strong()
+                } else {
+                    RichText::new(&p.name)
+                };
+                ui.label(title);
+                if !p.modified_at.is_empty() {
+                    ui.weak(RichText::new(&p.modified_at).small());
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Öffnen").clicked() {
+                        app.project_open(&p.name);
+                    }
+                });
+            });
+            ui.separator();
+        }
+    });
 }
 
 /// Text-Dialog: Eingabe, Font-Auswahl, Größe → Text als Pfad einfügen.

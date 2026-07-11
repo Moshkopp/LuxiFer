@@ -9,11 +9,22 @@ pub enum Tool {
     Polygon,
 }
 
-/// Rechter Reiter: Design-Inspektor (Ebenen/Palette) oder Laser-Bedienung.
+/// Haupt-Ansicht (Reiterleiste oben), analog zur Tauri-App.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
+pub enum View {
+    Projekt,
     Design,
     Laser,
+}
+
+impl View {
+    pub fn label(self) -> &'static str {
+        match self {
+            View::Projekt => "Projekt",
+            View::Design => "Design",
+            View::Laser => "Laser",
+        }
+    }
 }
 
 /// Laser-Bedien-Zustand (UI-seitig). Ohne echten Treiber-Anschluss im nativen

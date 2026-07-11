@@ -32,6 +32,7 @@ struct Tex {
 }
 
 /// Hält Pipeline, Sampler, Uniform-Buffer und die geladenen Texturen je Asset-ID.
+#[derive(Default)]
 pub struct ImageStore {
     pipeline: Option<wgpu::RenderPipeline>,
     sampler: Option<wgpu::Sampler>,
@@ -39,19 +40,6 @@ pub struct ImageStore {
     uniform_buf: Option<wgpu::Buffer>,
     uni_bind: Option<wgpu::BindGroup>,
     textures: HashMap<String, Tex>,
-}
-
-impl Default for ImageStore {
-    fn default() -> Self {
-        Self {
-            pipeline: None,
-            sampler: None,
-            tex_layout: None,
-            uniform_buf: None,
-            uni_bind: None,
-            textures: HashMap::new(),
-        }
-    }
 }
 
 impl ImageStore {
