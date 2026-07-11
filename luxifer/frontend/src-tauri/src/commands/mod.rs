@@ -3,3 +3,5 @@
 //! geteilten Zustand aus `crate::shared`.
 
 pub mod laser;
+pub mod project;
+pub mod shapes;
