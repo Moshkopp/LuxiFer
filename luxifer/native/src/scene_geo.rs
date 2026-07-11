@@ -147,7 +147,31 @@ pub fn rect_outline(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vert
     v
 }
 
+/// Kleines gefülltes Quadrat (als 2 Dreiecke = 6 Vertices) um einen Weltpunkt,
+/// Halbkantenlänge `hw` (mm). Für Transform-Handles.
+pub fn handle_marker(cx: f32, cy: f32, hw: f32, color: [f32; 4]) -> Vec<Vertex> {
+    let p = |x: f32, y: f32| Vertex { pos: [x, y], color };
+    let (l, r, t, b) = (cx - hw, cx + hw, cy - hw, cy + hw);
+    // Als Linien-Rahmen (die Pipeline ist LineList): 4 Kanten.
+    let mut v = Vec::new();
+    let corners = [[l, t], [r, t], [r, b], [l, b]];
+    for i in 0..4 {
+        let a = corners[i];
+        let c = corners[(i + 1) % 4];
+        v.push(p(a[0], a[1]));
+        v.push(p(c[0], c[1]));
+    }
+    // Diagonalkreuz zum Ausfüllen (damit das kleine Quadrat solide wirkt).
+    v.push(p(l, t));
+    v.push(p(r, b));
+    v.push(p(r, t));
+    v.push(p(l, b));
+    v
+}
+
 /// Farbwert für den Tisch-Rahmen (dezentes Grau).
 pub const BED_COLOR: [f32; 4] = [0.35, 0.38, 0.42, 1.0];
 /// Auswahl-BBox-Rahmen (heller Akzentton).
 pub const SEL_BOX_COLOR: [f32; 4] = [0.4, 0.7, 1.0, 0.9];
+/// Transform-Handles (weiß).
+pub const HANDLE_COLOR: [f32; 4] = [0.95, 0.97, 1.0, 1.0];

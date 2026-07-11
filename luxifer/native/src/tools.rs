@@ -68,4 +68,15 @@ pub enum Drag {
     DrawBox {
         start: [f64; 2],
     },
+    /// Auswahl über ein Handle skalieren. `handle` = gezogene Ecke/Kante,
+    /// `start_box` = Auswahl-BBox bei Drag-Beginn.
+    Resize {
+        handle: luxifer_core::Handle,
+        start_box: luxifer_core::BBox,
+    },
+    /// Auswahl drehen. `pivot` = Mittelpunkt, `last_angle` = letzter Mauswinkel.
+    Rotate {
+        pivot: [f64; 2],
+        last_angle: f64,
+    },
 }

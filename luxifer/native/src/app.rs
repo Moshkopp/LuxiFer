@@ -17,6 +17,35 @@ use crate::scene_geo::{self, Vertex};
 use crate::tools::{Drag, LaserUi, Tab, Tool};
 use crate::ui;
 
+/// Ziel-Box beim Ziehen eines Skalier-Handles: die vom Handle bewegte(n)
+/// Kante(n) folgen dem Cursor `w` (mm), die gegenüberliegenden bleiben fix.
+/// Negative Größen werden normalisiert (Box klappt sauber um).
+pub fn resize_target(
+    start: luxifer_core::BBox,
+    handle: luxifer_core::Handle,
+    w: [f64; 2],
+) -> luxifer_core::BBox {
+    let mut left = start.x;
+    let mut right = start.x + start.w;
+    let mut top = start.y;
+    let mut bottom = start.y + start.h;
+    if handle.moves_left() {
+        left = w[0];
+    }
+    if handle.moves_right() {
+        right = w[0];
+    }
+    if handle.moves_top() {
+        top = w[1];
+    }
+    if handle.moves_bottom() {
+        bottom = w[1];
+    }
+    let x = left.min(right);
+    let y = top.min(bottom);
+    luxifer_core::BBox::new(x, y, (right - left).abs().max(0.1), (bottom - top).abs().max(0.1))
+}
+
 pub struct App {
     pub window: Arc<Window>,
     pub gpu: Gpu,
@@ -229,6 +258,28 @@ impl App {
     }
 
     fn begin_select(&mut self, w: [f64; 2]) {
+        // Zuerst: wurde ein Transform-Handle der aktuellen Auswahl getroffen?
+        if let Some(b) = self.state.selection_bbox() {
+            let pick = self.handle_hw() as f64 * 1.8; // etwas großzügiger als sichtbar
+            // Rotate-Handle?
+            let rp = self.rotate_handle_pos(&b);
+            if (w[0] - rp[0]).hypot(w[1] - rp[1]) <= pick {
+                self.state.push_undo();
+                let pivot = [b.x + b.w / 2.0, b.y + b.h / 2.0];
+                let angle = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
+                self.drag = Drag::Rotate { pivot, last_angle: angle };
+                return;
+            }
+            // Skalier-Handle?
+            for (handle, (hx, hy)) in luxifer_core::Handle::positions(&b) {
+                if (w[0] - hx).abs() <= pick && (w[1] - hy).abs() <= pick {
+                    self.state.push_undo();
+                    self.drag = Drag::Resize { handle, start_box: b };
+                    return;
+                }
+            }
+        }
+
         let tol = 4.0 / self.cam.scale as f64;
         if let Some(idx) = self.state.hit_test(w[0], w[1], tol) {
             if !self.state.selected.contains(&idx) {
@@ -244,15 +295,27 @@ impl App {
     fn on_cursor_move(&mut self, new: [f32; 2]) {
         let dx = new[0] - self.cursor[0];
         let dy = new[1] - self.cursor[1];
+        let w = self.cam.screen_to_world(new);
         match &mut self.drag {
             Drag::Pan => self.cam.pan_pixels(dx, dy),
             Drag::MoveShapes { last } => {
-                let w = self.cam.screen_to_world(new);
                 self.state
                     .translate_selected(w[0] - last[0], w[1] - last[1]);
                 *last = w;
             }
-            // Marquee/DrawBox: nur der Endpunkt zählt (Vorschau folgt später).
+            Drag::Resize { handle, start_box } => {
+                // Ziel-Box aus dem Handle-Zug: gezogene Kante folgt dem Cursor.
+                let (handle, start_box) = (*handle, *start_box);
+                let target = resize_target(start_box, handle, w);
+                self.state.scale_selection_to(start_box, target);
+            }
+            Drag::Rotate { pivot, last_angle } => {
+                let a = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
+                let delta_deg = (a - *last_angle).to_degrees();
+                *last_angle = a;
+                self.state.rotate_selection(delta_deg);
+            }
+            // Marquee/DrawBox: nur der Endpunkt zählt.
             _ => {}
         }
     }
@@ -265,7 +328,7 @@ impl App {
                 }
             }
             Drag::DrawBox { start } => self.finish_box(start, w),
-            Drag::MoveShapes { .. } => {
+            Drag::MoveShapes { .. } | Drag::Resize { .. } | Drag::Rotate { .. } => {
                 self.state.discard_last_undo_if_no_change();
             }
             _ => {}
@@ -521,6 +584,52 @@ impl App {
         h.finish()
     }
 
+    /// Halbe Handle-Kantenlänge in Welt-mm, damit sie am Bildschirm konstant
+    /// ~7px groß wirken (unabhängig vom Zoom).
+    fn handle_hw(&self) -> f32 {
+        7.0 / self.cam.scale
+    }
+
+    /// Rotate-Handle-Position (mm): mittig über der Auswahl-BBox, mit Abstand.
+    fn rotate_handle_pos(&self, b: &luxifer_core::BBox) -> [f64; 2] {
+        let off = 22.0 / self.cam.scale as f64;
+        [b.x + b.w / 2.0, b.y - off]
+    }
+
+    /// Baut die Overlay-Vertices (Transform-Handles auf der Auswahl). Jeden Frame
+    /// neu (kamera-abhängig), aber winzig.
+    fn build_overlay(&self) -> Vec<Vertex> {
+        let mut v = Vec::new();
+        // Handles nur im Auswahl-Werkzeug und bei vorhandener Auswahl.
+        if self.tool != Tool::Select {
+            return v;
+        }
+        let Some(b) = self.state.selection_bbox() else {
+            return v;
+        };
+        let hw = self.handle_hw();
+        for (_, (hx, hy)) in luxifer_core::Handle::positions(&b) {
+            v.extend(scene_geo::handle_marker(
+                hx as f32,
+                hy as f32,
+                hw,
+                scene_geo::HANDLE_COLOR,
+            ));
+        }
+        // Rotate-Handle: Linie von oben-Mitte nach oben + Kreis-Marker.
+        let rp = self.rotate_handle_pos(&b);
+        let top = [b.x as f32 + b.w as f32 / 2.0, b.y as f32];
+        v.push(Vertex { pos: top, color: scene_geo::SEL_BOX_COLOR });
+        v.push(Vertex { pos: [rp[0] as f32, rp[1] as f32], color: scene_geo::SEL_BOX_COLOR });
+        v.extend(scene_geo::handle_marker(
+            rp[0] as f32,
+            rp[1] as f32,
+            hw * 1.1,
+            scene_geo::HANDLE_COLOR,
+        ));
+        v
+    }
+
     /// Baut die Zeichendaten (Tisch, Shapes, Auswahl-BBox, laufendes Polygon).
     fn build_vertices(&self) -> Vec<Vertex> {
         let mut v = scene_geo::rect_outline(
@@ -587,6 +696,9 @@ impl App {
         }
         self.gpu.upload_camera(&self.cam);
         let count = self.verts.len() as u32;
+        // Overlay (Handles) jeden Frame neu — klein, kamera-abhängig.
+        let overlay = self.build_overlay();
+        self.gpu.upload_overlay(&overlay);
 
         let frame = match self.gpu.surface.get_current_texture() {
             Ok(f) => f,
@@ -638,6 +750,7 @@ impl App {
                 occlusion_query_set: None,
             });
             self.gpu.draw_canvas(&mut rp, count);
+            self.gpu.draw_overlay(&mut rp);
             // egui obendrauf (eigener Lebenszeit-Scope via forget_lifetime).
             let mut rp = rp.forget_lifetime();
             self.egui_renderer.render(&mut rp, &tris, &screen);
@@ -648,5 +761,38 @@ impl App {
         for id in &full.textures_delta.free {
             self.egui_renderer.free_texture(id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resize_target;
+    use luxifer_core::{BBox, Handle};
+
+    #[test]
+    fn resize_se_zieht_rechte_untere_ecke() {
+        let start = BBox::new(0.0, 0.0, 100.0, 100.0);
+        // Se-Handle auf (150,120) ziehen: Ursprung bleibt, Box wird 150×120.
+        let t = resize_target(start, Handle::Se, [150.0, 120.0]);
+        assert!((t.x - 0.0).abs() < 1e-9 && (t.y - 0.0).abs() < 1e-9);
+        assert!((t.w - 150.0).abs() < 1e-9 && (t.h - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resize_nw_haelt_gegenueberliegende_ecke_fix() {
+        let start = BBox::new(0.0, 0.0, 100.0, 100.0);
+        // Nw auf (20,30): rechte-untere Ecke (100,100) bleibt fix.
+        let t = resize_target(start, Handle::Nw, [20.0, 30.0]);
+        assert!((t.x - 20.0).abs() < 1e-9 && (t.y - 30.0).abs() < 1e-9);
+        assert!((t.x + t.w - 100.0).abs() < 1e-9);
+        assert!((t.y + t.h - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resize_e_aendert_nur_breite() {
+        let start = BBox::new(10.0, 10.0, 50.0, 50.0);
+        let t = resize_target(start, Handle::E, [200.0, 999.0]);
+        assert!((t.y - 10.0).abs() < 1e-9 && (t.h - 50.0).abs() < 1e-9);
+        assert!((t.x + t.w - 200.0).abs() < 1e-9);
     }
 }

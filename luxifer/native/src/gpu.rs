@@ -24,9 +24,14 @@ pub struct Gpu {
     pipeline: wgpu::RenderPipeline,
     uniform_buf: wgpu::Buffer,
     bind: wgpu::BindGroup,
-    // Dynamischer Vertex-Buffer; wächst bei Bedarf.
+    // Dynamischer Vertex-Buffer (gecachte Szene); wächst bei Bedarf.
     vbuf: wgpu::Buffer,
     vbuf_cap: u64,
+    // Overlay-Buffer (Transform-Handles, Marquee): jeden Frame neu, klein,
+    // kamera-abhängig — bleibt aus dem Szene-Cache heraus.
+    obuf: wgpu::Buffer,
+    obuf_cap: u64,
+    ocount: u32,
 }
 
 impl Gpu {
@@ -143,6 +148,13 @@ impl Gpu {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let obuf_cap = 1024;
+        let obuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("overlay"),
+            size: obuf_cap * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Self {
             device,
@@ -154,7 +166,40 @@ impl Gpu {
             bind,
             vbuf,
             vbuf_cap,
+            obuf,
+            obuf_cap,
+            ocount: 0,
         }
+    }
+
+    /// Overlay-Vertices (Handles/Marquee) hochladen — jeden Frame, klein.
+    pub fn upload_overlay(&mut self, verts: &[Vertex]) {
+        let need = verts.len() as u64;
+        if need > self.obuf_cap {
+            self.obuf_cap = need.next_power_of_two().max(1);
+            self.obuf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("overlay"),
+                size: self.obuf_cap * std::mem::size_of::<Vertex>() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if !verts.is_empty() {
+            self.queue
+                .write_buffer(&self.obuf, 0, bytemuck::cast_slice(verts));
+        }
+        self.ocount = verts.len() as u32;
+    }
+
+    /// Zeichnet das Overlay (nach der Szene, gleiche Pipeline/Kamera).
+    pub fn draw_overlay<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>) {
+        if self.ocount == 0 {
+            return;
+        }
+        rp.set_pipeline(&self.pipeline);
+        rp.set_bind_group(0, &self.bind, &[]);
+        rp.set_vertex_buffer(0, self.obuf.slice(..));
+        rp.draw(0..self.ocount, 0..1);
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {

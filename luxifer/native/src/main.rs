@@ -35,7 +35,8 @@ impl ApplicationHandler for Runner {
             el.create_window(
                 Window::default_attributes()
                     .with_title("LuxiFer — nativ (wgpu)")
-                    .with_inner_size(winit::dpi::LogicalSize::new(1400, 880)),
+                    .with_inner_size(winit::dpi::LogicalSize::new(1400, 880))
+                    .with_active(true),
             )
             .unwrap(),
         );
