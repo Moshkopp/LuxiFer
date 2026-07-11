@@ -22,6 +22,7 @@ impl Camera {
     }
 
     /// Welt (mm) → Bildschirm (px, Ursprung oben links).
+    #[allow(dead_code)] // gegenstück zu screen_to_world; für Handles/Overlays.
     pub fn world_to_screen(&self, w: [f64; 2]) -> [f32; 2] {
         let x = (w[0] as f32 - self.center[0]) * self.scale + self.viewport[0] * 0.5;
         let y = (w[1] as f32 - self.center[1]) * self.scale + self.viewport[1] * 0.5;

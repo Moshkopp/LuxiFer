@@ -39,6 +39,11 @@ pub struct App {
     pub right_w: f32,
     last_frame: std::time::Instant,
     pub fps: f32,
+    // Vertex-Cache: die (teure) Scanline-Füllung wird NUR neu gebaut, wenn sich
+    // der Zustand ändert — nicht pro Frame. Pan/Zoom lassen die Vertices
+    // unberührt (die Projektion macht der Shader), daher bleiben sie gecacht.
+    verts: Vec<Vertex>,
+    last_fp: u64,
 }
 
 impl App {
@@ -72,12 +77,15 @@ impl App {
         });
         state.selected.clear();
         let accent = state.active_color().unwrap_or([0x3B, 0x82, 0xF6]);
+        // Ein erstes CLI-Argument wird als zu importierende Datei geladen
+        // (praktisch fürs Testen: `luxifer-native datei.svg`).
+        let auto_import = std::env::args().nth(1);
 
         let mut cam = Camera::new();
         cam.viewport = [gpu.config.width as f32, gpu.config.height as f32];
         cam.fit_bbox([0.0, 0.0, state.bed_w_mm, state.bed_h_mm], 0.85);
 
-        Self {
+        let mut app = Self {
             window,
             gpu,
             state,
@@ -95,7 +103,17 @@ impl App {
             right_w: 0.0,
             last_frame: std::time::Instant::now(),
             fps: 0.0,
+            verts: Vec::new(),
+            last_fp: 0,
+        };
+        if let Some(path) = auto_import {
+            app.import_path(std::path::Path::new(&path));
+            // Beim Auto-Import gleich füllen (Fill-Stresstest sichtbar machen).
+            if std::env::var("LUXI_FILL").is_ok() {
+                app.toggle_fill();
+            }
         }
+        app
     }
 
     pub fn window_event(&mut self, event: &WindowEvent) -> bool {
@@ -275,10 +293,111 @@ impl App {
         self.refresh_accent();
     }
 
+    /// Öffnet einen nativen Datei-Dialog und importiert SVG/DXF über den Core.
+    /// Danach Kamera auf die neue Geometrie einpassen.
+    pub fn import_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Vektor", &["svg", "dxf"])
+            .pick_file()
+        {
+            self.import_path(&path);
+        }
+    }
+
+    /// Importiert eine Datei direkt (auch für den „Aztec laden"-Schnellknopf).
+    pub fn import_path(&mut self, path: &std::path::Path) {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("Datei lesen: {e}");
+                return;
+            }
+        };
+        match luxifer_core::import::import_vector(&bytes, &ext) {
+            Ok(contours) => {
+                let t = std::time::Instant::now();
+                self.state.add_polylines(contours);
+                self.refresh_accent();
+                self.fit_all();
+                log::info!(
+                    "Import {}: {} Shapes in {:?}",
+                    path.display(),
+                    self.state.shapes.len(),
+                    t.elapsed()
+                );
+            }
+            Err(e) => log::error!("Import fehlgeschlagen: {e}"),
+        }
+    }
+
+    /// Kamera auf die BBox aller Shapes einpassen (Fallback: Tisch).
+    fn fit_all(&mut self) {
+        let b = luxifer_core::geometry::BBox::union_all(self.state.shapes.iter().map(|s| s.bbox()));
+        if let Some(b) = b {
+            self.cam.fit_bbox([b.x, b.y, b.w, b.h], 0.85);
+        } else {
+            self.cam
+                .fit_bbox([0.0, 0.0, self.state.bed_w_mm, self.state.bed_h_mm], 0.85);
+        }
+    }
+
+    /// Schaltet den Modus aller Layer zwischen Cut (nur Kontur) und Fill (Fläche).
+    /// Für den Fill-Stresstest an importierter Geometrie.
+    pub fn toggle_fill(&mut self) {
+        use luxifer_core::model::LayerMode;
+        let any_cut = self.state.layers.iter().any(|l| l.mode == LayerMode::Cut);
+        let target = if any_cut {
+            LayerMode::Fill
+        } else {
+            LayerMode::Cut
+        };
+        for l in &mut self.state.layers {
+            if l.mode == LayerMode::Cut || l.mode == LayerMode::Fill {
+                l.mode = target;
+            }
+        }
+    }
+
     fn refresh_accent(&mut self) {
         if let Some(c) = self.state.active_color() {
             self.accent = c;
         }
+    }
+
+    /// Billiger Fingerprint dessen, was die Vertices beeinflusst. Ändert er
+    /// sich, werden die Vertices neu gebaut — sonst bleibt der Cache. So kann
+    /// kein mutierender Pfad das Invalidieren „vergessen". Kamera ist bewusst
+    /// NICHT enthalten (Pan/Zoom projiziert der Shader, keine Neuberechnung).
+    fn scene_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.state.shapes.len().hash(&mut h);
+        self.state.selected.hash(&mut h);
+        self.poly_pts.len().hash(&mut h);
+        // Layer-Modus/Farbe/Sichtbarkeit beeinflussen Fill + Farbe.
+        for l in &self.state.layers {
+            l.color.hash(&mut h);
+            l.visible.hash(&mut h);
+            (l.mode as u8).hash(&mut h);
+        }
+        // Geometrie-Änderungen (Move/Draw/Import): BBox-Summe als grober Proxy,
+        // plus Rotation. Günstig und für Cache-Invalidierung ausreichend.
+        for s in &self.state.shapes {
+            let b = s.geo.bbox();
+            (b.x.to_bits(), b.y.to_bits(), b.w.to_bits(), b.h.to_bits()).hash(&mut h);
+            s.rotation.to_bits().hash(&mut h);
+            s.layer_id.hash(&mut h);
+        }
+        // Laufender Polygon-Zug (Live-Vorschau).
+        for p in &self.poly_pts {
+            (p.0.to_bits(), p.1.to_bits()).hash(&mut h);
+        }
+        h.finish()
     }
 
     /// Baut die Zeichendaten (Tisch, Shapes, Auswahl-BBox, laufendes Polygon).
@@ -290,6 +409,8 @@ impl App {
             self.state.bed_h_mm as f32,
             scene_geo::BED_COLOR,
         );
+        // Füllung zuerst (liegt unter den Konturen), dann die Umrisse.
+        v.extend(scene_geo::fill_lines(&self.state));
         v.extend(scene_geo::shape_lines(&self.state, self.accent));
         if let Some(b) = self.state.selection_bbox() {
             v.extend(scene_geo::rect_outline(
@@ -332,9 +453,19 @@ impl App {
             .handle_platform_output(&self.window, full.platform_output);
         let tris = self.egui_ctx.tessellate(full.shapes, full.pixels_per_point);
 
-        // Canvas-Vertices.
-        let verts = self.build_vertices();
-        let count = self.gpu.upload(&verts, &self.cam);
+        // Canvas-Vertices nur neu bauen+hochladen, wenn sich die Szene änderte
+        // (nicht bei reinem Pan/Zoom — das macht der Shader). Das war der
+        // 3-fps-Killer: die Scanline-Füllung lief zuvor pro Frame.
+        let fp = self.scene_fingerprint();
+        if fp != self.last_fp {
+            self.last_fp = fp;
+            self.verts = self.build_vertices();
+            let verts = std::mem::take(&mut self.verts);
+            self.gpu.upload_verts(&verts);
+            self.verts = verts;
+        }
+        self.gpu.upload_camera(&self.cam);
+        let count = self.verts.len() as u32;
 
         let frame = match self.gpu.surface.get_current_texture() {
             Ok(f) => f,

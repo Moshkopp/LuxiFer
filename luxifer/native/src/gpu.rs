@@ -163,9 +163,8 @@ impl Gpu {
         self.surface.configure(&self.device, &self.config);
     }
 
-    /// Lädt die Vertices in den (ggf. vergrößerten) Buffer und schreibt die
-    /// Kamera-Uniforms. Gibt die Vertex-Anzahl zurück.
-    pub fn upload(&mut self, verts: &[Vertex], cam: &Camera) -> u32 {
+    /// Schreibt die Kamera-Uniforms (jeden Frame — billig, ein kleiner Buffer).
+    pub fn upload_camera(&mut self, cam: &Camera) {
         let uni = Uniforms {
             center: cam.center,
             scale: cam.scale,
@@ -175,10 +174,14 @@ impl Gpu {
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&uni));
+    }
 
+    /// Lädt die Vertices in den (ggf. vergrößerten) Buffer. Nur bei
+    /// Szenen-Änderung aufrufen, nicht pro Frame.
+    pub fn upload_verts(&mut self, verts: &[Vertex]) {
         let need = verts.len() as u64;
         if need > self.vbuf_cap {
-            self.vbuf_cap = need.next_power_of_two();
+            self.vbuf_cap = need.next_power_of_two().max(1);
             self.vbuf = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("vertices"),
                 size: self.vbuf_cap * std::mem::size_of::<Vertex>() as u64,
@@ -190,7 +193,6 @@ impl Gpu {
             self.queue
                 .write_buffer(&self.vbuf, 0, bytemuck::cast_slice(verts));
         }
-        verts.len() as u32
     }
 
     /// Zeichnet die hochgeladenen Linien in den Render-Pass (Clear + Canvas).

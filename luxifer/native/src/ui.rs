@@ -71,6 +71,22 @@ fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
     if ui.button("↷ Redo").clicked() {
         app.state.redo();
     }
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.add_space(6.0);
+    ui.label(RichText::new("DATEI").small().weak());
+    if ui.button("📂 Öffnen…").clicked() {
+        app.import_dialog();
+    }
+    // Schnellzugriff auf die große Testdatei (Aztec) für den Fill-Stresstest.
+    let aztec = std::path::Path::new("/home/moshy/Schreibtisch/Aztec.svg");
+    if aztec.exists() && ui.button("⬇ Aztec laden").clicked() {
+        app.import_path(aztec);
+    }
+    if ui.button("▦ Fill an/aus").clicked() {
+        app.toggle_fill();
+    }
 }
 
 fn layers_panel(ui: &mut egui::Ui, app: &mut App) {

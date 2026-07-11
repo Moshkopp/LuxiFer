@@ -2,7 +2,8 @@
 //! wgpu-Canvas. Reines Zeichnen — keine Fachlogik. Farben kommen aus den Layern,
 //! Rotation wird wie im Core (`rotate_point`) angewendet.
 
-use luxifer_core::geometry::rotate_point;
+use luxifer_core::geometry::{rotate_point, Pt};
+use luxifer_core::scanline::{fill_segments, Contour};
 use luxifer_core::state::AppState;
 
 /// Ein Vertex im Welt-Raum (mm) mit Farbe. Die Projektion nach NDC macht der
@@ -58,6 +59,50 @@ pub fn shape_lines(state: &AppState, accent: [u8; 3]) -> Vec<Vertex> {
 
         let (pts, closed) = world_outline(shape);
         push_polyline(&mut v, &pts, closed, color);
+    }
+    v
+}
+
+/// Baut die Füll-Vertices für alle fillbaren, sichtbaren Layer: der Core rechnet
+/// die Even-Odd-Scanline-Segmente (`fill_segments`), wir zeichnen sie als
+/// horizontale Linien in Layer-Farbe. Das ist der Aztec-Stresstest (73k Segmente)
+/// — und derselbe Fill wie in der Laser-Vorschau, kein neuer Algorithmus.
+pub fn fill_lines(state: &AppState) -> Vec<Vertex> {
+    let mut v = Vec::new();
+    for (li, layer) in state.layers.iter().enumerate() {
+        if !layer.visible || !layer.mode.is_filled() {
+            continue;
+        }
+        // Alle (rotierten) Welt-Konturen dieses Layers gemeinsam füllen, damit
+        // überlappende Formen und Löcher korrekt kombiniert werden.
+        let rings: Vec<(Vec<Pt>, bool)> = state
+            .shapes
+            .iter()
+            .filter(|s| s.layer_id == li)
+            .map(world_outline)
+            .collect();
+        let contours: Vec<Contour> = rings
+            .iter()
+            .map(|(pts, closed)| Contour {
+                points: pts,
+                closed: *closed,
+            })
+            .collect();
+        if contours.is_empty() {
+            continue;
+        }
+        let step = layer.line_step_mm.max(0.05);
+        let color = col(layer.color, 0.85);
+        for seg in fill_segments(&contours, step) {
+            v.push(Vertex {
+                pos: [seg.x0 as f32, seg.y as f32],
+                color,
+            });
+            v.push(Vertex {
+                pos: [seg.x1 as f32, seg.y as f32],
+                color,
+            });
+        }
     }
     v
 }
