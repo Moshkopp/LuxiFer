@@ -688,6 +688,7 @@
       bridgewidth={bridgeWidth}
       onbridgestroke={doBridgeStroke}
       ondragnode={async (sh, n, part, x, y, begin) => (scene = await core.dragNode(sh, n, part, x, y, begin))}
+      onhitnodesegment={(x, y, tolerance) => core.hitBezierSegment(x, y, tolerance)}
       onsplitnode={async (sh, seg, t) => (scene = await core.splitNode(sh, seg, t))}
       ondeletenode={async (sh, n) => (scene = await core.deleteNode(sh, n))}
       ontogglenode={async (sh, n) => (scene = await core.toggleNodeSmooth(sh, n))}

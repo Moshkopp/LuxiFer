@@ -86,6 +86,26 @@ pub struct BezierSplit {
     pub right_h_in: Pt,
 }
 
+/// Treffer auf einem editierbaren Segment einer Shape.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct BezierSegmentHit {
+    pub shape: usize,
+    pub segment: usize,
+    pub t: f64,
+}
+
+fn cubic_at(a: &BezierNode, b: &BezierNode, t: f64) -> Pt {
+    let p0 = a.p;
+    let p1 = a.h_out.unwrap_or(a.p);
+    let p2 = b.h_in.unwrap_or(b.p);
+    let p3 = b.p;
+    let u = 1.0 - t;
+    (
+        u * u * u * p0.0 + 3.0 * u * u * t * p1.0 + 3.0 * u * t * t * p2.0 + t * t * t * p3.0,
+        u * u * u * p0.1 + 3.0 * u * u * t * p1.1 + 3.0 * u * t * t * p2.1 + t * t * t * p3.1,
+    )
+}
+
 /// Teilt das Segment zwischen `a` und `b` bei `t ∈ (0,1)` formerhaltend.
 pub fn split_bezier_segment(a: &BezierNode, b: &BezierNode, t: f64) -> BezierSplit {
     let p0 = a.p;
@@ -198,6 +218,83 @@ pub enum NodePart {
 }
 
 impl AppState {
+    /// Findet das nächste editierbare Kurvensegment innerhalb `tolerance` mm.
+    /// Grobe Abtastung plus lokale Verfeinerung; das Frontend kennt weder
+    /// Kontrollpunkte noch Segmentparameter.
+    pub fn hit_bezier_segment(&self, at: Pt, tolerance: f64) -> Option<BezierSegmentHit> {
+        let mut best: Option<(BezierSegmentHit, f64)> = None;
+        for &shape_idx in self.selected.iter().rev() {
+            let Some(shape) = self.shapes.get(shape_idx) else {
+                continue;
+            };
+            let local_at = if shape.rotation.abs() > f64::EPSILON {
+                let (cx, cy) = shape.geo.bbox().center();
+                crate::geometry::rotate_point(at.0, at.1, cx, cy, -shape.rotation)
+            } else {
+                at
+            };
+            let fallback;
+            let (nodes, closed): (&[BezierNode], bool) = if let Some(bp) = &shape.bezier {
+                (&bp.nodes, bp.closed)
+            } else if matches!(shape.geo, Geo::Image { .. } | Geo::Ellipse { .. }) {
+                continue;
+            } else {
+                let (pts, is_closed) = shape.geo.outline_points();
+                fallback = pts.into_iter().map(BezierNode::corner).collect::<Vec<_>>();
+                (&fallback, is_closed)
+            };
+            if nodes.len() < 2 {
+                continue;
+            }
+            let count = if closed { nodes.len() } else { nodes.len() - 1 };
+            for segment in 0..count {
+                let a = &nodes[segment];
+                let b = &nodes[(segment + 1) % nodes.len()];
+                let mut sample_t = 0.0;
+                let mut sample_d = f64::MAX;
+                for sample in 0..=32 {
+                    let t = sample as f64 / 32.0;
+                    let p = cubic_at(a, b, t);
+                    let d = (p.0 - local_at.0).hypot(p.1 - local_at.1);
+                    if d < sample_d {
+                        sample_d = d;
+                        sample_t = t;
+                    }
+                }
+                // Um den besten Sample-Punkt mehrfach verfeinern.
+                let mut lo = (sample_t - 1.0 / 32.0).max(0.0);
+                let mut hi = (sample_t + 1.0 / 32.0).min(1.0);
+                for _ in 0..10 {
+                    let t1 = lo + (hi - lo) / 3.0;
+                    let t2 = hi - (hi - lo) / 3.0;
+                    let p1 = cubic_at(a, b, t1);
+                    let p2 = cubic_at(a, b, t2);
+                    let d1 = (p1.0 - local_at.0).hypot(p1.1 - local_at.1);
+                    let d2 = (p2.0 - local_at.0).hypot(p2.1 - local_at.1);
+                    if d1 <= d2 {
+                        hi = t2;
+                    } else {
+                        lo = t1;
+                    }
+                }
+                let t = (lo + hi) / 2.0;
+                let p = cubic_at(a, b, t);
+                let d = (p.0 - local_at.0).hypot(p.1 - local_at.1);
+                if d <= tolerance && best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((
+                        BezierSegmentHit {
+                            shape: shape_idx,
+                            segment,
+                            t,
+                        },
+                        d,
+                    ));
+                }
+            }
+        }
+        best.map(|(hit, _)| hit)
+    }
+
     /// Fügt eine Bézier-Feder aus den geklickten Punkten ein: glatte Kurve
     /// durch alle Punkte, editierbare Knoten als Metadatum. Ein Undo-Punkt.
     pub fn add_bezier(&mut self, pts: Vec<Pt>, closed: bool) -> usize {
@@ -576,6 +673,38 @@ mod tests {
         assert_eq!(bp.nodes[0].p, (20.0, 0.0));
         assert_eq!(bp.nodes[1].p, (0.0, 20.0));
         assert_eq!(bp.nodes[0].h_out, Some((16.0, 6.0)));
+    }
+
+    #[test]
+    fn segment_hit_liefert_shape_segment_und_parameter() {
+        let mut app = AppState::new();
+        let i = app.add_bezier_nodes(
+            vec![
+                BezierNode::corner((0.0, 0.0)),
+                BezierNode::corner((20.0, 0.0)),
+            ],
+            false,
+        );
+        let hit = app.hit_bezier_segment((5.0, 0.2), 0.5).unwrap();
+        assert_eq!(hit.shape, i);
+        assert_eq!(hit.segment, 0);
+        assert!((hit.t - 0.326).abs() < 0.01);
+        assert!(app.hit_bezier_segment((5.0, 2.0), 0.5).is_none());
+    }
+
+    #[test]
+    fn segment_hit_beruecksichtigt_shape_rotation() {
+        let mut app = AppState::new();
+        let i = app.add_bezier_nodes(
+            vec![
+                BezierNode::corner((0.0, 0.0)),
+                BezierNode::corner((20.0, 0.0)),
+            ],
+            false,
+        );
+        app.shapes[i].rotation = 90.0;
+        // Die horizontale Linie rotiert um ihre Mitte und liegt dann bei x=10.
+        assert!(app.hit_bezier_segment((10.1, 5.0), 0.5).is_some());
     }
 
     #[test]

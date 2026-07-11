@@ -708,6 +708,17 @@ fn split_node(data: State<AppData>, shape_index: usize, seg_start: usize, t: f64
 }
 
 #[tauri::command]
+fn hit_bezier_segment(
+    data: State<AppData>,
+    x: f64,
+    y: f64,
+    tolerance: f64,
+) -> Option<luxifer_core::bezier::BezierSegmentHit> {
+    let s = data.state.lock().unwrap();
+    s.hit_bezier_segment((x, y), tolerance.max(0.001))
+}
+
+#[tauri::command]
 fn toggle_node_smooth(data: State<AppData>, shape_index: usize, node: usize) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.push_undo();
@@ -1629,6 +1640,7 @@ pub fn run() {
             add_bezier,
             add_bezier_nodes,
             drag_node,
+            hit_bezier_segment,
             split_node,
             delete_node,
             toggle_node_smooth,

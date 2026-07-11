@@ -29,6 +29,7 @@
     bridgewidth = 2,
     onbridgestroke,
     ondragnode,
+    onhitnodesegment,
     onsplitnode,
     ondeletenode,
     ontogglenode,
@@ -76,6 +77,7 @@
     onbridgestroke?: (x0: number, y0: number, x1: number, y1: number) => void;
     // Node-Editor: Knoten/Handle ziehen, Segment teilen, Knoten löschen.
     ondragnode?: (shape: number, node: number, part: "anchor" | "in" | "out", x: number, y: number, begin: boolean) => void;
+    onhitnodesegment?: (x: number, y: number, tolerance: number) => Promise<{ shape: number; segment: number; t: number } | null>;
     onsplitnode?: (shape: number, segStart: number, t: number) => void;
     ondeletenode?: (shape: number, node: number) => void;
     ontogglenode?: (shape: number, node: number) => void;
@@ -570,40 +572,6 @@
     return null;
   }
 
-  function cubicPoint(a: BNode, b: BNode, t: number): [number, number] {
-    const p0 = a.p, p1 = a.hOut ?? a.p, p2 = b.hIn ?? b.p, p3 = b.p;
-    const u = 1 - t;
-    return [
-      u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0],
-      u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1],
-    ];
-  }
-
-  // Nächstes Kurvensegment samt Kurvenparameter treffen. Der Core teilt dann
-  // exakt an dieser Stelle per De Casteljau, ohne die sichtbare Form zu ändern.
-  function hitNodeSegment(px: number, py: number): { shape: number; seg: number; t: number } | null {
-    let best: { shape: number; seg: number; t: number } | null = null;
-    let bestD = 8;
-    for (const idx of scene.selected) {
-      const s = scene.shapes[idx];
-      if (!s) continue;
-      const nodes = editNodes(s);
-      const closed = s.bezier?.closed ?? ("Polyline" in s.geo && s.geo.Polyline.closed) ?? ("Rect" in s.geo);
-      const count = closed ? nodes.length : nodes.length - 1;
-      for (let seg = 0; seg < count; seg++) {
-        const a = nodes[seg], b = nodes[(seg + 1) % nodes.length];
-        for (let sample = 0; sample <= 32; sample++) {
-          const t = sample / 32;
-          const p = cubicPoint(a, b, t);
-          const [sx, sy] = toScreen(p[0], p[1]);
-          const d = Math.hypot(sx - px, sy - py);
-          if (d < bestD) { bestD = d; best = { shape: idx, seg, t }; }
-        }
-      }
-    }
-    return best;
-  }
-
   // ---- Messen-Werkzeug (reine Anzeige, keine Wahrheit) ----------------------
   let measureA = $state<[number, number] | null>(null);
   let measureB = $state<[number, number] | null>(null);
@@ -1016,7 +984,7 @@
     return [ev.clientX - r.left, ev.clientY - r.top];
   }
 
-  function onPointerDown(ev: PointerEvent) {
+  async function onPointerDown(ev: PointerEvent) {
     canvasEl.setPointerCapture(ev.pointerId);
     const [px, py] = localXY(ev);
     // Mittel-Maus oder Space = Pan.
@@ -1055,9 +1023,9 @@
         if (ev.altKey && hit.part === "anchor") ondeletenode?.(hit.shape, hit.node);
         else drag = { kind: "node", ...hit, began: false };
       } else {
-        const segment = hitNodeSegment(px, py);
+        const segment = await onhitnodesegment?.(mx, my, 8 / zoom);
         if (segment) {
-          onsplitnode?.(segment.shape, segment.seg, segment.t);
+          onsplitnode?.(segment.shape, segment.segment, segment.t);
           return;
         }
         // Kein Knoten getroffen → Shape unter dem Cursor selektieren (zum Editieren).

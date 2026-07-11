@@ -359,6 +359,9 @@ export const dragNode = (
   shapeIndex: number, node: number, part: "anchor" | "in" | "out",
   x: number, y: number, begin: boolean,
 ) => invoke<Scene>("drag_node", { shapeIndex, node, part, x, y, begin });
+export interface BezierSegmentHit { shape: number; segment: number; t: number; }
+export const hitBezierSegment = (x: number, y: number, tolerance: number) =>
+  invoke<BezierSegmentHit | null>("hit_bezier_segment", { x, y, tolerance });
 export const splitNode = (shapeIndex: number, segStart: number, t: number) =>
   invoke<Scene>("split_node", { shapeIndex, segStart, t });
 export const deleteNode = (shapeIndex: number, node: number) =>

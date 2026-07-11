@@ -16,12 +16,13 @@ Stand 11.07.2026 wurden die ersten kritischen Grundlagen bereits korrigiert:
 - Nullbreite und Nullhöhe werden bei der Seitenverhältnis-Berechnung abgefangen; horizontale und vertikale Linien erzeugen dort kein `Infinity` oder `NaN` mehr.
 - Editierbare Text-Metadaten besitzen eine feste Transformationsregel: proportionale Skalierung aktualisiert `size_mm`; nichtproportionale Skalierung und Spiegelung entfernen die nicht mehr reproduzierbaren Textparameter und lassen sichere normale Konturen zurück.
 - Die beiden bestehenden Clippy-Warnungen im Pattern-Fill-Beispiel und im UI-Settings-Test sind behoben; das vollständige Clippy-Gate kann wieder als belastbare Prüfung für neue Änderungen dienen.
+- Der Bézier-Segment-Hit-Test liegt im Rust-Core. Das Frontend übergibt nur Weltposition und zoomabhängige Toleranz; Shape, Segment und Kurvenparameter `t` werden zentral und rotationsbewusst bestimmt.
 - Die zuvor offenen Änderungen sind in zwei getrennten Commits gesichert:
   - `ba52247 Stabilisiere Transformationen und Anordnen`
   - `97823ea Berücksichtige Rotation in Weltgrenzen`
 - Der geprüfte Stand umfasst 211 erfolgreiche Rust-Tests, einen fehlerfreien `svelte-check` und einen erfolgreichen Produktions-Build.
 
-Noch offen bleiben insbesondere der Core-basierte Bézier-Hit-Test, die einheitliche Fehlerbehandlung und die Modulzerlegung.
+Noch offen bleiben insbesondere die einheitliche Fehlerbehandlung und die Modulzerlegung.
 
 Bereits vorhandene Probleme
 1. Kritisch: Bézier-Knoten werden bei Transformationen nicht mitgeführt
