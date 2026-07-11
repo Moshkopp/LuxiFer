@@ -88,6 +88,28 @@ pub struct App {
     /// Bild-Texturen (asset-id → GPU-Textur) und ob neu geladen werden muss.
     images: crate::image_gpu::ImageStore,
     image_dirty: bool,
+    /// Offener Text-Dialog (Eingabe/Font/Größe) oder None.
+    pub text_dialog: Option<TextDialogState>,
+    /// Verfügbare System-Fonts (einmalig gescannt, lazy).
+    pub fonts: Vec<crate::fonts::FontEntry>,
+}
+
+/// Zustand des Text-Dialogs.
+pub struct TextDialogState {
+    pub text: String,
+    pub size_mm: f64,
+    /// Index in `App::fonts`, oder None (kein Font gewählt).
+    pub font_idx: Option<usize>,
+}
+
+impl Default for TextDialogState {
+    fn default() -> Self {
+        Self {
+            text: "Text".into(),
+            size_mm: 20.0,
+            font_idx: None,
+        }
+    }
 }
 
 impl App {
@@ -161,6 +183,8 @@ impl App {
             last_fp: 0,
             images: crate::image_gpu::ImageStore::default(),
             image_dirty: false,
+            text_dialog: None,
+            fonts: Vec::new(),
         };
         if let Some(path) = auto_import {
             app.import_path(std::path::Path::new(&path));
@@ -387,6 +411,66 @@ impl App {
     pub fn pick_color(&mut self, c: [u8; 3]) {
         self.state.activate_color(c);
         self.refresh_accent();
+    }
+
+    /// Öffnet den Text-Dialog und scannt bei Bedarf die System-Fonts.
+    pub fn open_text_dialog(&mut self) {
+        if self.fonts.is_empty() {
+            self.fonts = crate::fonts::list_fonts();
+        }
+        let mut st = TextDialogState::default();
+        // Ersten Font vorwählen.
+        if !self.fonts.is_empty() {
+            st.font_idx = Some(0);
+        }
+        self.text_dialog = Some(st);
+    }
+
+    /// Setzt den Text als Pfad-Shapes (Text→Kontur über den Core) und platziert
+    /// ihn. Gibt bei Erfolg true zurück (Dialog schließen).
+    pub fn commit_text(&mut self) -> bool {
+        let Some(st) = self.text_dialog.as_ref() else {
+            return false;
+        };
+        let Some(fi) = st.font_idx else {
+            self.laser_msg = "Kein Font gewählt".into();
+            return false;
+        };
+        let Some(font) = self.fonts.get(fi) else {
+            return false;
+        };
+        let text = st.text.clone();
+        let size = st.size_mm;
+        let font_path = font.path.clone();
+        let font_data = match std::fs::read(&font_path) {
+            Ok(d) => d,
+            Err(e) => {
+                self.laser_msg = format!("Font lesen: {e}");
+                return false;
+            }
+        };
+        match luxifer_core::text::text_to_contours(&font_data, &text, size) {
+            Ok(contours) if !contours.is_empty() => {
+                let meta = luxifer_core::TextMeta {
+                    text,
+                    font_path: font_path.to_string_lossy().to_string(),
+                    size_mm: size,
+                };
+                let idxs = self.state.add_text_block(contours, meta);
+                self.state.selected = idxs;
+                self.refresh_accent();
+                self.fit_all();
+                true
+            }
+            Ok(_) => {
+                self.laser_msg = "Text ergab keine Konturen".into();
+                false
+            }
+            Err(e) => {
+                self.laser_msg = format!("Text-Fehler: {e}");
+                false
+            }
+        }
     }
 
     /// Öffnet einen nativen Datei-Dialog und importiert SVG/DXF über den Core.
@@ -912,5 +996,29 @@ mod tests {
             _ => panic!("erwartet Geo::Image"),
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Text→Pfad-Kette mit einem echten System-Font. CI-tolerant.
+    #[test]
+    fn text_wird_zu_pfad_shapes() {
+        use luxifer_core::{text::text_to_contours, AppState, TextMeta};
+        let fonts = crate::fonts::list_fonts();
+        let Some(font) = fonts.first() else {
+            eprintln!("Kein System-Font — Test übersprungen");
+            return;
+        };
+        let data = std::fs::read(&font.path).expect("font lesen");
+        let contours = text_to_contours(&data, "Hi", 20.0).expect("text_to_contours");
+        assert!(!contours.is_empty(), "Text sollte Konturen ergeben");
+        let mut s = AppState::new();
+        let idxs = s.add_text_block(
+            contours,
+            TextMeta {
+                text: "Hi".into(),
+                font_path: font.path.to_string_lossy().to_string(),
+                size_mm: 20.0,
+            },
+        );
+        assert!(!idxs.is_empty(), "Text-Block sollte Shapes anlegen");
     }
 }

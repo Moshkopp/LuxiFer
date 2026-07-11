@@ -4,6 +4,7 @@
 
 mod app;
 mod camera;
+mod fonts;
 mod gpu;
 mod image_gpu;
 mod laser;
