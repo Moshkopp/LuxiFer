@@ -106,24 +106,30 @@ die `lock()` kapselt und einen vergifteten Mutex kontrolliert als `EditorError`
 zurückgibt statt zu panicken. Da `EditorError` bereits existiert, ist das eine
 mechanische, risikoarme Umstellung.
 
-### 🟠 Blocker 3 — Sammelmodule zu groß
+### 🟠 Blocker 3 — Sammelmodule zu groß (weitgehend ERLEDIGT 2026-07-11)
 
-- `frontend/src-tauri/src/lib.rs`: ~1.696 Zeilen
-- `Canvas.svelte`: ~1.450 Zeilen
-- `App.svelte`: ~1.303 Zeilen
-- `core/src/geo_ops.rs`: ~1.057 Zeilen
-- `core/src/state.rs` / `core/src/project.rs`: ~920 Zeilen
+Prinzip: **nach Verantwortlichkeit** schneiden (nicht „ein Typ = eine Datei" —
+das würde jedes Feature über viele Dateien zerreißen; ein Feature wie „Shape
+zeichnen" geht über alle Typen, ein Typ über alle Features). Geometrie-*Primitive*
+dagegen zentral als eine Funktion.
 
-`Canvas.svelte` mischt Kamera, Raster/Lineale, Rendering, Auswahl, Resize,
-Bézier, Node-Edit, Messen, Haltestege, Fillet, Bilder, Tastatur. Änderung an
-einem Werkzeug kann ein anderes brechen, weil `draw()` alles gemeinsam anfasst.
-Koppelt mit Blocker 1: Die 2D→GL-Umstellung ist ungleich schwerer, solange
-Rendering und Werkzeugzustand in einer Datei verklebt sind.
+Erledigt:
+- **`lib.rs` 1.696 → 185 Zeilen.** Zerlegt in `shared.rs` (geteilte Infra) +
+  `commands/{shapes,project,edit,laser,image}.rs`. Wurzel enthält nur noch
+  Kern-Commands + `run()`/`generate_handler`. (Tauri-Kniff: `pub`-Commands in
+  Submodulen vermeiden die `generate_handler`-Makrokollision E0255.)
+- **Geometrie-Primitive** (`lib/geometry.ts`): `ellipsePoints`/`rectPoints`/
+  `rotateAroundBBoxCenter`/`boundsOf` als eine Quelle — sammelte die 96-vs-64-
+  Duplizierung ein (siehe Punkt 4/5 unten, damit teilweise miterledigt).
+- **`Canvas.svelte` 1.562 → 1.490:** zustandsfreie Helfer nach `canvas/handles.ts`
+  (Auswahl-Griffe) und `canvas/bezier-draft.ts` (Kurven-Flatten) ausgelagert.
 
-Empfehlung: Beim Angehen von Blocker 1 gleich `canvas/render.ts` +
-`canvas/camera.ts` herausziehen; Werkzeuge (`tools/bezier.ts`, `tools/node.ts`)
-folgen inkrementell. `lib.rs` nach Command-Gruppen splitten
-(`commands/shapes.rs`, `commands/arrange.rs`, …).
+Offen (bewusst als größerer, separater Schritt vertagt):
+- `Canvas.svelte` ist noch groß, weil der Rest kamera-/gestengebundenen Zustand
+  teilt (`zoom`/`pan`/`drag`/`toScreen`). Saubere Weiterzerlegung braucht einen
+  Camera-Store + Tool-Module — höheres Regressionsrisiko, eigener Schritt.
+- `App.svelte` (~1.300), `core/src/geo_ops.rs` (~1.057), `state.rs`/`project.rs`
+  (~920) noch nicht angefasst.
 
 ### 🟡 Punkt 4 — Geometrie-Duplizierung Frontend ↔ Core (mittel)
 
@@ -145,18 +151,21 @@ kantig; die Punktzahl wächst zudem linear mit der Objektzahl in der
 Scene-Serialisierung. Aktuell unkritisch, relevant sobald „präzise Kurven" oder
 zoom-abhängiges Tessellieren gefordert wird. Notieren, nicht sofort handeln.
 
-### Empfohlene Reihenfolge (Stand 2026-07-11 abends)
+### Empfohlene Reihenfolge (Stand 2026-07-11 spät)
 
 0. ✅ **Messen erledigt** → Blocker 1 quantifiziert.
-1. ✅ **Blocker 1 (WebGL-Hybrid) erledigt** auf Branch `webgl-design-canvas`.
+1. ✅ **Blocker 1 (WebGL-Hybrid) erledigt** (auf `main` gemergt).
 2. ✅ **Eingabe-Latenz gelöst** (GDK_BACKEND=x11, siehe oben).
-3. **Offen — Blocker 2** (Mutex-Kapselung): 73× `lock().unwrap()` durch
-   `with_state()`-Helper mit `EditorError` ersetzen. Klein, risikoarm.
-4. **Offen — Blocker 3** (Modulzerlegung): Canvas.svelte / lib.rs schrittweise
-   aufteilen. Jetzt teils vorbereitet (`gl/design-render.ts` ausgelagert).
-5. Punkt 4/5 (Geometrie-Duplizierung, Ellipsen-Punktdichte) als Aufräumarbeiten.
-
-Merge-Status: `webgl-design-canvas` wartet auf Merge-Entscheidung nach `main`.
+3. ✅ **Blocker 3 (Modulzerlegung) weitgehend erledigt** — lib.rs → shared.rs +
+   commands/*, geometry.ts, Canvas-Helfer ausgelagert. Rest (Camera-Store/
+   Tool-Module, App.svelte, Core-Module) offen.
+4. **Offen — Blocker 2** (Mutex-Kapselung): `lock().unwrap()` (jetzt über die
+   `commands/*`-Module verteilt) durch einen `with_state()`-Helper mit
+   `EditorError` ersetzen. Klein, risikoarm — guter nächster Schritt.
+5. **Punkt 4** (Frontend↔Core-BBox-Duplizierung) — `shapeBBox` in core.ts nutzt
+   jetzt die zentralen Primitive (geometry.ts), driftet aber weiter vom Core.
+   Prüfen, ob es ganz durch `selection_bbox` ersetzbar ist. **Punkt 5** (statische
+   Ellipsen-Auflösung) jetzt an EINER Stelle (`ELLIPSE_SEGS` in geometry.ts).
 
 ---
 
