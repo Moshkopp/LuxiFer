@@ -121,6 +121,8 @@ pub(crate) struct Scene {
     bed_h_mm: f64,
     /// Ungespeicherte Änderungen? Steuert den Unsaved-Guard im Frontend.
     dirty: bool,
+    /// Aktive Zeichenfarbe (für die Markierung in der Farbpalette), oder `None`.
+    active_color: Option<[u8; 3]>,
     /// Offenes Projekt (Name/Beschreibung/Tags) oder `None`, wenn namenlos.
     project: Option<ProjectMeta>,
 }
@@ -135,6 +137,7 @@ impl Scene {
             bed_w_mm: s.bed_w_mm,
             bed_h_mm: s.bed_h_mm,
             dirty: s.dirty,
+            active_color: s.active_color(),
             project: cur.file.as_ref().map(|f| ProjectMeta {
                 name: f.name.clone(),
                 description: f.description.clone(),

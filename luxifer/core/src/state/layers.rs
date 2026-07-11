@@ -34,6 +34,16 @@ impl super::AppState {
         }
     }
 
+    /// Die aktuell aktive Zeichenfarbe (für die Markierung in der Farbpalette).
+    ///
+    /// `pending_color` hat Vorrang (zuletzt geklickte Farbe, deren Layer erst
+    /// beim nächsten Shape entsteht); sonst die Farbe des aktiven Layers. `None`
+    /// nur, wenn weder eine Farbe gemerkt ist noch Layer existieren.
+    pub fn active_color(&self) -> Option<[u8; 3]> {
+        self.pending_color
+            .or_else(|| self.layers.get(self.active_layer).map(|l| l.color))
+    }
+
     /// Index eines Layers mit der Farbe; legt ihn an, falls nicht vorhanden.
     pub(super) fn find_or_create_layer(&mut self, color: [u8; 3]) -> usize {
         if let Some(idx) = self.layers.iter().position(|l| l.color == color) {

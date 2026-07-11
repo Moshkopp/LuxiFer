@@ -202,6 +202,25 @@ mod tests {
     }
 
     #[test]
+    fn active_color_folgt_pending_dann_aktivem_layer() {
+        let mut s = AppState::new();
+        // Frisches, leeres Projekt: keine aktive Farbe.
+        assert_eq!(s.active_color(), None);
+
+        // Farbe ohne Auswahl klicken → pending_color ist aktiv, auch ohne Layer.
+        let blue = [0x3B, 0x82, 0xF6];
+        s.activate_color(blue);
+        assert_eq!(s.active_color(), Some(blue));
+
+        // Shape zeichnen: pending wird zum Layer; die aktive Farbe bleibt blau
+        // (jetzt über den aktiven Layer statt pending).
+        s.add_shape(rect());
+        assert_eq!(s.layers[s.active_layer].color, blue);
+        s.pending_color = None;
+        assert_eq!(s.active_color(), Some(blue));
+    }
+
+    #[test]
     fn farbe_auf_selektiertes_shape_verschiebt_in_farb_layer() {
         let mut s = AppState::new();
         s.add_shape(rect()); // Layer 0 (rot), Shape selektiert

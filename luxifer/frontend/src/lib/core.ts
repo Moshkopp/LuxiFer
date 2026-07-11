@@ -167,6 +167,8 @@ export interface Scene {
   bed_w_mm: number;
   bed_h_mm: number;
   dirty: boolean;
+  /** Aktive Zeichenfarbe (für die Markierung in der Farbpalette). */
+  active_color: [number, number, number] | null;
   project: ProjectMeta | null;
 }
 

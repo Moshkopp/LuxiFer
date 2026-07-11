@@ -895,7 +895,7 @@
       </aside>
 
       <section class="dock bottom palette-dock glass">
-        <PalettePanel {swatches} onpick={pickColor} />
+        <PalettePanel {swatches} active={scene.active_color} onpick={pickColor} />
       </section>
     </div>
   {/if}
