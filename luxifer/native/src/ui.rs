@@ -7,7 +7,8 @@ use egui::{Color32, RichText};
 use luxifer_core::model::SWATCH_COLORS;
 
 use crate::app::App;
-use crate::tools::Tool;
+use crate::laserpanel;
+use crate::tools::{Tab, Tool};
 
 fn c32(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
@@ -23,14 +24,39 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     app.left_w = left.response.rect.width();
 
     let right = egui::SidePanel::right("inspector")
-        .exact_width(240.0)
+        .exact_width(260.0)
         .resizable(false)
         .show(ctx, |ui| {
-            layers_panel(ui, app);
-            ui.add_space(8.0);
+            // Reiter-Umschalter: Design-Inspektor ↔ Laser-Bedienung.
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(app.tab == Tab::Design, "  Design  ")
+                    .clicked()
+                {
+                    app.tab = Tab::Design;
+                }
+                if ui
+                    .selectable_label(app.tab == Tab::Laser, "  Laser  ")
+                    .clicked()
+                {
+                    app.tab = Tab::Laser;
+                }
+            });
+            ui.add_space(6.0);
             ui.separator();
             ui.add_space(8.0);
-            palette_panel(ui, app);
+
+            match app.tab {
+                Tab::Design => {
+                    layers_panel(ui, app);
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+                    palette_panel(ui, app);
+                }
+                Tab::Laser => laserpanel::show(ui, &mut app.laser),
+            }
         });
     app.right_w = right.response.rect.width();
 

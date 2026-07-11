@@ -9,6 +9,37 @@ pub enum Tool {
     Polygon,
 }
 
+/// Rechter Reiter: Design-Inspektor (Ebenen/Palette) oder Laser-Bedienung.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Design,
+    Laser,
+}
+
+/// Laser-Bedien-Zustand (UI-seitig). Ohne echten Treiber-Anschluss im nativen
+/// Umbau — die Aktionen loggen vorerst; die Treiber-Verdrahtung kommt später.
+pub struct LaserUi {
+    pub jog_step: f64,
+    pub jog_speed: f64,
+    /// Job-Nullpunkt-Anker (0..8, 4 = Mitte).
+    pub anchor: usize,
+    pub selection_only: bool,
+    /// „Verbunden"-Zustand (Demo-Umschalter, bis der Treiber angebunden ist).
+    pub connected: bool,
+}
+
+impl Default for LaserUi {
+    fn default() -> Self {
+        Self {
+            jog_step: 10.0,
+            jog_speed: 100.0,
+            anchor: 4,
+            selection_only: false,
+            connected: false,
+        }
+    }
+}
+
 impl Tool {
     pub fn label(self) -> &'static str {
         match self {

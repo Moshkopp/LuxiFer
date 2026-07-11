@@ -5,6 +5,7 @@
 mod app;
 mod camera;
 mod gpu;
+mod laserpanel;
 mod scene_geo;
 mod tools;
 mod ui;

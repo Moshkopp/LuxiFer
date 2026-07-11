@@ -14,7 +14,7 @@ use winit::window::Window;
 use crate::camera::Camera;
 use crate::gpu::Gpu;
 use crate::scene_geo::{self, Vertex};
-use crate::tools::{Drag, Tool};
+use crate::tools::{Drag, LaserUi, Tab, Tool};
 use crate::ui;
 
 pub struct App {
@@ -23,6 +23,8 @@ pub struct App {
     pub state: AppState,
     pub cam: Camera,
     pub tool: Tool,
+    pub tab: Tab,
+    pub laser: LaserUi,
     pub drag: Drag,
     /// Aktive Zeichenfarbe für die Palette-Markierung (aus dem Core gespiegelt).
     pub accent: [u8; 3],
@@ -91,6 +93,13 @@ impl App {
             state,
             cam,
             tool: Tool::Select,
+            // Start-Reiter per Env (Testhilfe): LUXI_TAB=laser.
+            tab: if std::env::var("LUXI_TAB").as_deref() == Ok("laser") {
+                Tab::Laser
+            } else {
+                Tab::Design
+            },
+            laser: LaserUi::default(),
             drag: Drag::None,
             accent,
             cursor: [0.0, 0.0],
