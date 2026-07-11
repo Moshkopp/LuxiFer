@@ -817,14 +817,12 @@ impl App {
         // Rotate-Handle: Linie von oben-Mitte nach oben + Kreis-Marker.
         let rp = self.rotate_handle_pos(&b);
         let top = [b.x as f32 + b.w as f32 / 2.0, b.y as f32];
-        v.push(Vertex {
-            pos: top,
-            color: scene_geo::SEL_BOX_COLOR,
-        });
-        v.push(Vertex {
-            pos: [rp[0] as f32, rp[1] as f32],
-            color: scene_geo::SEL_BOX_COLOR,
-        });
+        scene_geo::push_seg(
+            &mut v,
+            top,
+            [rp[0] as f32, rp[1] as f32],
+            scene_geo::SEL_BOX_COLOR,
+        );
         v.extend(scene_geo::handle_marker(
             rp[0] as f32,
             rp[1] as f32,
@@ -859,14 +857,12 @@ impl App {
         if self.poly_pts.len() >= 2 {
             let col = [0.9, 0.9, 0.95, 1.0];
             for wnd in self.poly_pts.windows(2) {
-                v.push(Vertex {
-                    pos: [wnd[0].0 as f32, wnd[0].1 as f32],
-                    color: col,
-                });
-                v.push(Vertex {
-                    pos: [wnd[1].0 as f32, wnd[1].1 as f32],
-                    color: col,
-                });
+                scene_geo::push_seg(
+                    &mut v,
+                    [wnd[0].0 as f32, wnd[0].1 as f32],
+                    [wnd[1].0 as f32, wnd[1].1 as f32],
+                    col,
+                );
             }
         }
         v

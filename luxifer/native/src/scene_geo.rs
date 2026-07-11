@@ -6,12 +6,17 @@ use luxifer_core::geometry::{rotate_point, Pt};
 use luxifer_core::scanline::{fill_segments, Contour};
 use luxifer_core::state::AppState;
 
-/// Ein Vertex im Welt-Raum (mm) mit Farbe. Die Projektion nach NDC macht der
-/// Vertex-Shader anhand der Kamera-Uniforms.
+/// Ein Vertex für dicke Linien im Welt-Raum (mm). `pos` = Punkt auf der
+/// Segment-Mittellinie, `dir` = normierte Segmentrichtung (Welt), `side` = -1/+1
+/// (welche Seite des Quads). Der Vertex-Shader verschiebt um `side` senkrecht zu
+/// `dir` um die halbe Linienbreite in PIXELN — so ist die Dicke zoom-unabhängig
+/// konstant und die Geometrie bleibt cache-fähig (Kamera nur im Shader).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub pos: [f32; 2],
+    pub dir: [f32; 2],
+    pub side: f32,
     pub color: [f32; 4],
 }
 
@@ -92,19 +97,41 @@ pub fn fill_lines(state: &AppState) -> Vec<Vertex> {
             continue;
         }
         let step = layer.line_step_mm.max(0.05);
-        let color = col(layer.color, 0.85);
+        let color = col(layer.color, 0.9);
         for seg in fill_segments(&contours, step) {
-            v.push(Vertex {
-                pos: [seg.x0 as f32, seg.y as f32],
+            push_seg(
+                &mut v,
+                [seg.x0 as f32, seg.y as f32],
+                [seg.x1 as f32, seg.y as f32],
                 color,
-            });
-            v.push(Vertex {
-                pos: [seg.x1 as f32, seg.y as f32],
-                color,
-            });
+            );
         }
     }
     v
+}
+
+/// Ein Liniensegment als dickes Quad (2 Dreiecke = 6 Vertices). Die Dicke trägt
+/// der Shader im Screen-Space auf (siehe `Vertex`).
+pub fn push_seg(v: &mut Vec<Vertex>, a: [f32; 2], b: [f32; 2], color: [f32; 4]) {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-6 {
+        return;
+    }
+    let dir = [dx / len, dy / len];
+    let mk = |pos: [f32; 2], side: f32| Vertex {
+        pos,
+        dir,
+        side,
+        color,
+    };
+    // Zwei Dreiecke: (a-, a+, b-) und (a+, b+, b-).
+    v.push(mk(a, -1.0));
+    v.push(mk(a, 1.0));
+    v.push(mk(b, -1.0));
+    v.push(mk(a, 1.0));
+    v.push(mk(b, 1.0));
+    v.push(mk(b, -1.0));
 }
 
 fn push_polyline(v: &mut Vec<Vertex>, pts: &[(f64, f64)], closed: bool, color: [f32; 4]) {
@@ -112,60 +139,40 @@ fn push_polyline(v: &mut Vec<Vertex>, pts: &[(f64, f64)], closed: bool, color: [
         return;
     }
     for w in pts.windows(2) {
-        v.push(Vertex {
-            pos: [w[0].0 as f32, w[0].1 as f32],
+        push_seg(
+            v,
+            [w[0].0 as f32, w[0].1 as f32],
+            [w[1].0 as f32, w[1].1 as f32],
             color,
-        });
-        v.push(Vertex {
-            pos: [w[1].0 as f32, w[1].1 as f32],
-            color,
-        });
+        );
     }
     if closed {
         let (a, b) = (pts[pts.len() - 1], pts[0]);
-        v.push(Vertex {
-            pos: [a.0 as f32, a.1 as f32],
-            color,
-        });
-        v.push(Vertex {
-            pos: [b.0 as f32, b.1 as f32],
-            color,
-        });
+        push_seg(v, [a.0 as f32, a.1 as f32], [b.0 as f32, b.1 as f32], color);
     }
 }
 
-/// Rechteck-Umriss (Welt) als Linien — für Tisch-Rahmen und Auswahl-BBox.
+/// Rechteck-Umriss (Welt) als dicke Linien — für Tisch-Rahmen und Auswahl-BBox.
 pub fn rect_outline(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
     let p = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
     let mut v = Vec::new();
     for i in 0..4 {
-        let a = p[i];
-        let b = p[(i + 1) % 4];
-        v.push(Vertex { pos: a, color });
-        v.push(Vertex { pos: b, color });
+        push_seg(&mut v, p[i], p[(i + 1) % 4], color);
     }
     v
 }
 
-/// Kleines gefülltes Quadrat (als 2 Dreiecke = 6 Vertices) um einen Weltpunkt,
-/// Halbkantenlänge `hw` (mm). Für Transform-Handles.
+/// Kleines gefülltes Quadrat um einen Weltpunkt (Halbkante `hw` mm) für
+/// Transform-Handles: als dicke Rahmen-Linien + Diagonalen (wirkt solide).
 pub fn handle_marker(cx: f32, cy: f32, hw: f32, color: [f32; 4]) -> Vec<Vertex> {
-    let p = |x: f32, y: f32| Vertex { pos: [x, y], color };
     let (l, r, t, b) = (cx - hw, cx + hw, cy - hw, cy + hw);
-    // Als Linien-Rahmen (die Pipeline ist LineList): 4 Kanten.
-    let mut v = Vec::new();
     let corners = [[l, t], [r, t], [r, b], [l, b]];
+    let mut v = Vec::new();
     for i in 0..4 {
-        let a = corners[i];
-        let c = corners[(i + 1) % 4];
-        v.push(p(a[0], a[1]));
-        v.push(p(c[0], c[1]));
+        push_seg(&mut v, corners[i], corners[(i + 1) % 4], color);
     }
-    // Diagonalkreuz zum Ausfüllen (damit das kleine Quadrat solide wirkt).
-    v.push(p(l, t));
-    v.push(p(r, b));
-    v.push(p(r, t));
-    v.push(p(l, b));
+    push_seg(&mut v, [l, t], [r, b], color);
+    push_seg(&mut v, [r, t], [l, b], color);
     v
 }
 

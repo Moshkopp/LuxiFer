@@ -117,7 +117,8 @@ impl Gpu {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+                    // pos, dir, side, color
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32, 3 => Float32x4],
                 }],
                 compilation_options: Default::default(),
             },
@@ -132,7 +133,7 @@ impl Gpu {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
             },
             depth_stencil: None,
@@ -258,10 +259,17 @@ struct U { center: vec2<f32>, scale: f32, _p: f32, viewport: vec2<f32>, _p2: vec
 @group(0) @binding(0) var<uniform> u: U;
 struct VOut { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32> };
 
+// Halbe Linienbreite in Pixeln (bildschirm-konstant).
+const HALF_W: f32 = 0.9;
+
 @vertex
-fn vs(@location(0) p: vec2<f32>, @location(1) c: vec4<f32>) -> VOut {
-    let px = (p - u.center) * u.scale;
-    // Pixel → NDC; Y nach unten (Bildkonvention).
+fn vs(@location(0) p: vec2<f32>, @location(1) dir: vec2<f32>,
+      @location(2) side: f32, @location(3) c: vec4<f32>) -> VOut {
+    // Welt → Pixel (relativ zum Zentrum).
+    var px = (p - u.center) * u.scale;
+    // Senkrechte zur Segmentrichtung, um HALF_W Pixel zur Seite versetzen.
+    let n = vec2<f32>(-dir.y, dir.x);
+    px = px + n * side * HALF_W;
     let ndc = vec2<f32>(px.x / (u.viewport.x * 0.5), -px.y / (u.viewport.y * 0.5));
     var o: VOut;
     o.pos = vec4<f32>(ndc, 0.0, 1.0);

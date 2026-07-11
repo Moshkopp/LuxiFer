@@ -423,12 +423,63 @@ fn palette_panel(ui: &mut egui::Ui, app: &mut App) {
 }
 
 /// Dunkles Theme, an den Svelte-Look angelehnt (kühles Blau-Grau).
+/// Theme nah am Tauri-Design (app.css): kühles Blau-Grau, Akzent nur am aktiven
+/// Element, sanfte Rundungen und ein bisschen mehr Luft. Bewusst ohne echtes
+/// Glas/Blur (das kann egui nicht), aber mit denselben Farbwerten.
 fn apply_theme(ctx: &egui::Context) {
+    use egui::{Rounding, Stroke};
+    let bg = Color32::from_rgb(0x10, 0x12, 0x16); // --bg
+    let panel = Color32::from_rgb(0x17, 0x1a, 0x20); // --panel
+    let panel2 = Color32::from_rgb(0x1c, 0x1f, 0x26); // --panel-2 (Inputs/Kacheln)
+    let border = Color32::from_rgb(0x2a, 0x2e, 0x36); // --border
+    let text = Color32::from_rgb(0xec, 0xee, 0xf1); // --text
+    let muted = Color32::from_rgb(0x9a, 0xa0, 0xa9); // --muted
+    let accent = Color32::from_rgb(0x3B, 0x82, 0xF6); // --accent
+
     let mut v = egui::Visuals::dark();
-    v.panel_fill = Color32::from_rgb(0x14, 0x17, 0x1c);
-    v.window_fill = Color32::from_rgb(0x17, 0x1a, 0x20);
-    v.override_text_color = Some(Color32::from_rgb(0xec, 0xee, 0xf1));
-    v.widgets.inactive.bg_fill = Color32::from_rgb(0x24, 0x28, 0x30);
-    v.selection.bg_fill = Color32::from_rgb(0x3B, 0x82, 0xF6);
+    v.panel_fill = panel;
+    v.window_fill = panel;
+    v.extreme_bg_color = bg; // Hintergrund von TextEdit/Canvas-Rand
+    v.faint_bg_color = panel2;
+    v.override_text_color = Some(text);
+    v.window_stroke = Stroke::new(1.0, border);
+    v.window_rounding = Rounding::same(12.0);
+    v.selection.bg_fill = accent.gamma_multiply(0.9);
+    v.selection.stroke = Stroke::new(1.0, accent);
+    v.hyperlink_color = accent;
+
+    let r = Rounding::same(8.0);
+    // Ruhende Widgets: neutrale Fläche, weiche Kante.
+    v.widgets.noninteractive.bg_fill = panel;
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, muted);
+    v.widgets.noninteractive.rounding = r;
+    v.widgets.inactive.bg_fill = panel2;
+    v.widgets.inactive.weak_bg_fill = panel2;
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
+    v.widgets.inactive.rounding = r;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, border);
+    // Hover: leicht anheben.
+    v.widgets.hovered.bg_fill = Color32::from_rgb(0x25, 0x2a, 0x33);
+    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x25, 0x2a, 0x33);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.5));
+    v.widgets.hovered.rounding = r;
+    // Aktiv/gedrückt: Akzent trägt.
+    v.widgets.active.bg_fill = accent.gamma_multiply(0.85);
+    v.widgets.active.weak_bg_fill = accent.gamma_multiply(0.85);
+    v.widgets.active.fg_stroke = Stroke::new(1.0, text);
+    v.widgets.active.bg_stroke = Stroke::new(1.0, accent);
+    v.widgets.active.rounding = r;
+    // „open" (ComboBox aufgeklappt etc.)
+    v.widgets.open.bg_fill = panel2;
+    v.widgets.open.rounding = r;
+
     ctx.set_visuals(v);
+
+    // Etwas mehr Luft in Abständen (näher am Svelte-Spacing).
+    let mut style = (*ctx.style()).clone();
+    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+    style.spacing.button_padding = egui::vec2(10.0, 6.0);
+    style.spacing.window_margin = egui::Margin::same(12.0);
+    ctx.set_style(style);
 }
