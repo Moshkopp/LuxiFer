@@ -199,6 +199,7 @@ pub fn run() {
             laser_actions,
             laser_run_action,
             laser_export,
+            laser_job_start,
             laser_jog,
             laser_home,
             laser_position,

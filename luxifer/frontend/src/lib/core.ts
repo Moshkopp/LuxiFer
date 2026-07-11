@@ -543,6 +543,7 @@ export interface LaserRegistry {
 export interface JobParamsDto {
   start_mode: "absolut" | "aktuell" | "ursprung";
   anchor: number;
+  selection_only: boolean;
 }
 
 export const laserList = () => invoke<LaserRegistry>("laser_list");
@@ -563,6 +564,8 @@ export interface ExportDto {
 }
 export const laserExport = (params: JobParamsDto) =>
   invoke<ExportDto>("laser_export", { params });
+export const laserJobStart = (params: JobParamsDto) =>
+  invoke<[number, number] | null>("laser_job_start", { params });
 
 export const laserJog = (dx: number, dy: number, speed: number) =>
   invoke<void>("laser_jog", { dx, dy, speed });

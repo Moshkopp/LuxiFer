@@ -4,6 +4,20 @@
   // Der aktive Laser wird hier per Dropdown gewählt; Anlegen/Verwalten in Settings.
   import type { LaserRegistry, JobParamsDto } from "./core";
 
+  type SavedPanelState = JobParamsDto & { jog_step: number; jog_speed: number };
+  const defaults: SavedPanelState = {
+    start_mode: "absolut", anchor: 4, selection_only: false, jog_step: 10, jog_speed: 100,
+  };
+  function loadPanelState(): SavedPanelState {
+    if (typeof localStorage === "undefined") return defaults;
+    try {
+      return { ...defaults, ...JSON.parse(localStorage.getItem("luxifer_laser_panel") ?? "{}") };
+    } catch {
+      return defaults;
+    }
+  }
+  const saved = loadPanelState();
+
   let {
     registry,
     actions,
@@ -11,6 +25,7 @@
     onselect,
     onaction,
     onexport,
+    onparamschange,
     onjog,
     onhome,
     onreadposition,
@@ -24,18 +39,20 @@
     onselect: (id: string) => void;
     onaction: (action: string, params: JobParamsDto) => void;
     onexport: (params: JobParamsDto) => void;
+    onparamschange: (params: JobParamsDto) => void;
     onjog: (dx: number, dy: number, speed: number) => void;
     onhome: (speed: number) => void;
     onreadposition: () => void;
     onopensettings: () => void;
   } = $props();
 
-  let startFrom = $state<"absolut" | "aktuell" | "ursprung">("absolut");
+  let startFrom = $state<"absolut" | "aktuell" | "ursprung">(saved.start_mode);
   // Job-Nullpunkt-Anker: 3×3-Raster (Index 0..8), 4 = Mitte.
-  let anchor = $state(4);
+  let anchor = $state(saved.anchor);
+  let selectionOnly = $state(saved.selection_only);
   // Jog-Parameter.
-  let jogStep = $state(10);
-  let jogSpeed = $state(100);
+  let jogStep = $state(saved.jog_step);
+  let jogSpeed = $state(saved.jog_speed);
 
   const profiles = $derived(registry?.profiles ?? []);
   const activeId = $derived(registry?.active_id ?? "");
@@ -62,8 +79,16 @@
   const canExport = $derived(actions.includes("export_file"));
 
   function params(): JobParamsDto {
-    return { start_mode: startFrom, anchor };
+    return { start_mode: startFrom, anchor, selection_only: selectionOnly };
   }
+  $effect(() => { startFrom; anchor; selectionOnly; onparamschange(params()); });
+  $effect(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("luxifer_laser_panel", JSON.stringify({
+        ...params(), jog_step: jogStep, jog_speed: jogSpeed,
+      }));
+    }
+  });
   // Eine Aktion auslösen — Export läuft über den Datei-Download-Callback.
   function trigger(a: string) {
     if (a === "export_file") onexport(params());
@@ -105,6 +130,7 @@
   <!-- Job-Aktionen (vom aktiven Treiber gemeldet) -->
   <section>
     <span class="label">Job</span>
+    <label class="check"><input type="checkbox" bind:checked={selectionOnly} /> Nur Auswahl lasern</label>
     {#if !hasLaser}
       <p class="hint">Lege zuerst einen Laser an, um Jobs zu senden.</p>
     {:else if actions.length === 0}

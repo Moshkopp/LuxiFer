@@ -63,6 +63,8 @@
   let laserConnected = $state(false);
   let laserHead = $state<[number, number] | null>(null);
   let laserOrigin = $state<[number, number] | null>(null);
+  let laserJobStart = $state<[number, number] | null>(null);
+  let laserJobParams = $state<core.JobParamsDto>({ start_mode: "absolut", anchor: 4, selection_only: false });
 
   // --- Projektverwaltung (ADR 0003) -----------------------------------------
   // saveMode: Projekt-Reiter zeigt das Speichern-Formular (Strg+S bei namenlos).
@@ -451,6 +453,22 @@
       error = core.errorMessage(e);
     }
   }
+  async function updateLaserJobStart(params: core.JobParamsDto) {
+    laserJobParams = params;
+    await refreshLaserJobStart(params);
+  }
+  async function refreshLaserJobStart(params: core.JobParamsDto) {
+    try {
+      laserJobStart = await core.laserJobStart(params);
+    } catch {
+      laserJobStart = null;
+    }
+  }
+  $effect(() => {
+    // Eine geänderte Auswahl/Geometrie verändert die effektive Job-BBox.
+    scene;
+    void refreshLaserJobStart(laserJobParams);
+  });
   // Job als Datei herunterladen (.rd bzw. .gcode) — kein natives Plugin nötig.
   async function exportLaser(params: core.JobParamsDto) {
     try {
@@ -681,6 +699,7 @@
     if (isTyping(e.target)) return;
     // Entf / Rueckschritt loescht die Auswahl.
     if (e.key === "Delete" || e.key === "Backspace") {
+      if (activeTab !== "Design") return;
       if (selCount > 0) {
         e.preventDefault();
         await doDelete();
@@ -692,10 +711,10 @@
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) {
         e.preventDefault();
-        await doUndo();
+        if (activeTab === "Design") await doUndo();
       } else if (k === "y" || (k === "z" && e.shiftKey)) {
         e.preventDefault();
-        await doRedo();
+        if (activeTab === "Design") await doRedo();
       } else if (k === "s" && e.shiftKey) {
         e.preventDefault();
         await saveVersionShortcut();
@@ -707,10 +726,10 @@
         await requestNew();
       } else if (k === "g" && e.shiftKey) {
         e.preventDefault();
-        scene = await core.ungroupOp();
+        if (activeTab === "Design") scene = await core.ungroupOp();
       } else if (k === "g") {
         e.preventDefault();
-        scene = await core.groupOp();
+        if (activeTab === "Design") scene = await core.groupOp();
       }
     }
   }
@@ -729,10 +748,11 @@
   {#if scene && activeTab !== "Projekt" && activeTab !== "Preview"}
     <Canvas
       {scene}
-      {tool}
+      tool={activeTab === "Laser" ? "select" : tool}
       {activeShape}
       {insets}
       active={activeTab === "Design"}
+      readonlySelection={activeTab === "Laser"}
       fitTrigger={designFitTrigger}
       gridSize={settings?.grid_size_mm ?? 50}
       {ondrawrect}
@@ -747,6 +767,7 @@
       {onrotate}
       laserHead={laserHead}
       laserOrigin={laserOrigin}
+      laserJobStart={laserJobStart}
       oneditimage={(i) => (editImage = i)}
       onedittext={openTextEdit}
       filletpick={filletPick}
@@ -876,6 +897,7 @@
         onselect={selectLaser}
         onaction={runLaserAction}
         onexport={exportLaser}
+        onparamschange={updateLaserJobStart}
         onjog={jogLaser}
         onhome={homeLaser}
         onreadposition={readLaserPosition}

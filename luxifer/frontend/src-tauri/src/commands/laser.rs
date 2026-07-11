@@ -16,6 +16,37 @@ pub struct JobParamsDto {
     start_mode: String,
     /// 3×3-Index 0..8 (4 = Mitte).
     anchor: usize,
+    /// Nur die aktuell ausgewählten Shapes in Job, Export und Rahmen übernehmen.
+    selection_only: bool,
+}
+
+fn effective_shapes(
+    data: &State<AppData>,
+    selection_only: bool,
+) -> (Vec<luxifer_core::Shape>, Vec<luxifer_core::Layer>) {
+    let s = data.state();
+    let shapes = if selection_only {
+        s.selected
+            .iter()
+            .filter_map(|&i| s.shapes.get(i).cloned())
+            .collect()
+    } else {
+        s.shapes.clone()
+    };
+    (shapes, s.layers.clone())
+}
+
+/// Position des sichtbaren Job-Startmarkers. Im absoluten Modus gibt es keinen
+/// verschobenen Job-Nullpunkt, daher wird kein Marker geliefert.
+#[tauri::command]
+pub fn laser_job_start(data: State<AppData>, params: JobParamsDto) -> Option<[f64; 2]> {
+    if matches!(params.to_params().start_mode, StartMode::Absolut) {
+        return None;
+    }
+    let (shapes, layers) = effective_shapes(&data, params.selection_only);
+    let bbox = plan_with_assets(&shapes, &layers).bbox?;
+    let (x, y) = params.to_params().anchor.point(bbox);
+    Some([x, y])
 }
 
 impl JobParamsDto {
@@ -113,10 +144,11 @@ pub fn laser_run_action(
     params: JobParamsDto,
 ) -> Result<String, String> {
     let job_action = action_from_key(&action)?;
-    let (plan, layers) = {
-        let s = data.state();
-        (plan_with_assets(&s.shapes, &s.layers), s.layers.clone())
-    };
+    let (shapes, layers) = effective_shapes(&data, params.selection_only);
+    let plan = plan_with_assets(&shapes, &layers);
+    if params.selection_only && plan.layers.is_empty() {
+        return Err("Keine laserbare Auswahl vorhanden.".into());
+    }
     let jp = params.to_params();
     // Aktion, die eine Verbindung braucht, verbindet vorher automatisch.
     data.with_active_driver(|d| {
@@ -133,10 +165,11 @@ pub fn laser_run_action(
 /// Ruida sind das .rd-Bytes, für GRBL G-Code. Braucht KEINE Verbindung.
 #[tauri::command]
 pub fn laser_export(data: State<AppData>, params: JobParamsDto) -> Result<ExportDto, String> {
-    let (plan, layers) = {
-        let s = data.state();
-        (plan_with_assets(&s.shapes, &s.layers), s.layers.clone())
-    };
+    let (shapes, layers) = effective_shapes(&data, params.selection_only);
+    let plan = plan_with_assets(&shapes, &layers);
+    if params.selection_only && plan.layers.is_empty() {
+        return Err("Keine laserbare Auswahl vorhanden.".into());
+    }
     let jp = params.to_params();
     data.with_active_driver(|d| {
         let ext = match d.name() {

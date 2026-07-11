@@ -19,6 +19,7 @@
     activeShape,
     insets,
     active = true,
+    readonlySelection = false,
     fitTrigger = 0,
     ondrawrect,
     ondrawellipse,
@@ -46,6 +47,7 @@
     onbezierdone,
     laserHead,
     laserOrigin,
+    laserJobStart,
     gridSize = 50,
   }: {
     scene: Scene;
@@ -56,6 +58,8 @@
     gridSize?: number;
     // Sichtbarer Arbeitsbereich: Beim Wechsel zurueck in Design wird neu eingepasst.
     active?: boolean;
+    /** Laser-Tab: Auswahl erlauben, aber keinerlei Geometrie verändern. */
+    readonlySelection?: boolean;
     // Externer FitView-Impuls (Start/Tabwechsel). Der Wert selbst ist egal.
     fitTrigger?: number;
     // Freie Raender in Pixeln, in die das Bett beim Start eingepasst wird
@@ -101,6 +105,7 @@
     // Laser-Positionen (mm) fuer Marker: Kopf und Benutzerursprung. Optional.
     laserHead?: [number, number] | null;
     laserOrigin?: [number, number] | null;
+    laserJobStart?: [number, number] | null;
   } = $props();
 
   let canvasEl: HTMLCanvasElement;   // oberer 2D-Layer: Overlays + Pointer
@@ -756,6 +761,19 @@
   // Marker fuer die zuletzt gelesene Laser-Position: Kopf (Fadenkreuz) und
   // Benutzerursprung (Ring). Beide in mm, via toScreen positioniert.
   function drawLaserMarkers(ctx: CanvasRenderingContext2D) {
+    if (laserJobStart) {
+      const [x, y] = toScreen(laserJobStart[0], laserJobStart[1]);
+      const r = 8;
+      ctx.strokeStyle = "#3fb27f";
+      ctx.fillStyle = "#3fb27f";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - r, y); ctx.lineTo(x + r, y);
+      ctx.moveTo(x, y - r); ctx.lineTo(x, y + r);
+      ctx.stroke();
+      ctx.font = "11px system-ui";
+      ctx.fillText("Start", x + r + 4, y - 4);
+    }
     if (laserOrigin) {
       const [x, y] = toScreen(laserOrigin[0], laserOrigin[1]);
       ctx.strokeStyle = "#f0a500";
@@ -1074,6 +1092,9 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // Laser-Tab: reine Auswahlmarkierung, ohne Bearbeitungs-Affordances.
+    if (readonlySelection) return;
+
     // 8 Skalier-Griffe an den (mit-transformierten) Kanten/Ecken.
     ctx.fillStyle = "#fff";
     ctx.strokeStyle = "#4c82f7";
@@ -1256,6 +1277,13 @@
       polyPts = [...polyPts, [mx, my]];
       polyCursor = [mx, my];
       draw();
+      return;
+    }
+    // Im Laser-Tab ist der Canvas ein reiner Job-Auswahl-Canvas: keine Griffe,
+    // kein Verschieben und kein Öffnen von Objekt-Editoren.
+    if (readonlySelection) {
+      onselectat(mx, my, ev.shiftKey || ev.ctrlKey);
+      drag = { kind: "marquee", sx: mx, sy: my, cx: mx, cy: my };
       return;
     }
     // select-Werkzeug — Dreh-Greifer hat Vorrang (liegt über der Box).
@@ -1454,6 +1482,7 @@
   // pointerdown schon einen (nahezu deckungsgleichen) Extrapunkt gesetzt — den
   // entfernen wir, wenn er auf dem vorherigen liegt.
   function onDblClick(ev: MouseEvent) {
+    if (readonlySelection) return;
     // Im Polyline-Modus: Kontur abschliessen (wie bisher).
     if (tool === "bezier" && bez && bez.nodes.length >= 2) {
       bezCommit();
@@ -1578,7 +1607,7 @@
   $effect(() => {
     scene; zoom; panX; panY; drag;
     polyPts; polyCursor; polyNearStart;
-    laserHead; laserOrigin; gridSize;
+    laserHead; laserOrigin; laserJobStart; gridSize; readonlySelection;
     draw();
   });
   // Aendern sich die freien Raender (Reiterwechsel, Panel verschoben) und der
