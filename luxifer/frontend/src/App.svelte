@@ -227,19 +227,8 @@
   async function doNest(gap: number) {
     scene = await core.nestOp(gap);
   }
-  // BBox der Auswahl (für die Größen-Eingabe im Anordnen-Panel).
-  const selBBox = $derived.by((): [number, number, number, number] | null => {
-    if (!scene || scene.selected.length === 0) return null;
-    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-    for (const i of scene.selected) {
-      const s = scene.shapes[i];
-      if (!s) continue;
-      const [x, y, w, h] = core.shapeBBox(s);
-      a = Math.min(a, x); b = Math.min(b, y);
-      c = Math.max(c, x + w); d = Math.max(d, y + h);
-    }
-    return isFinite(a) ? [a, b, c - a, d - b] : null;
-  });
+  // Kanonische Welt-BBox kommt direkt aus dem Core.
+  const selBBox = $derived(scene?.selection_bbox ?? null);
   async function doTransform(start: [number, number, number, number], target: [number, number, number, number]) {
     scene = await core.scaleSelected(start, target);
   }

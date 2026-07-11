@@ -263,16 +263,7 @@
 
   // ---- BBox-Helfer ----------------------------------------------------------
   function selectionBBox(): [number, number, number, number] | null {
-    if (!scene.selected.length) return null;
-    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-    for (const idx of scene.selected) {
-      const s = scene.shapes[idx];
-      if (!s) continue;
-      const [x, y, w, h] = shapeBBox(s);
-      a = Math.min(a, x); b = Math.min(b, y); c = Math.max(c, x + w); d = Math.max(d, y + h);
-    }
-    if (a === Infinity) return null;
-    return [a, b, c - a, d - b];
+    return scene.selection_bbox ?? null;
   }
 
   function handlePositions(box: [number, number, number, number]): [HandleId, number, number][] {

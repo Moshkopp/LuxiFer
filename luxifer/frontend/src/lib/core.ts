@@ -101,6 +101,7 @@ export interface Scene {
   layers: Layer[];
   shapes: Shape[];
   selected: number[];
+  selection_bbox: [number, number, number, number] | null;
   bed_w_mm: number;
   bed_h_mm: number;
   dirty: boolean;

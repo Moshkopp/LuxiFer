@@ -90,6 +90,8 @@ struct Scene {
     layers: Vec<Layer>,
     shapes: Vec<Shape>,
     selected: Vec<usize>,
+    /// Kanonische Welt-Bounding-Box der Auswahl (x, y, w, h).
+    selection_bbox: Option<[f64; 4]>,
     bed_w_mm: f64,
     bed_h_mm: f64,
     /// Ungespeicherte Änderungen? Steuert den Unsaved-Guard im Frontend.
@@ -104,6 +106,7 @@ impl Scene {
             layers: s.layers.clone(),
             shapes: s.shapes.clone(),
             selected: s.selected.clone(),
+            selection_bbox: s.selection_bbox().map(|b| [b.x, b.y, b.w, b.h]),
             bed_w_mm: s.bed_w_mm,
             bed_h_mm: s.bed_h_mm,
             dirty: s.dirty,
