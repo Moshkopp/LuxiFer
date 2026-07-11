@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { rgb, polygonPreview, imageRender, shapeBBox, type Scene, type Shape, type ImageParams } from "./core";
+  // WebGL-Geometrie-Ebene (ADR 0008): Konturen/Grid/Bett/Bilder auf der GPU.
+  // Die Overlays (Handles, Lineale, Mess-/Node-Griffe) bleiben auf dem 2D-Canvas
+  // DARÜBER — der trägt weiterhin alle Pointer-Handler.
+  import { GlRenderer, type LineBatch, type GlBatch } from "./gl/renderer";
+  import { type Camera } from "./gl/camera";
+  import { shapesToBatch, type PointXf } from "./gl/design-render";
 
   type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure" | "bezier" | "node";
 
@@ -88,8 +94,16 @@
     laserOrigin?: [number, number] | null;
   } = $props();
 
-  let canvasEl: HTMLCanvasElement;
+  let canvasEl: HTMLCanvasElement;   // oberer 2D-Layer: Overlays + Pointer
+  let glCanvasEl: HTMLCanvasElement;  // unterer WebGL-Layer: Geometrie
   let wrapEl: HTMLDivElement;
+
+  // ---- WebGL-Geometrie-Ebene (ADR 0008) -------------------------------------
+  // Der Renderer und die hochgeladenen GPU-Batches. Konturen werden bei
+  // Datenänderung EINMAL hochgeladen (rebuildGeo), bei Pan/Zoom ändert sich nur
+  // die Kamera-Matrix — kein Neu-Upload. Bilder liegen als Texturen an ihrer Box.
+  let gl: GlRenderer | null = null;
+  let shapeBatch: GlBatch | null = null;
 
   // ---- Bild-Cache (ADR 0004 §3a) --------------------------------------------
   // Gerenderte Bild-Bitmaps (asset+params → HTMLImageElement). Move/Resize
@@ -213,6 +227,8 @@
 
   const toScreen = (x: number, y: number): [number, number] => [x * zoom + panX, y * zoom + panY];
   const toMm = (px: number, py: number): [number, number] => [(px - panX) / zoom, (py - panY) / zoom];
+  // Kamera für die WebGL-Ebene — identische Konvention (px = x*zoom + pan).
+  const cam = (): Camera => ({ zoom, panX, panY });
 
   // ---- Interaktions-Zustand (lokal, nur während einer Geste) ----------------
   type Drag =
@@ -340,16 +356,114 @@
 
   function renderNow() {
     if (!canvasEl) return;
+    renderGeo();      // untere WebGL-Ebene: Konturen, Grid, Bett, Bilder
+    renderOverlay();  // obere 2D-Ebene: Füllungen + alle Overlays (transparent)
+  }
+
+  // ---- WebGL-Ebene: Geometrie (ADR 0008) ------------------------------------
+  // Der aktuelle Live-Drag-Transformer: während move/scale wandern selektierte
+  // Konturen mit. Ist er gesetzt, wird der Shape-Batch pro Frame neu gebaut
+  // (nur so lange die Geste läuft); sonst bleibt der einmal hochgeladene Batch.
+  function liveXf(): PointXf | null {
+    if (drag?.kind === "move") {
+      const sel = new Set(scene.selected);
+      const dx = drag.dx, dy = drag.dy;
+      return (x, y, idx) => (sel.has(idx) ? [x + dx, y + dy] : [x, y]);
+    }
+    if (drag?.kind === "scale") {
+      const sel = new Set(scene.selected);
+      const [sx, sy, sw, sh] = drag.start;
+      const [tx, ty, tw, th] = drag.cur;
+      const fx = sw > 0 ? tw / sw : 1, fy = sh > 0 ? th / sh : 1;
+      return (x, y, idx) => (sel.has(idx) ? [tx + (x - sx) * fx, ty + (y - sy) * fy] : [x, y]);
+    }
+    return null;
+  }
+
+  // Konturen-Batch einmal auf die GPU laden. Bei Live-Drag NICHT cachen — dann
+  // baut renderGeo pro Frame neu (wenige Segmente wandern, Rest liegt statisch).
+  function rebuildGeo() {
+    if (!gl) return;
+    if (shapeBatch) { gl.free(shapeBatch); shapeBatch = null; }
+    const batch = shapesToBatch(scene);
+    if (batch.positions.length) shapeBatch = gl.upload(batch.positions, batch.colors);
+  }
+
+  function renderGeo() {
+    if (!glCanvasEl) return;
+    if (!gl) { try { gl = new GlRenderer(glCanvasEl); } catch { return; } rebuildGeo(); }
+    if (gl.isLost()) { try { gl = new GlRenderer(glCanvasEl); rebuildGeo(); } catch { return; } }
+    const w = glCanvasEl.width, h = glCanvasEl.height;
+    gl.begin(cam(), w, h, [0.078, 0.082, 0.094]); // #141518
+
+    // Grid + Bett (wenige Linien, sichtbereichsabhängig) pro Frame bauen.
+    const grid = gridBatchGl(w, h);
+    const gb = gl.upload(grid.positions, grid.colors);
+    gl.drawBatch(gb, "lines"); gl.free(gb);
+    const bed = bedBatchGl();
+    const bb = gl.upload(bed.positions, bed.colors);
+    gl.drawBatch(bb, "lines"); gl.free(bb);
+
+    // Konturen: bei Live-Drag pro Frame neu (Geste), sonst der Cache-Batch.
+    // Bilder liegen NICHT hier — sie bleiben auf der 2D-Ebene (drawImage-Quad,
+    // ohnehin billig; kein WebGL-Textur-Umweg nötig).
+    const xf = liveXf();
+    if (xf) {
+      const b = shapesToBatch(scene, xf);
+      if (b.positions.length) {
+        const tmp = gl.upload(b.positions, b.colors);
+        gl.drawBatch(tmp, "lines"); gl.free(tmp);
+      }
+    } else if (shapeBatch) {
+      gl.drawBatch(shapeBatch, "lines");
+    }
+  }
+
+  // Grid als Line-Batch in mm (Shader rechnet mm→Clip). Wie drawGrid, aber GPU.
+  function gridBatchGl(w: number, h: number): LineBatch {
+    let step = 50;
+    while (step * zoom < 8) step *= 2;
+    const [tlx, tly] = toMm(0, 0);
+    const [brx, bry] = toMm(w, h);
+    const pos: number[] = [];
+    for (let x = Math.floor(tlx / step) * step; x <= brx; x += step) pos.push(x, tly, x, bry);
+    for (let y = Math.floor(tly / step) * step; y <= bry; y += step) pos.push(tlx, y, brx, y);
+    return solidBatch(pos, [1, 1, 1, 0.06]);
+  }
+
+  // Bett-Rechteck (blau) + Ursprungswinkel (gelb) als Line-Batch.
+  function bedBatchGl(): LineBatch {
+    const bw = scene.bed_w_mm, bh = scene.bed_h_mm;
+    const pos: number[] = [], col: number[] = [];
+    const line = (x0: number, y0: number, x1: number, y1: number, c: number[]) => {
+      pos.push(x0, y0, x1, y1);
+      col.push(c[0], c[1], c[2], c[3], c[0], c[1], c[2], c[3]);
+    };
+    const blue = [0.35, 0.59, 0.86, 0.9];
+    line(0, 0, bw, 0, blue); line(bw, 0, bw, bh, blue);
+    line(bw, bh, 0, bh, blue); line(0, bh, 0, 0, blue);
+    // Ursprungswinkel: konstante Bildschirmlänge (18 px) in mm umgerechnet.
+    const armMm = 18 / zoom, gold = [0.94, 0.71, 0.24, 1];
+    line(0, 0, armMm, 0, gold); line(0, 0, 0, armMm, gold);
+    return { positions: new Float32Array(pos), colors: new Float32Array(col) };
+  }
+
+  // Einfarbiger Line-Batch (eine Farbe für alle Vertices).
+  function solidBatch(pos: number[], rgba: [number, number, number, number]): LineBatch {
+    const n = pos.length / 2;
+    const col = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) col.set(rgba, i * 4);
+    return { positions: new Float32Array(pos), colors: col };
+  }
+
+  // ---- 2D-Ebene: Füllungen + Overlays (transparent über der WebGL-Ebene) ----
+  function renderOverlay() {
     const ctx = canvasEl.getContext("2d");
     if (!ctx) return;
     const w = canvasEl.width, h = canvasEl.height;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#141518";
-    ctx.fillRect(0, 0, w, h);
-    drawGrid(ctx, w, h);
-    drawBed(ctx);
-    // Index einmal ueber die Schleife fuehren statt pro Shape indexOf (O(n²)→O(n)).
-    scene.shapes.forEach((s, i) => drawShape(ctx, s, i));
+    ctx.clearRect(0, 0, w, h); // transparent — die WebGL-Ebene scheint durch
+    // Füllungen gefüllter Layer (die Kontur selbst kommt aus WebGL).
+    scene.shapes.forEach((s, i) => drawFill(ctx, s, i));
     drawSelection(ctx);
     drawGesturePreview(ctx);
     drawPolyPreview(ctx);
@@ -730,38 +844,7 @@
     });
   }
 
-  function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number) {
-    let step = 50;
-    while (step * zoom < 8) step *= 2;
-    const [tlx, tly] = toMm(0, 0);
-    const [brx, bry] = toMm(w, h);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    ctx.beginPath();
-    for (let x = Math.floor(tlx / step) * step; x <= brx; x += step) {
-      const sx = toScreen(x, 0)[0];
-      ctx.moveTo(sx, 0); ctx.lineTo(sx, h);
-    }
-    for (let y = Math.floor(tly / step) * step; y <= bry; y += step) {
-      const sy = toScreen(0, y)[1];
-      ctx.moveTo(0, sy); ctx.lineTo(w, sy);
-    }
-    ctx.stroke();
-  }
-
-  function drawBed(ctx: CanvasRenderingContext2D) {
-    const [x0, y0] = toScreen(0, 0);
-    const bw = scene.bed_w_mm * zoom, bh = scene.bed_h_mm * zoom;
-    ctx.strokeStyle = "rgba(90,150,220,0.9)";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x0, y0, bw, bh);
-    ctx.strokeStyle = "rgb(240,180,60)";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0); ctx.lineTo(x0 + 18, y0);
-    ctx.moveTo(x0, y0); ctx.lineTo(x0, y0 + 18);
-    ctx.stroke();
-  }
+  // Grid + Bett zeichnet jetzt die WebGL-Ebene (gridBatchGl/bedBatchGl).
 
   function layerColor(s: Shape): string {
     const l = scene.layers[s.layer_id];
@@ -806,56 +889,51 @@
     return [Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)];
   }
 
-  function drawShape(ctx: CanvasRenderingContext2D, s: Shape, idx: number) {
-    const color = layerColor(s);
+  // 2D-Ebene je Shape: Bilder (drawImage-Quad) + Flächen gefüllter Layer. Die
+  // KONTUR selbst zeichnet die WebGL-Ebene (renderGeo); hier nur Füllung/Bild.
+  function drawFill(ctx: CanvasRenderingContext2D, s: Shape, idx: number) {
     const [bx, by, bw, bh] = shapeDrawBox(s, idx);
-    ctx.save();
-    if (s.rotation) {
-      const [scx, scy] = toScreen(bx + bw / 2, by + bh / 2);
-      ctx.translate(scx, scy);
-      ctx.rotate((s.rotation * Math.PI) / 180);
-      ctx.translate(-scx, -scy);
-    }
-    const [sx, sy] = toScreen(bx, by);
     // Bild: gecachtes Bitmap in die Box zeichnen (volle Aufloesung, ADR 0004).
-    // Move/Resize aendern nur die Box — kein Neurendern. Duenner Layer-Rahmen
-    // als Kennung; die Auswahl-Handles kommen aus drawSelection.
+    // Move/Resize aendern nur die Box — kein Neurendern.
     if ("Image" in s.geo) {
+      ctx.save();
+      if (s.rotation) {
+        const [scx, scy] = toScreen(bx + bw / 2, by + bh / 2);
+        ctx.translate(scx, scy); ctx.rotate((s.rotation * Math.PI) / 180); ctx.translate(-scx, -scy);
+      }
+      const [sx, sy] = toScreen(bx, by);
       const { asset, params } = s.geo.Image;
       const img = cachedImage(asset, params);
-      if (img) {
-        ctx.drawImage(img, sx, sy, bw * zoom, bh * zoom);
-      } else {
-        // Noch nicht geladen: Platzhalterflaeche in Layer-Farbe.
-        ctx.fillStyle = layerFillColor(s, 0.15);
-        ctx.fillRect(sx, sy, bw * zoom, bh * zoom);
-      }
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
+      if (img) ctx.drawImage(img, sx, sy, bw * zoom, bh * zoom);
+      else { ctx.fillStyle = layerFillColor(s, 0.15); ctx.fillRect(sx, sy, bw * zoom, bh * zoom); }
+      ctx.strokeStyle = layerColor(s); ctx.lineWidth = 1;
       ctx.strokeRect(sx, sy, bw * zoom, bh * zoom);
       ctx.restore();
       return;
     }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
+    if (!layerFilled(s)) return; // nur gefüllte Layer bekommen eine Fläche
+    ctx.save();
+    if (s.rotation) {
+      const [scx, scy] = toScreen(bx + bw / 2, by + bh / 2);
+      ctx.translate(scx, scy); ctx.rotate((s.rotation * Math.PI) / 180); ctx.translate(-scx, -scy);
+    }
+    const [sx, sy] = toScreen(bx, by);
+    ctx.fillStyle = layerFillColor(s, 0.32);
     ctx.beginPath();
     if ("Ellipse" in s.geo) {
       ctx.ellipse(sx + (bw * zoom) / 2, sy + (bh * zoom) / 2, (bw * zoom) / 2, (bh * zoom) / 2, 0, 0, Math.PI * 2);
     } else if ("Polyline" in s.geo) {
-      // Polyline: jeden Punkt live transformieren (move UND scale), damit die
-      // Form waehrend der Geste mitwandert und nicht erst am Ende springt.
-      const { pts, closed } = s.geo.Polyline;
+      const { pts } = s.geo.Polyline;
       pts.forEach((p, i) => {
         const [wx, wy] = liveTransformPoint(p[0], p[1], idx);
         const [px, py] = toScreen(wx, wy);
         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       });
-      if (closed) ctx.closePath();
+      ctx.closePath();
     } else {
       ctx.rect(sx, sy, bw * zoom, bh * zoom);
     }
-    if (layerFilled(s)) { ctx.fillStyle = layerFillColor(s, 0.32); ctx.fill(); }
-    ctx.stroke();
+    ctx.fill();
     ctx.restore();
   }
 
@@ -1373,6 +1451,11 @@
       canvasEl.width = nw;
       canvasEl.height = nh;
     }
+    // WebGL-Ebene identisch dimensionieren (deckungsgleich mit dem 2D-Layer).
+    if (glCanvasEl && (glCanvasEl.width !== nw || glCanvasEl.height !== nh)) {
+      glCanvasEl.width = nw;
+      glCanvasEl.height = nh;
+    }
     // Solange der Nutzer die Ansicht nicht selbst bewegt hat, Bett einpassen.
     if (!viewTouched) fitBed();
     draw();
@@ -1398,10 +1481,18 @@
     fitTrigger;
     if (active) scheduleFitBed(true);
   });
-  // rAF beim Unmount abbrechen (kein Redraw auf totem Canvas).
+  // Ändert sich die Scene-Geometrie, den WebGL-Konturen-Batch neu hochladen.
+  // NUR wenn keine Live-Drag-Geste läuft — während move/scale baut renderGeo den
+  // Batch pro Frame selbst (mit Transform), ein zusätzliches rebuild wäre doppelt.
+  $effect(() => {
+    scene.shapes; scene.layers;
+    if (!drag || (drag.kind !== "move" && drag.kind !== "scale")) rebuildGeo();
+  });
+  // rAF beim Unmount abbrechen (kein Redraw auf totem Canvas) + GPU-Buffer frei.
   $effect(() => () => {
     if (rafId) cancelAnimationFrame(rafId);
     clearScheduledFit();
+    if (gl && shapeBatch) gl.free(shapeBatch);
   });
   // Werkzeugwechsel bricht einen laufenden Polylinien-Zug ab.
   $effect(() => {
@@ -1426,8 +1517,12 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="wrap" bind:this={wrapEl}>
+  <!-- Untere Ebene: WebGL-Geometrie (Konturen, Grid, Bett). -->
+  <canvas bind:this={glCanvasEl} class="gl"></canvas>
+  <!-- Obere Ebene: 2D-Overlays + Bilder; trägt alle Pointer-Handler. -->
   <canvas
     bind:this={canvasEl}
+    class="ov"
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
@@ -1438,13 +1533,17 @@
 
 <style>
   .wrap { position: absolute; inset: 0; }
-  /* Eigenes GPU-Layer fuer den Canvas. Unter WebKitGTK/Wayland (dev.sh setzt
-     WEBKIT_DISABLE_COMPOSITING_MODE=1) flackert eine Vollflaechen-Neuzeichnung
-     sonst sichtbar; der Layer-Hint entkoppelt die Canvas-Repaints vom Rest. */
+  /* Beide Canvas-Ebenen deckungsgleich übereinander: WebGL (gl) unten,
+     2D-Overlay (ov) darüber. Nur der obere Layer nimmt Pointer-Events an —
+     der untere liegt unter ihm und braucht sie nicht. */
   canvas {
     display: block;
+    position: absolute;
+    inset: 0;
     touch-action: none;
     transform: translateZ(0);
     will-change: transform;
   }
+  .gl { z-index: 0; }
+  .ov { z-index: 1; }
 </style>
