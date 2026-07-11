@@ -193,8 +193,11 @@ fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
     ui.separator();
     ui.add_space(6.0);
     ui.label(RichText::new("DATEI").small().weak());
-    if ui.button("📂 Öffnen…").clicked() {
+    if ui.button("📂 Vektor…").clicked() {
         app.import_dialog();
+    }
+    if ui.button("🖼 Bild…").clicked() {
+        app.import_image_dialog();
     }
     // Schnellzugriff auf die große Testdatei (Aztec) für den Fill-Stresstest.
     let aztec = std::path::Path::new("/home/moshy/Schreibtisch/Aztec.svg");

@@ -43,7 +43,12 @@ pub fn resize_target(
     }
     let x = left.min(right);
     let y = top.min(bottom);
-    luxifer_core::BBox::new(x, y, (right - left).abs().max(0.1), (bottom - top).abs().max(0.1))
+    luxifer_core::BBox::new(
+        x,
+        y,
+        (right - left).abs().max(0.1),
+        (bottom - top).abs().max(0.1),
+    )
 }
 
 pub struct App {
@@ -80,6 +85,9 @@ pub struct App {
     // unberührt (die Projektion macht der Shader), daher bleiben sie gecacht.
     verts: Vec<Vertex>,
     last_fp: u64,
+    /// Bild-Texturen (asset-id → GPU-Textur) und ob neu geladen werden muss.
+    images: crate::image_gpu::ImageStore,
+    image_dirty: bool,
 }
 
 impl App {
@@ -151,6 +159,8 @@ impl App {
             fps: 0.0,
             verts: Vec::new(),
             last_fp: 0,
+            images: crate::image_gpu::ImageStore::default(),
+            image_dirty: false,
         };
         if let Some(path) = auto_import {
             app.import_path(std::path::Path::new(&path));
@@ -261,20 +271,26 @@ impl App {
         // Zuerst: wurde ein Transform-Handle der aktuellen Auswahl getroffen?
         if let Some(b) = self.state.selection_bbox() {
             let pick = self.handle_hw() as f64 * 1.8; // etwas großzügiger als sichtbar
-            // Rotate-Handle?
+                                                      // Rotate-Handle?
             let rp = self.rotate_handle_pos(&b);
             if (w[0] - rp[0]).hypot(w[1] - rp[1]) <= pick {
                 self.state.push_undo();
                 let pivot = [b.x + b.w / 2.0, b.y + b.h / 2.0];
                 let angle = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
-                self.drag = Drag::Rotate { pivot, last_angle: angle };
+                self.drag = Drag::Rotate {
+                    pivot,
+                    last_angle: angle,
+                };
                 return;
             }
             // Skalier-Handle?
             for (handle, (hx, hy)) in luxifer_core::Handle::positions(&b) {
                 if (w[0] - hx).abs() <= pick && (w[1] - hy).abs() <= pick {
                     self.state.push_undo();
-                    self.drag = Drag::Resize { handle, start_box: b };
+                    self.drag = Drag::Resize {
+                        handle,
+                        start_box: b,
+                    };
                     return;
                 }
             }
@@ -381,6 +397,48 @@ impl App {
             .pick_file()
         {
             self.import_path(&path);
+        }
+    }
+
+    /// Bild importieren (Asset-Store) und als Image-Shape platzieren.
+    pub fn import_image_dialog(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Bild", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
+            .pick_file()
+        else {
+            return;
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("Bild lesen: {e}");
+                return;
+            }
+        };
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("bild")
+            .to_string();
+        match luxifer_core::import_image(&luxifer_core::assets_dir(), &bytes, &name) {
+            Ok(meta) => {
+                // Pixel → mm bei 254 DPI (10 px/mm), wie der Core-Default.
+                let w_mm = meta.width as f64 / 10.0;
+                let h_mm = meta.height as f64 / 10.0;
+                let idx = self
+                    .state
+                    .add_image(meta.id.clone(), 20.0, 20.0, w_mm, h_mm);
+                self.state.selected = vec![idx];
+                self.image_dirty = true;
+                self.fit_all();
+                log::info!(
+                    "Bild importiert: {} ({}×{})",
+                    meta.id,
+                    meta.width,
+                    meta.height
+                );
+            }
+            Err(e) => log::error!("Bild-Import fehlgeschlagen: {e}"),
         }
     }
 
@@ -619,8 +677,14 @@ impl App {
         // Rotate-Handle: Linie von oben-Mitte nach oben + Kreis-Marker.
         let rp = self.rotate_handle_pos(&b);
         let top = [b.x as f32 + b.w as f32 / 2.0, b.y as f32];
-        v.push(Vertex { pos: top, color: scene_geo::SEL_BOX_COLOR });
-        v.push(Vertex { pos: [rp[0] as f32, rp[1] as f32], color: scene_geo::SEL_BOX_COLOR });
+        v.push(Vertex {
+            pos: top,
+            color: scene_geo::SEL_BOX_COLOR,
+        });
+        v.push(Vertex {
+            pos: [rp[0] as f32, rp[1] as f32],
+            color: scene_geo::SEL_BOX_COLOR,
+        });
         v.extend(scene_geo::handle_marker(
             rp[0] as f32,
             rp[1] as f32,
@@ -695,6 +759,16 @@ impl App {
             self.verts = verts;
         }
         self.gpu.upload_camera(&self.cam);
+        // Bild-Texturen laden (nur wenn neue Bilder dazukamen).
+        if self.image_dirty || fp != self.last_fp {
+            self.images.sync(
+                &self.gpu.device,
+                &self.gpu.queue,
+                self.gpu.config.format,
+                &self.state,
+            );
+            self.image_dirty = false;
+        }
         let count = self.verts.len() as u32;
         // Overlay (Handles) jeden Frame neu — klein, kamera-abhängig.
         let overlay = self.build_overlay();
@@ -729,6 +803,8 @@ impl App {
             &screen,
         );
 
+        // Scratch-Buffer für die Bild-Quads (muss den Render-Pass überleben).
+        let mut img_scratch: Option<wgpu::Buffer> = None;
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("frame"),
@@ -749,6 +825,15 @@ impl App {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            // Bilder zuunterst, dann Linien/Fill, dann Handles.
+            self.images.draw(
+                &mut rp,
+                &self.gpu.device,
+                &self.gpu.queue,
+                &self.cam,
+                &self.state,
+                &mut img_scratch,
+            );
             self.gpu.draw_canvas(&mut rp, count);
             self.gpu.draw_overlay(&mut rp);
             // egui obendrauf (eigener Lebenszeit-Scope via forget_lifetime).
@@ -794,5 +879,38 @@ mod tests {
         let t = resize_target(start, Handle::E, [200.0, 999.0]);
         assert!((t.y - 10.0).abs() < 1e-9 && (t.h - 50.0).abs() < 1e-9);
         assert!((t.x + t.w - 200.0).abs() < 1e-9);
+    }
+
+    /// Bild-Import-Kette: import_image (Store) → add_image → Geo::Image im State.
+    /// Verifiziert die native Verdrahtung (Rendern selbst braucht die GPU).
+    #[test]
+    fn bild_import_legt_image_shape_an() {
+        use luxifer_core::{import_image, AppState, Geo};
+        let png = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../luxifer/native/tests/fixtures/test2x2.png"
+        ));
+        // Fixture optional: wenn nicht vorhanden, Test überspringen (CI-tolerant).
+        let Ok(bytes) = png else {
+            eprintln!("Fixture fehlt — Test übersprungen");
+            return;
+        };
+        let dir = std::env::temp_dir().join("luxifer_img_test");
+        let meta = import_image(&dir, &bytes, "test.png").expect("import_image");
+        assert!(meta.width >= 1 && meta.height >= 1);
+
+        let mut s = AppState::new();
+        let idx = s.add_image(
+            meta.id.clone(),
+            0.0,
+            0.0,
+            meta.width as f64,
+            meta.height as f64,
+        );
+        match &s.shapes[idx].geo {
+            Geo::Image { asset, .. } => assert_eq!(asset, &meta.id),
+            _ => panic!("erwartet Geo::Image"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
