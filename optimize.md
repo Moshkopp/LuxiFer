@@ -94,17 +94,17 @@ Preview; Overlays (Lineale, Handles, Text-Labels) dürfen ein transparenter
 2D-Layer darüber bleiben. **Vorher im Release messen** (Test-Szene mit vielen
 Shapes), um die Dringlichkeit zu belegen.
 
-### 🔴 Blocker 2 — `Mutex::lock().unwrap()` 73× im Tauri-Backend
+### ✅ Blocker 2 — Mutex-Vergiftungs-Cascade (ERLEDIGT 2026-07-11)
 
-`luxifer/frontend/src-tauri/src/lib.rs` enthält 73 `lock().unwrap()`. Ein
-einziger Panic während gehaltenem Lock **vergiftet den Mutex**; danach schlägt
-jeder weitere Command fehl → App gefühlt eingefroren, obwohl nur eine Operation
-buggy war. Mit wachsender Command-Zahl steigt die Panic-Wahrscheinlichkeit.
+Waren 73× `data.<mutex>.lock().unwrap()`. Ein Panic bei gehaltenem Lock
+vergiftete den Mutex dauerhaft → jeder weitere Command panickte → App tot.
 
-Empfehlung: Zentrale Helper-Funktion `with_state(|s| …) -> Result<_, EditorError>`,
-die `lock()` kapselt und einen vergifteten Mutex kontrolliert als `EditorError`
-zurückgibt statt zu panicken. Da `EditorError` bereits existiert, ist das eine
-mechanische, risikoarme Umstellung.
+Gelöst: vergiftungssichere Accessoren `AppData::state()/current()/lasers()` über
+`lock_recover` (`lock().unwrap_or_else(|e| e.into_inner())`). Der Guard kommt auch
+bei Vergiftung zurück; die App bleibt bedienbar (Undo/Neuladen). Bewusst KEIN
+neuer `Result<_, EditorError>`-Rückgabetyp (das existierende `EditorError` ist nur
+Frontend-TS): Commands geben weiter `Scene` zurück, Frontend-Vertrag unverändert,
+minimaler Eingriff.
 
 ### 🟠 Blocker 3 — Sammelmodule zu groß (weitgehend ERLEDIGT 2026-07-11)
 
@@ -159,13 +159,16 @@ zoom-abhängiges Tessellieren gefordert wird. Notieren, nicht sofort handeln.
 3. ✅ **Blocker 3 (Modulzerlegung) weitgehend erledigt** — lib.rs → shared.rs +
    commands/*, geometry.ts, Canvas-Helfer ausgelagert. Rest (Camera-Store/
    Tool-Module, App.svelte, Core-Module) offen.
-4. **Offen — Blocker 2** (Mutex-Kapselung): `lock().unwrap()` (jetzt über die
-   `commands/*`-Module verteilt) durch einen `with_state()`-Helper mit
-   `EditorError` ersetzen. Klein, risikoarm — guter nächster Schritt.
-5. **Punkt 4** (Frontend↔Core-BBox-Duplizierung) — `shapeBBox` in core.ts nutzt
-   jetzt die zentralen Primitive (geometry.ts), driftet aber weiter vom Core.
-   Prüfen, ob es ganz durch `selection_bbox` ersetzbar ist. **Punkt 5** (statische
+4. ✅ **Blocker 2 (Mutex-Vergiftung) erledigt** — vergiftungssichere Accessoren.
+5. **Offen (klein) — Punkt 4** (Frontend↔Core-BBox-Duplizierung): `shapeBBox` in
+   core.ts nutzt jetzt die zentralen Primitive (geometry.ts), driftet aber weiter
+   vom Core. Prüfen, ob ganz durch `selection_bbox` ersetzbar. **Punkt 5** (statische
    Ellipsen-Auflösung) jetzt an EINER Stelle (`ELLIPSE_SEGS` in geometry.ts).
+6. **Offen (größer) — Rest-Modulzerlegung:** Camera-Store + Tool-Module aus
+   `Canvas.svelte`, `App.svelte` (~1.300), Core-Module (`geo_ops.rs`, `state.rs`).
+
+**Alle in Analyse 1+2 als 🔴/🟠 markierten Blocker sind abgearbeitet.** Offen sind
+nur noch 🟡-Aufräumarbeiten und die freiwillige Rest-Zerlegung.
 
 ---
 
