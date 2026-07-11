@@ -107,23 +107,33 @@ export interface Scene {
   project: ProjectMeta | null;
 }
 
-// BBox einer Shape (ohne Rotation — wie das Core-Modell) für Anzeige/Inputs.
+// Welt-BBox einschließlich Rotation, analog zu Shape::bbox im Core.
 export function shapeBBox(s: Shape): [number, number, number, number] {
+  let points: [number, number][];
   if ("Rect" in s.geo) {
     const { x, y, w, h } = s.geo.Rect;
-    return [x, y, w, h];
-  }
-  if ("Image" in s.geo) {
+    points = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  } else if ("Image" in s.geo) {
     const { x, y, w, h } = s.geo.Image;
-    return [x, y, w, h];
-  }
-  if ("Ellipse" in s.geo) {
+    points = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  } else if ("Ellipse" in s.geo) {
     const { cx, cy, rx, ry } = s.geo.Ellipse;
-    return [cx - rx, cy - ry, rx * 2, ry * 2];
+    points = Array.from({ length: 64 }, (_, i) => {
+      const a = i / 64 * Math.PI * 2;
+      return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
+    });
+  } else {
+    points = s.geo.Polyline.pts;
   }
-  const { pts } = s.geo.Polyline;
+  if (points.length === 0) return [0, 0, 0, 0];
+  if (Math.abs(s.rotation ?? 0) > Number.EPSILON) {
+    let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
+    for (const [x,y] of points) { x0=Math.min(x0,x); y0=Math.min(y0,y); x1=Math.max(x1,x); y1=Math.max(y1,y); }
+    const cx=(x0+x1)/2, cy=(y0+y1)/2, r=s.rotation*Math.PI/180, co=Math.cos(r), si=Math.sin(r);
+    points = points.map(([x,y]) => [cx+(x-cx)*co-(y-cy)*si, cy+(x-cx)*si+(y-cy)*co]);
+  }
   let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-  for (const [px, py] of pts) {
+  for (const [px, py] of points) {
     a = Math.min(a, px); b = Math.min(b, py); c = Math.max(c, px); d = Math.max(d, py);
   }
   return [a, b, c - a, d - b];

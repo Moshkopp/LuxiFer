@@ -211,7 +211,17 @@ impl Shape {
     }
 
     pub fn bbox(&self) -> BBox {
-        self.geo.bbox()
+        let local = self.geo.bbox();
+        if self.rotation.abs() <= f64::EPSILON {
+            return local;
+        }
+        let (cx, cy) = local.center();
+        let (pts, _) = self.geo.outline_points();
+        BBox::union_all(pts.into_iter().map(|(x, y)| {
+            let (rx, ry) = crate::geometry::rotate_point(x, y, cx, cy, self.rotation);
+            BBox::new(rx, ry, 0.0, 0.0)
+        }))
+        .unwrap_or(local)
     }
 
     /// Verschiebt alle Darstellungen der Form gemeinsam. `geo` ist die
@@ -281,7 +291,7 @@ impl Shape {
         if self.rotation == 0.0 {
             return self.geo.hit_test(px, py, tol);
         }
-        let (cx, cy) = self.bbox().center();
+        let (cx, cy) = self.geo.bbox().center();
         let (rx, ry) = crate::geometry::rotate_point(px, py, cx, cy, -self.rotation);
         self.geo.hit_test(rx, ry, tol)
     }
@@ -345,5 +355,24 @@ mod tests {
         assert!(!s.hit_test(50.0, 45.0, 0.0)); // ungedreht außerhalb
         s.rotation = 90.0;
         assert!(s.hit_test(50.0, 45.0, 0.0)); // gedreht: ragt vertikal
+    }
+
+    #[test]
+    fn shape_bbox_beruecksichtigt_rotation() {
+        let mut s = Shape::new(
+            0,
+            Geo::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 20.0,
+                h: 10.0,
+            },
+        );
+        s.rotation = 90.0;
+        let b = s.bbox();
+        assert!((b.x - 5.0).abs() < 1e-9);
+        assert!((b.y + 5.0).abs() < 1e-9);
+        assert!((b.w - 10.0).abs() < 1e-9);
+        assert!((b.h - 20.0).abs() < 1e-9);
     }
 }

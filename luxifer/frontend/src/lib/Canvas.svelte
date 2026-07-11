@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { rgb, polygonPreview, imageRender, type Scene, type Shape, type ImageParams } from "./core";
+  import { rgb, polygonPreview, imageRender, shapeBBox, type Scene, type Shape, type ImageParams } from "./core";
 
   type Tool = "select" | "rect" | "ellipse" | "line" | "polyline" | "polygon" | "spline" | "measure" | "bezier" | "node";
 
@@ -262,27 +262,6 @@
   type HandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
   // ---- BBox-Helfer ----------------------------------------------------------
-  function shapeBBox(s: Shape): [number, number, number, number] {
-    if ("Rect" in s.geo) {
-      const { x, y, w, h } = s.geo.Rect;
-      return [x, y, w, h];
-    }
-    if ("Image" in s.geo) {
-      const { x, y, w, h } = s.geo.Image;
-      return [x, y, w, h];
-    }
-    if ("Ellipse" in s.geo) {
-      const { cx, cy, rx, ry } = s.geo.Ellipse;
-      return [cx - rx, cy - ry, rx * 2, ry * 2];
-    }
-    const { pts } = s.geo.Polyline;
-    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-    for (const [px, py] of pts) {
-      a = Math.min(a, px); b = Math.min(b, py); c = Math.max(c, px); d = Math.max(d, py);
-    }
-    return [a, b, c - a, d - b];
-  }
-
   function selectionBBox(): [number, number, number, number] | null {
     if (!scene.selected.length) return null;
     let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
