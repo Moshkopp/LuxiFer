@@ -31,6 +31,7 @@
     ondragnode,
     onsplitnode,
     ondeletenode,
+    ontogglenode,
     onbezierdone,
     laserHead,
     laserOrigin,
@@ -75,8 +76,9 @@
     onbridgestroke?: (x0: number, y0: number, x1: number, y1: number) => void;
     // Node-Editor: Knoten/Handle ziehen, Segment teilen, Knoten löschen.
     ondragnode?: (shape: number, node: number, part: "anchor" | "in" | "out", x: number, y: number, begin: boolean) => void;
-    onsplitnode?: (shape: number, segStart: number) => void;
+    onsplitnode?: (shape: number, segStart: number, t: number) => void;
     ondeletenode?: (shape: number, node: number) => void;
+    ontogglenode?: (shape: number, node: number) => void;
     // Fertiger Bézier-Pfad: Knoten (Anker+Tangenten in mm) + geschlossen.
     onbezierdone?: (nodes: { p: [number, number]; h_in: [number, number] | null; h_out: [number, number] | null }[], closed: boolean) => void;
     // Laser-Positionen (mm) fuer Marker: Kopf und Benutzerursprung. Optional.
@@ -241,7 +243,10 @@
   // Klick = Ecke, Klick+Ziehen = glatter Knoten (hOut folgt, hIn = Spiegel).
   type BNode = { p: [number, number]; hIn: [number, number] | null; hOut: [number, number] | null };
   let bez = $state<{ nodes: BNode[]; cursor: [number, number] | null; closed: boolean } | null>(null);
-  let bezDrag = $state<BNode | null>(null);
+  // Index statt Objektreferenz: Svelte proxifiziert Elemente eines $state-
+  // Arrays. Eine vorher gemerkte Roh-Referenz würde außerhalb des Arrays
+  // verändert; die sichtbare und später gespeicherte Kurve bliebe gerade.
+  let bezDrag = $state<number | null>(null);
   let bezDragStart: [number, number] | null = null;
   let bezDragged = false;
   // Fangradius um den ersten Punkt in Bildschirm-Pixeln.
@@ -467,12 +472,11 @@
   }
   function drawBezierDraft(ctx: CanvasRenderingContext2D) {
     if (tool !== "bezier" || !bez || bez.nodes.length === 0) return;
-    // Kurve inkl. Gummiband zum Cursor.
-    const nodes = bez.cursor
-      ? [...bez.nodes, { p: bez.cursor, hIn: null, hOut: null }]
-      : bez.nodes;
-    if (nodes.length >= 2) {
-      const flat = bezFlatten(nodes, false);
+    // Nur bereits gesetzte Knoten bilden die Kurve. Der Cursor ist ausdrücklich
+    // KEIN vorläufiger Bézier-Knoten: Das Gummiband bleibt bis zum nächsten
+    // Klick gerade. Erst Klick+Ziehen erzeugt Tangenten und damit eine Kurve.
+    if (bez.nodes.length >= 2) {
+      const flat = bezFlatten(bez.nodes, false);
       ctx.strokeStyle = "#ff5c62";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -481,6 +485,19 @@
         if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       });
       ctx.stroke();
+    }
+    if (bez.cursor && bezDrag === null) {
+      const last = bez.nodes[bez.nodes.length - 1].p;
+      const [lx, ly] = toScreen(last[0], last[1]);
+      const [cx, cy] = toScreen(bez.cursor[0], bez.cursor[1]);
+      ctx.strokeStyle = "#ff5c62";
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
     // Tangenten des zuletzt/aktiv gezogenen Knotens + Anker-Quadrate.
     ctx.strokeStyle = "rgba(120,160,230,0.85)";
@@ -581,6 +598,40 @@
       }
     }
     return null;
+  }
+
+  function cubicPoint(a: BNode, b: BNode, t: number): [number, number] {
+    const p0 = a.p, p1 = a.hOut ?? a.p, p2 = b.hIn ?? b.p, p3 = b.p;
+    const u = 1 - t;
+    return [
+      u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0],
+      u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1],
+    ];
+  }
+
+  // Nächstes Kurvensegment samt Kurvenparameter treffen. Der Core teilt dann
+  // exakt an dieser Stelle per De Casteljau, ohne die sichtbare Form zu ändern.
+  function hitNodeSegment(px: number, py: number): { shape: number; seg: number; t: number } | null {
+    let best: { shape: number; seg: number; t: number } | null = null;
+    let bestD = 8;
+    for (const idx of scene.selected) {
+      const s = scene.shapes[idx];
+      if (!s) continue;
+      const nodes = editNodes(s);
+      const closed = s.bezier?.closed ?? ("Polyline" in s.geo && s.geo.Polyline.closed) ?? ("Rect" in s.geo);
+      const count = closed ? nodes.length : nodes.length - 1;
+      for (let seg = 0; seg < count; seg++) {
+        const a = nodes[seg], b = nodes[(seg + 1) % nodes.length];
+        for (let sample = 0; sample <= 32; sample++) {
+          const t = sample / 32;
+          const p = cubicPoint(a, b, t);
+          const [sx, sy] = toScreen(p[0], p[1]);
+          const d = Math.hypot(sx - px, sy - py);
+          if (d < bestD) { bestD = d; best = { shape: idx, seg, t }; }
+        }
+      }
+    }
+    return best;
   }
 
   // ---- Messen-Werkzeug (reine Anzeige, keine Wahrheit) ----------------------
@@ -1010,7 +1061,7 @@
       const CLOSE = 10;
       if (!bez) {
         bez = { nodes: [{ p: [mx, my], hIn: null, hOut: null }], cursor: [mx, my], closed: false };
-        bezDrag = bez.nodes[0];
+        bezDrag = 0;
       } else {
         // Nahe Startknoten (>=2 Knoten) → schließen + fertig.
         const [sx, sy] = toScreen(...bez.nodes[0].p);
@@ -1021,7 +1072,7 @@
         }
         const nd: BNode = { p: [mx, my], hIn: null, hOut: null };
         bez.nodes = [...bez.nodes, nd];
-        bezDrag = nd;
+        bezDrag = bez.nodes.length - 1;
       }
       bezDragStart = [px, py];
       bezDragged = false;
@@ -1031,8 +1082,14 @@
     if (tool === "node") {
       const hit = hitNode(px, py);
       if (hit) {
-        drag = { kind: "node", ...hit, began: false };
+        if (ev.altKey && hit.part === "anchor") ondeletenode?.(hit.shape, hit.node);
+        else drag = { kind: "node", ...hit, began: false };
       } else {
+        const segment = hitNodeSegment(px, py);
+        if (segment) {
+          onsplitnode?.(segment.shape, segment.seg, segment.t);
+          return;
+        }
         // Kein Knoten getroffen → Shape unter dem Cursor selektieren (zum Editieren).
         onselectat(mx, my, ev.shiftKey || ev.ctrlKey);
       }
@@ -1114,11 +1171,18 @@
     const [mx, my] = toMm(px, py);
     // Bézier-Feder: Ziehen setzt symmetrische Tangenten am eben gesetzten Knoten.
     if (tool === "bezier" && bez) {
-      if (bezDrag && bezDragStart) {
+      if (bezDrag !== null && bezDragStart) {
         if (!bezDragged && Math.hypot(px - bezDragStart[0], py - bezDragStart[1]) > 3) bezDragged = true;
         if (bezDragged) {
-          bezDrag.hOut = [mx, my];
-          bezDrag.hIn = [2 * bezDrag.p[0] - mx, 2 * bezDrag.p[1] - my];
+          const node = bez.nodes[bezDrag];
+          if (node) {
+            const updated: BNode = {
+              ...node,
+              hOut: [mx, my],
+              hIn: [2 * node.p[0] - mx, 2 * node.p[1] - my],
+            };
+            bez.nodes = bez.nodes.map((n, i) => i === bezDrag ? updated : n);
+          }
         }
       } else {
         bez.cursor = [mx, my]; // Gummiband
@@ -1170,7 +1234,7 @@
 
   async function onPointerUp(ev: PointerEvent) {
     // Bézier-Feder: Tangenten-Drag beenden (kein drag-Objekt im Spiel).
-    if (tool === "bezier" && bezDrag) {
+    if (tool === "bezier" && bezDrag !== null) {
       bezDrag = null;
       bezDragStart = null;
       return;
@@ -1283,7 +1347,7 @@
       const CLOSE = 10;
       if (!bez) {
         bez = { nodes: [{ p: [mx, my], hIn: null, hOut: null }], cursor: [mx, my], closed: false };
-        bezDrag = bez.nodes[0];
+        bezDrag = 0;
       } else {
         // Nahe Startknoten (>=2 Knoten) → schließen + fertig.
         const [sx, sy] = toScreen(...bez.nodes[0].p);
@@ -1294,7 +1358,7 @@
         }
         const nd: BNode = { p: [mx, my], hIn: null, hOut: null };
         bez.nodes = [...bez.nodes, nd];
-        bezDrag = nd;
+        bezDrag = bez.nodes.length - 1;
       }
       bezDragStart = [px, py];
       bezDragged = false;
@@ -1304,22 +1368,8 @@
     if (tool === "node") {
       const hit = hitNode(px, py);
       if (hit) {
-        ondeletenode?.(hit.shape, hit.node);
+        if (hit.part === "anchor") ontogglenode?.(hit.shape, hit.node);
         return;
-      }
-      // Nächstes Kurvensegment finden: Knoten, dessen geflatteter Abschnitt
-      // dem Klick am nächsten liegt. Vereinfachung: nächster Knoten davor.
-      for (const idx of scene.selected) {
-        const bp = scene.shapes[idx]?.bezier;
-        if (!bp) continue;
-        let best = -1, bestD = 12;
-        for (let i = 0; i < bp.nodes.length; i++) {
-          const [ax, ay] = toScreen(bp.nodes[i].p[0], bp.nodes[i].p[1]);
-          const d = Math.hypot(ax - px, ay - py);
-          if (d < bestD) { bestD = d; best = i; }
-        }
-        // Segment ab dem nächstgelegenen Knoten teilen.
-        if (best >= 0) { onsplitnode?.(idx, best); return; }
       }
       return;
     }
@@ -1357,6 +1407,12 @@
     if (bez) {
       if (ev.key === "Enter") { ev.preventDefault(); bezCommit(); }
       else if (ev.key === "Escape") { ev.preventDefault(); bez = null; bezDrag = null; draw(); }
+      else if (ev.key === "Backspace") {
+        ev.preventDefault();
+        if (bez.nodes.length > 1) bez.nodes = bez.nodes.slice(0, -1);
+        else { bez = null; bezDrag = null; }
+        draw();
+      }
       return;
     }
     if (polyPts.length === 0) return;

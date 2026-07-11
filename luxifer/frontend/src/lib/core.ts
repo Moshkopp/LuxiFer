@@ -348,10 +348,12 @@ export const dragNode = (
   shapeIndex: number, node: number, part: "anchor" | "in" | "out",
   x: number, y: number, begin: boolean,
 ) => invoke<Scene>("drag_node", { shapeIndex, node, part, x, y, begin });
-export const splitNode = (shapeIndex: number, segStart: number) =>
-  invoke<Scene>("split_node", { shapeIndex, segStart });
+export const splitNode = (shapeIndex: number, segStart: number, t: number) =>
+  invoke<Scene>("split_node", { shapeIndex, segStart, t });
 export const deleteNode = (shapeIndex: number, node: number) =>
   invoke<Scene>("delete_node", { shapeIndex, node });
+export const toggleNodeSmooth = (shapeIndex: number, node: number) =>
+  invoke<Scene>("toggle_node_smooth", { shapeIndex, node });
 
 // Font in den App-Fonts-Ordner installieren (TTF/OTF-Bytes).
 export const uploadFont = (bytes: number[], name: string) =>

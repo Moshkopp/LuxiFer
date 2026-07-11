@@ -257,8 +257,18 @@ impl AppState {
                     *h = (h.0 + dx, h.1 + dy);
                 }
             }
-            NodePart::HandleIn => n.h_in = Some(to),
-            NodePart::HandleOut => n.h_out = Some(to),
+            NodePart::HandleIn => {
+                n.h_in = Some(to);
+                if n.h_out.is_some() {
+                    n.h_out = Some((2.0 * n.p.0 - to.0, 2.0 * n.p.1 - to.1));
+                }
+            }
+            NodePart::HandleOut => {
+                n.h_out = Some(to);
+                if n.h_in.is_some() {
+                    n.h_in = Some((2.0 * n.p.0 - to.0, 2.0 * n.p.1 - to.1));
+                }
+            }
         }
         let (flat, closed) = (bp.flatten(), bp.closed);
         sh.geo = Geo::Polyline { pts: flat, closed };
@@ -267,7 +277,7 @@ impl AppState {
 
     /// Teilt das Segment vor Knoten `node` (fügt einen Mittelknoten ein).
     /// Ein Undo-Punkt.
-    pub fn split_node_segment(&mut self, idx: usize, seg_start: usize) {
+    pub fn split_node_segment(&mut self, idx: usize, seg_start: usize, t: f64) {
         self.ensure_bezier(idx);
         let Some(sh) = self.shapes.get_mut(idx) else {
             return;
@@ -282,7 +292,7 @@ impl AppState {
             return;
         }
         self.dirty = true; // Undo hat der Aufrufer gesetzt
-        let split = split_bezier_segment(&bp.nodes[i], &bp.nodes[j], 0.5);
+        let split = split_bezier_segment(&bp.nodes[i], &bp.nodes[j], t.clamp(0.001, 0.999));
         bp.nodes[i].h_out = Some(split.left_h_out);
         bp.nodes[j].h_in = Some(split.right_h_in);
         bp.nodes.insert(i + 1, split.mid);
@@ -300,6 +310,62 @@ impl AppState {
             return;
         }
         bp.nodes.remove(node);
+        let (flat, closed) = (bp.flatten(), bp.closed);
+        sh.geo = Geo::Polyline { pts: flat, closed };
+        self.dirty = true;
+    }
+
+    /// Schaltet einen Knoten zwischen Ecke und glattem, symmetrischem Knoten um.
+    pub fn toggle_node_smooth(&mut self, idx: usize, node: usize) {
+        self.ensure_bezier(idx);
+        let Some(sh) = self.shapes.get_mut(idx) else {
+            return;
+        };
+        let Some(bp) = sh.bezier.as_mut() else { return };
+        if node >= bp.nodes.len() {
+            return;
+        }
+        if bp.nodes[node].h_in.is_some() || bp.nodes[node].h_out.is_some() {
+            bp.nodes[node].h_in = None;
+            bp.nodes[node].h_out = None;
+        } else {
+            let count = bp.nodes.len();
+            if count < 2 {
+                return;
+            }
+            let p = bp.nodes[node].p;
+            let prev = if node > 0 {
+                Some(bp.nodes[node - 1].p)
+            } else if bp.closed {
+                Some(bp.nodes[count - 1].p)
+            } else {
+                None
+            };
+            let next = if node + 1 < count {
+                Some(bp.nodes[node + 1].p)
+            } else if bp.closed {
+                Some(bp.nodes[0].p)
+            } else {
+                None
+            };
+            let (dx, dy, length) = match (prev, next) {
+                (Some(a), Some(b)) => (
+                    b.0 - a.0,
+                    b.1 - a.1,
+                    ((p.0 - a.0).hypot(p.1 - a.1) + (b.0 - p.0).hypot(b.1 - p.1)) / 6.0,
+                ),
+                (None, Some(b)) => (b.0 - p.0, b.1 - p.1, (b.0 - p.0).hypot(b.1 - p.1) / 3.0),
+                (Some(a), None) => (p.0 - a.0, p.1 - a.1, (p.0 - a.0).hypot(p.1 - a.1) / 3.0),
+                _ => return,
+            };
+            let norm = dx.hypot(dy);
+            if norm <= f64::EPSILON {
+                return;
+            }
+            let (vx, vy) = (dx / norm * length, dy / norm * length);
+            bp.nodes[node].h_in = Some((p.0 - vx, p.1 - vy));
+            bp.nodes[node].h_out = Some((p.0 + vx, p.1 + vy));
+        }
         let (flat, closed) = (bp.flatten(), bp.closed);
         sh.geo = Geo::Polyline { pts: flat, closed };
         self.dirty = true;
@@ -471,7 +537,7 @@ mod tests {
         let i = app.add_bezier(vec![(0.0, 0.0), (10.0, 10.0)], false);
         let n0 = app.shapes[i].bezier.as_ref().unwrap().nodes.len();
         app.push_undo();
-        app.split_node_segment(i, 0);
+        app.split_node_segment(i, 0, 0.5);
         assert_eq!(app.shapes[i].bezier.as_ref().unwrap().nodes.len(), n0 + 1);
     }
 

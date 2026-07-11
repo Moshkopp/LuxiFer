@@ -694,10 +694,18 @@ fn drag_node(
 
 /// Teilt das Segment ab Knoten `seg_start` (fügt einen Mittelknoten ein).
 #[tauri::command]
-fn split_node(data: State<AppData>, shape_index: usize, seg_start: usize) -> Scene {
+fn split_node(data: State<AppData>, shape_index: usize, seg_start: usize, t: f64) -> Scene {
     let mut s = data.state.lock().unwrap();
     s.push_undo();
-    s.split_node_segment(shape_index, seg_start);
+    s.split_node_segment(shape_index, seg_start, t);
+    scene_with(&s, &data)
+}
+
+#[tauri::command]
+fn toggle_node_smooth(data: State<AppData>, shape_index: usize, node: usize) -> Scene {
+    let mut s = data.state.lock().unwrap();
+    s.push_undo();
+    s.toggle_node_smooth(shape_index, node);
     scene_with(&s, &data)
 }
 
@@ -1617,6 +1625,7 @@ pub fn run() {
             drag_node,
             split_node,
             delete_node,
+            toggle_node_smooth,
             upload_font,
             offset_op,
             fillet_op,
