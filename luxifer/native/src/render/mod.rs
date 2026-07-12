@@ -209,16 +209,14 @@ impl Renderer {
             // Opakes Bett/Gitter zuerst. Danach echte Bildtexturen, anschließend
             // Vektor-Fills und Konturen; Handles bleiben ganz oben.
             self.gpu.draw_canvas_range(&mut rp, 0..self.background_end);
-            if !scene.preview {
-                self.images.draw(
-                    &mut rp,
-                    &self.gpu.device,
-                    &self.gpu.queue,
-                    scene.cam,
-                    scene.session,
-                    &mut img_scratch,
-                );
-            }
+            self.images.draw(
+                &mut rp,
+                &self.gpu,
+                scene.cam,
+                scene.session,
+                scene.preview && scene.selection_only,
+                &mut img_scratch,
+            );
             self.gpu
                 .draw_canvas_range(&mut rp, self.background_end..count);
             self.gpu.draw_overlay(&mut rp);

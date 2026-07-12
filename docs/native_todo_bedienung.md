@@ -44,7 +44,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
 | D1 | ENTSCHIEDEN | — | Scanlines bleiben bewusst im Design-Tab: direkte Kontrolle des Fill-Ergebnisses; der native Vertex-Cache zeigt aktuell keinen spürbaren Performance-Einbruch. |
-| D2 | IN ARBEIT | P1 | Read-only Vorschau-Reiter zeigt Cut/Fill/Travel aus dem echten JobPlan; Rastertexturen und Preview-Status/Legende fehlen noch. |
+| D2 | IN ARBEIT | P1 | Read-only Vorschau zeigt Cut/Fill/Travel und gecachte Bildtexturen; Mittelmaus-Pan/Mausrad-Zoom aktiv. Verarbeitete Rastertexturen und Legende fehlen noch. |
 
 ## E. Panels / Layout / Views
 
@@ -107,4 +107,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 - D2 (in Arbeit): Der erste native Preview-Schnitt besitzt einen eigenen
   read-only Reiter und zeichnet Cut-, Fill- und Travel-Bewegungen direkt aus
   `EditorSession::job_preview`/`JobPlan`. Editor-Shortcuts, Gesten und Overlay
-  sind dort gesperrt. Rastertexturen und erklärende Preview-UI folgen separat.
+  sind dort gesperrt. Navigation bleibt per Mittelmaus/Mausrad möglich. Bilder
+  nutzen vorläufig die bereits gecachte Design-Textur, damit große Assets den
+  Reiter nicht durch unsichtbare Rasterberechnung blockieren. Die verarbeitete
+  Rastertextur und erklärende Preview-UI folgen separat.

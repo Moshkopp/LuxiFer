@@ -8,6 +8,7 @@ use luxifer_core::state::AppState;
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
+use crate::gpu::Gpu;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -228,10 +229,10 @@ impl ImageStore {
     pub fn draw<'a>(
         &'a self,
         rp: &mut wgpu::RenderPass<'a>,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        gpu: &Gpu,
         cam: &Camera,
         state: &AppState,
+        selection_only: bool,
         scratch: &'a mut Option<wgpu::Buffer>,
     ) {
         let (Some(pipeline), Some(uni_buf), Some(uni_bind)) = (
@@ -249,12 +250,15 @@ impl ImageStore {
             viewport: cam.viewport,
             _pad2: [0.0, 0.0],
         };
-        queue.write_buffer(uni_buf, 0, bytemuck::bytes_of(&uni));
+        gpu.queue.write_buffer(uni_buf, 0, bytemuck::bytes_of(&uni));
 
         // Alle Image-Quads in einen Vertex-Buffer (6 Vertices je Bild).
         let mut verts: Vec<ImgVertex> = Vec::new();
         let mut ranges: Vec<(String, u32, u32)> = Vec::new();
-        for s in &state.shapes {
+        for (index, s) in state.shapes.iter().enumerate() {
+            if selection_only && !state.selected.contains(&index) {
+                continue;
+            }
             if let luxifer_core::Geo::Image {
                 asset, x, y, w, h, ..
             } = &s.geo
@@ -282,11 +286,13 @@ impl ImageStore {
         if verts.is_empty() {
             return;
         }
-        let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("img_quads"),
-            contents: bytemuck::cast_slice(&verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let buf = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("img_quads"),
+                contents: bytemuck::cast_slice(&verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
         *scratch = Some(buf);
         let buf = scratch.as_ref().unwrap();
 

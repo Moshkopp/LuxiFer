@@ -8,6 +8,7 @@ use luxifer_application::EditorSession;
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::keyboard::KeyCode;
 
+use crate::tools::Drag;
 use crate::tools::Key;
 
 use super::state::CanvasState;
@@ -32,6 +33,40 @@ pub fn map_keycode(code: KeyCode) -> Option<Key> {
 }
 
 impl CanvasState {
+    /// Read-only Navigation der Preview: Mittelmaus-Pan und Mausrad-Zoom,
+    /// keinerlei Auswahl- oder Zeichenmutation.
+    pub fn handle_preview_pointer_event(&mut self, event: &WindowEvent) {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                let new = [position.x as f32, position.y as f32];
+                if matches!(self.drag, Drag::Pan) {
+                    self.cam
+                        .pan_pixels(new[0] - self.cursor[0], new[1] - self.cursor[1]);
+                }
+                self.cursor = new;
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: winit::event::MouseButton::Middle,
+                ..
+            } => {
+                self.drag = if *state == ElementState::Pressed {
+                    Drag::Pan
+                } else {
+                    Drag::None
+                };
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let steps = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => *y,
+                    MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
+                };
+                self.cam.zoom_at(1.12_f32.powf(steps), self.cursor);
+            }
+            _ => {}
+        }
+    }
+
     /// Behandelt ein reines Canvas-Zeiger-Event (Bewegen/Klicken/Scrollen) und
     /// meldet dessen Ergebnis (Shape entstanden, Doppelklick auf Shape). Für
     /// andere Event-Arten (Tastatur, Resize) ein leeres Ergebnis; die behandelt

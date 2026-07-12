@@ -186,6 +186,17 @@ fn job_preview_ist_abgeleitete_read_only_sicht() {
 }
 
 #[test]
+fn job_preview_rastert_bilder_nicht_unsichtbar_im_ui_thread() {
+    let mut state = AppState::new();
+    state.add_image("grosses-asset".into(), 0.0, 0.0, 500.0, 300.0);
+    let session = EditorSession::new(state);
+
+    let preview = session.job_preview(false);
+
+    assert!(preview.is_empty());
+}
+
+#[test]
 fn auswahloperation_ohne_voraussetzung_mutiert_nicht() {
     let mut session = EditorSession::default();
     let error = session.align(Align::Left).unwrap_err();

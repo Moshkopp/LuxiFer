@@ -29,7 +29,7 @@ Sammelmodul werden; Projekt-, Asset- und Laserabläufe erhalten eigene Services.
 | `get_scene` | Core/Application | `EditorSession`, Übergangszugriff | Session besitzt `AppState`; read-only Renderer-View später verengen |
 | `swatch_colors` | Core | vorhanden | direkt aus Core, kein UI-Duplikat |
 | `app_version` | Application | fehlt | Cargo-Paketversion ohne Tauri liefern |
-| `job_preview` | Core/Application | teilweise nativ | read-only `EditorSession::job_preview`, nativer Vorschau-Reiter für Cut/Fill/Travel; Rastertextur-Darstellung noch offen |
+| `job_preview` | Core/Application | teilweise nativ | read-only `EditorSession::job_preview`, Cut/Fill/Travel nativ; Bilder vorläufig aus GPU-Asset-Cache, verarbeitete Rastertextur noch offen |
 | `get_ui_settings` | Application | fehlt | plattformneutral laden, Defaults bei fehlender Datei |
 | `save_ui_settings` | Application | fehlt | validieren und fehlersicher speichern |
 | `undo` | Core/Application | über `EditorSession` | Basisschnitt getestet; Gesten-Undo folgt in Phase 2 |

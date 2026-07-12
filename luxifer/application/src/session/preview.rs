@@ -13,17 +13,10 @@ impl EditorSession {
         } else {
             self.state.shapes.clone()
         };
-        let dir = luxifer_core::assets_dir();
-        let plan =
-            luxifer_core::JobPlan::from_shapes_with_assets(&shapes, &self.state.layers, |asset| {
-                let (pixels, width, height) =
-                    luxifer_core::load_asset_luma(&dir, &asset.to_string()).ok()?;
-                Some((
-                    std::borrow::Cow::Owned(pixels),
-                    width as usize,
-                    height as usize,
-                ))
-            });
+        // Rasterbilder werden im ersten nativen Preview-Schnitt als bereits
+        // gecachte GPU-Textur dargestellt. Die teure Job-Rasterung folgt erst
+        // mit der dedizierten Raster-Preview-Pipeline.
+        let plan = luxifer_core::JobPlan::from_shapes(&shapes, &self.state.layers);
         luxifer_core::preview::JobPreview::from_plan(&plan)
     }
 }

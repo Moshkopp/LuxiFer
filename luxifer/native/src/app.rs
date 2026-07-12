@@ -206,6 +206,7 @@ impl App {
             // Doppelklick auf ein Objekt öffnet den passenden Editor.
             _ => {
                 if self.view == crate::tools::View::Preview {
+                    self.canvas.handle_preview_pointer_event(event);
                     return true;
                 }
                 let out = self.canvas.handle_pointer_event(&mut self.session, event);
