@@ -74,32 +74,6 @@ impl App {
         }
     }
 
-    pub fn open_laser_settings(&mut self, edit_active: bool) {
-        self.laser_settings = Some(if edit_active {
-            self.laser_backend
-                .active_profile()
-                .cloned()
-                .unwrap_or_default()
-        } else {
-            luxifer_core::LaserProfile::default()
-        });
-    }
-
-    pub fn save_laser_settings(&mut self) {
-        if let Some(profile) = self.laser_settings.take() {
-            let is_new = profile.id.is_empty();
-            self.laser_backend.save_profile(profile);
-            if is_new && self.laser_backend.active_profile().is_none() {
-                if let Some(profile) = self.laser_backend.registry.profiles.last() {
-                    let id = profile.id.clone();
-                    self.laser_backend.set_active(&id);
-                }
-            }
-        }
-    }
-
-    pub fn delete_laser_profile(&mut self, id: &str) {
-        self.laser_backend.delete_profile(id);
-        self.laser_settings = None;
-    }
+    // Die Laser-Profil-Verwaltung (öffnen/speichern/löschen) lebt in der
+    // Laser-Sektion des Einstellungen-Dialogs — siehe app/settings.rs.
 }

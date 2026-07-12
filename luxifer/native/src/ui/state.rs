@@ -126,10 +126,23 @@ pub struct ProjectBrowserState {
     pub cached: Option<CachedProjectDetail>,
 }
 
-/// Entwurf des Einstellungen-Dialogs: Kopie der GUI-Settings; Klemmen und
-/// Persistenz macht der Core (`UiSettings::sanitize`/`save`) beim Übernehmen.
+/// Sektion des Einstellungen-Dialogs (Navigation links, wie das Tauri-Modal).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SettingsSection {
+    Oberflaeche,
+    Laser,
+    Ueber,
+}
+
+/// Entwurf des Einstellungen-Dialogs: Kopie der GUI-Settings plus die aktive
+/// Sektion und ein optionaler Laser-Profil-Entwurf (Laser-Sektion). Klemmen
+/// und Persistenz macht der Core (`UiSettings::sanitize`/`save`) bzw. der
+/// `LaserService` beim Übernehmen.
 pub struct SettingsDialogState {
     pub draft: luxifer_core::UiSettings,
+    pub section: SettingsSection,
+    /// Gerade bearbeitetes Laser-Profil (None = nur Liste sichtbar).
+    pub laser_draft: Option<luxifer_core::LaserProfile>,
 }
 
 /// Entwurf der „Neues Projekt"-Maske (Strg+S ohne offenes Projekt bzw.

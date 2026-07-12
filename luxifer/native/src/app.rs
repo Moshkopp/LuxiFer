@@ -57,8 +57,6 @@ pub struct App {
     pub laser_backend: luxifer_application::LaserService,
     /// Zentraler, nutzerlesbarer Fehlerkanal der Anwendungsschicht.
     pub app_error: Option<AppError>,
-    /// Offener Laser-Einstellungen-Dialog (Profil-Bearbeitung) oder None.
-    pub laser_settings: Option<luxifer_core::LaserProfile>,
     /// Aktive Zeichenfarbe für die Palette-Markierung (aus dem Core gespiegelt).
     pub accent: [u8; 3],
     /// egui-Kontext (billiger Arc-Clone; auch für die Fokus-Gate-Abfrage).
@@ -148,7 +146,6 @@ impl App {
             laser: LaserUi::default(),
             laser_backend: luxifer_application::LaserService::load(),
             app_error: None,
-            laser_settings: None,
             accent,
             egui_ctx,
             left_w: 0.0,
@@ -268,7 +265,6 @@ impl App {
             || self.image_dialog.is_some()
             || self.geo_op_dialog.is_some()
             || self.text_dialog.is_some()
-            || self.laser_settings.is_some()
             || self.project_save_dialog.is_some()
             || self.settings_dialog.is_some()
             || self.pending_project.is_some()

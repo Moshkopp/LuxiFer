@@ -26,7 +26,7 @@ pub use action::UiAction;
 pub use state::{
     CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState,
     PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState, SettingsDialogState,
-    TextDialogState,
+    SettingsSection, TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -249,22 +249,6 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
-    // Laser-Einstellungen: Entwurf (Profil) als &mut; der Root persistiert bei
-    // Speichern/Löschen und schließt bei Abbrechen.
-    if app.laser_settings.is_some() {
-        let profile = app.laser_settings.as_mut().unwrap();
-        match dialogs::laser_settings_window(ctx, profile) {
-            dialogs::LaserDialogOutcome::None => {}
-            dialogs::LaserDialogOutcome::Save => app.save_laser_settings(),
-            dialogs::LaserDialogOutcome::Delete => {
-                let id = app.laser_settings.as_ref().unwrap().id.clone();
-                app.delete_laser_profile(&id);
-                app.laser_settings = None;
-            }
-            dialogs::LaserDialogOutcome::Cancel => app.laser_settings = None,
-        }
-    }
-
     // Text-Dialog: Entwurf als &mut, Font-Namen als reine Anzeigeliste.
     if app.text_dialog.is_some() {
         let font_names: Vec<String> = app.fonts.iter().map(|f| f.name.clone()).collect();
@@ -325,17 +309,23 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
-    // Einstellungen: Entwurf als &mut; Klemmen/Speichern macht der Core beim
-    // Übernehmen, native wendet Theme/Raster an.
-    if let Some(st) = app.settings_dialog.as_mut() {
-        match dialogs::settings_dialog_window(ctx, st) {
-            dialogs::DialogOutcome::None => {}
-            dialogs::DialogOutcome::Commit => {
+    // Einstellungen (sektioniert): GUI-Entwurf + Laser-Profil-Entwurf als
+    // &mut, die Registry als Lesekopie (Borrow-Trennung vom App-Root).
+    // Klemmen/Speichern machen Core bzw. LaserService beim Übernehmen.
+    if app.settings_dialog.is_some() {
+        let registry = app.laser_backend.registry.clone();
+        let st = app.settings_dialog.as_mut().unwrap();
+        match dialogs::settings_dialog_window(ctx, st, &registry) {
+            dialogs::SettingsOutcome::None => {}
+            dialogs::SettingsOutcome::Commit => {
                 if app.commit_settings_dialog() {
                     app.settings_dialog = None;
                 }
             }
-            dialogs::DialogOutcome::Cancel => app.settings_dialog = None,
+            dialogs::SettingsOutcome::Cancel => app.settings_dialog = None,
+            // Profil-Aktionen lassen den Dialog offen (Liste aktualisiert sich).
+            dialogs::SettingsOutcome::LaserSave => app.settings_laser_save(),
+            dialogs::SettingsOutcome::LaserDelete(id) => app.settings_laser_delete(&id),
         }
     }
 
