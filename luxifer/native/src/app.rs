@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use egui_wgpu::ScreenDescriptor;
 use luxifer_application::{AppError, EditorSession, LayerParams, LayerToggle};
 use luxifer_core::geometry::Geo;
 use luxifer_core::state::AppState;
@@ -15,16 +14,17 @@ use winit::window::Window;
 use crate::camera::Camera;
 use crate::canvas::CanvasState;
 use crate::gpu::Gpu;
-use crate::scene_geo::Vertex;
+use crate::render::Renderer;
 use crate::tools::{Drag, LaserUi};
 use crate::ui::{self, LayerDialogState, TextDialogState};
 
 pub struct App {
     pub window: Arc<Window>,
-    pub gpu: Gpu,
     pub session: EditorSession,
     /// Interaktions-/Kamerazustand des Canvas (Werkzeug, Geste, Cursor, Kamera).
     pub canvas: CanvasState,
+    /// GPU-Ressourcen und Frame-Ablauf.
+    renderer: Renderer,
     pub view: crate::tools::View,
     pub project: crate::project::ProjectBackend,
     /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
@@ -39,27 +39,12 @@ pub struct App {
     pub laser_settings: Option<luxifer_core::LaserProfile>,
     /// Aktive Zeichenfarbe für die Palette-Markierung (aus dem Core gespiegelt).
     pub accent: [u8; 3],
-    // egui.
+    /// egui-Kontext (billiger Arc-Clone; auch für die Fokus-Gate-Abfrage).
     egui_ctx: egui::Context,
-    egui_state: egui_winit::State,
-    egui_renderer: egui_wgpu::Renderer,
     // Panel-Breiten, damit der Canvas den freien Bereich kennt.
     pub left_w: f32,
     pub right_w: f32,
-    last_frame: std::time::Instant,
-    pub fps: f32,
-    // Vertex-Cache: die (teure) Scanline-Füllung wird NUR neu gebaut, wenn sich
-    // der Zustand ändert — nicht pro Frame. Pan/Zoom lassen die Vertices
-    // unberührt (die Projektion macht der Shader), daher bleiben sie gecacht.
-    verts: Vec<Vertex>,
-    /// Render-Revision (aus dem Core) beim letzten Vertex-Aufbau. Weicht die
-    /// aktuelle davon ab, wurde die Szene mutiert und der Cache muss neu.
-    last_render_rev: u64,
-    /// Ob egui im letzten Frame einen sofortigen weiteren Repaint wollte
-    /// (laufende Animation/Interaktion) — steuert die Render-Schleife.
-    wants_repaint: bool,
-    /// Bild-Texturen (asset-id → GPU-Textur) und ob neu geladen werden muss.
-    images: crate::image_gpu::ImageStore,
+    /// Externe Bild-Änderung (Import) → Textur-Sync im nächsten Frame nötig.
     image_dirty: bool,
     /// Offener Text-Dialog (Eingabe/Font/Größe) oder None.
     pub text_dialog: Option<TextDialogState>,
@@ -80,8 +65,8 @@ impl App {
             None,
             None,
         );
-        let egui_renderer =
-            egui_wgpu::Renderer::new(&gpu.device, gpu.config.format, None, 1, false);
+        let viewport = [gpu.config.width as f32, gpu.config.height as f32];
+        let renderer = Renderer::new(gpu, egui_state);
 
         let mut state = AppState::new();
         // Ein paar Start-Shapes, damit sofort etwas zu sehen ist.
@@ -105,14 +90,14 @@ impl App {
         let auto_import = std::env::args().nth(1);
 
         let mut cam = Camera::new();
-        cam.viewport = [gpu.config.width as f32, gpu.config.height as f32];
+        cam.viewport = viewport;
         cam.fit_bbox([0.0, 0.0, state.bed_w_mm, state.bed_h_mm], 0.85);
 
         let mut app = Self {
             window,
-            gpu,
             session: EditorSession::new(state),
             canvas: CanvasState::new(cam),
+            renderer,
             // Start-Ansicht per Env (Testhilfe): LUXI_TAB=laser.
             view: if std::env::var("LUXI_TAB").as_deref() == Ok("laser") {
                 crate::tools::View::Laser
@@ -128,17 +113,8 @@ impl App {
             laser_settings: None,
             accent,
             egui_ctx,
-            egui_state,
-            egui_renderer,
             left_w: 0.0,
             right_w: 0.0,
-            last_frame: std::time::Instant::now(),
-            fps: 0.0,
-            verts: Vec::new(),
-            // MAX erzwingt den Aufbau im ersten Frame (Core startet bei 0).
-            last_render_rev: u64::MAX,
-            wants_repaint: false,
-            images: crate::image_gpu::ImageStore::default(),
             image_dirty: false,
             text_dialog: None,
             layer_dialog: None,
@@ -157,7 +133,7 @@ impl App {
     pub fn window_event(&mut self, event: &WindowEvent) -> bool {
         // egui zuerst — verschluckt es das Event (Panel getroffen), geht es nicht
         // an den Canvas.
-        let resp = self.egui_state.on_window_event(&self.window, event);
+        let resp = self.renderer.on_window_event(&self.window, event);
         // Modifier immer mitschreiben — auch wenn egui das Event konsumiert,
         // sonst geht der Shift-/Ctrl-Status beim Zeichnen/Resizen verloren.
         if let WindowEvent::ModifiersChanged(m) = event {
@@ -175,7 +151,7 @@ impl App {
 
         match event {
             WindowEvent::Resized(sz) => {
-                self.gpu.resize(sz.width, sz.height);
+                self.renderer.resize(sz.width, sz.height);
                 self.canvas.cam.viewport = [sz.width as f32, sz.height as f32];
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -452,7 +428,7 @@ impl App {
             // Der neue State führt seinen eigenen Revisionszähler; erzwinge den
             // Vertex-Neuaufbau, statt auf einen zufälligen Zählervergleich zu
             // vertrauen.
-            self.last_render_rev = u64::MAX;
+            self.renderer.invalidate_scene();
             self.fit_all();
             self.view = crate::tools::View::Design;
         }
@@ -767,60 +743,29 @@ impl App {
     /// Ob nach dem letzten Frame sofort weiter gezeichnet werden soll
     /// (egui-Animation/Interaktion läuft). Steuert die Render-Schleife.
     pub fn egui_wants_repaint(&self) -> bool {
-        self.wants_repaint
+        self.renderer.wants_repaint()
+    }
+
+    /// Laufende Bildrate (für die Statuszeile).
+    pub fn fps(&self) -> f32 {
+        self.renderer.fps()
     }
 
     pub fn render(&mut self) {
-        // FPS.
-        let dt = self.last_frame.elapsed().as_secs_f32();
-        self.last_frame = std::time::Instant::now();
-        if dt > 0.0 {
-            self.fps = 0.9 * self.fps + 0.1 * (1.0 / dt);
-        }
+        // egui-Frame bauen (Panels): die Closure braucht `&mut App`, daher hier
+        // im Root. Der egui-Kontext ist ein billiger Arc-Clone.
+        let raw = self.renderer.take_egui_input(&self.window);
+        let mut full = self.egui_ctx.clone().run(raw, |ctx| ui::build(ctx, self));
+        let shapes = std::mem::take(&mut full.shapes);
+        let tris = self.egui_ctx.tessellate(shapes, full.pixels_per_point);
 
-        // egui-Frame bauen (Panels). Liefert Breiten zurück für den Canvas-Bereich.
-        let raw = self.egui_state.take_egui_input(&self.window);
-        let full = self.egui_ctx.clone().run(raw, |ctx| ui::build(ctx, self));
-        self.egui_state
-            .handle_platform_output(&self.window, full.platform_output);
-        // Will egui gleich wieder zeichnen (laufende Animation/Interaktion)?
-        // Delay == 0 → ja. So bleibt die Schleife nur bei Bedarf aktiv.
-        self.wants_repaint = full
-            .viewport_output
-            .values()
-            .any(|v| v.repaint_delay.is_zero());
-        let tris = self.egui_ctx.tessellate(full.shapes, full.pixels_per_point);
-
-        // Canvas-Vertices nur neu bauen+hochladen, wenn sich die Szene änderte
-        // (nicht bei reinem Pan/Zoom — das macht der Shader). Das Signal kommt
-        // aus dem Application-/Core-Zustand (Render-Revision), nicht mehr aus
-        // einem Per-Frame-Hash über alle Shapes. Das war der 3-fps-Killer.
-        let rev = self.session.render_rev();
-        let scene_changed = rev != self.last_render_rev;
-        if scene_changed {
-            self.last_render_rev = rev;
-            self.verts = crate::canvas::scene::base_vertices(&self.session);
-            let verts = std::mem::take(&mut self.verts);
-            self.gpu.upload_verts(&verts);
-            self.verts = verts;
-        }
-        self.gpu.upload_camera(&self.canvas.cam);
-        // Bild-Texturen laden (nur wenn neue Bilder dazukamen oder die Szene
-        // sich änderte).
-        if self.image_dirty || scene_changed {
-            self.images.sync(
-                &self.gpu.device,
-                &self.gpu.queue,
-                self.gpu.config.format,
-                &self.session,
-            );
-            self.image_dirty = false;
-        }
-        let count = self.verts.len() as u32;
-        // Overlay (Auswahl/Handles/Vorschau) jeden Frame neu — klein, kamera-
-        // abhängig. Die reine Aufbaulogik liegt in canvas::overlay.
-        let overlay =
-            crate::canvas::overlay::overlay_vertices(&crate::canvas::overlay::OverlayInput {
+        // Szenenzustand (nur lesend) an den Renderer übergeben; er baut/lädt die
+        // Caches und zeichnet Canvas + Overlay + egui.
+        let image_dirty = std::mem::take(&mut self.image_dirty);
+        let scene = crate::render::FrameScene {
+            session: &self.session,
+            cam: &self.canvas.cam,
+            overlay: crate::canvas::overlay::OverlayInput {
                 session: &self.session,
                 accent: self.accent,
                 drag: &self.canvas.drag,
@@ -829,81 +774,10 @@ impl App {
                 poly_pts: &self.canvas.poly_pts,
                 world_cursor: self.canvas.world(),
                 cam_scale: self.canvas.cam.scale,
-            });
-        self.gpu.upload_overlay(&overlay);
-
-        let frame = match self.gpu.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(_) => {
-                self.gpu
-                    .surface
-                    .configure(&self.gpu.device, &self.gpu.config);
-                return;
-            }
+            },
+            image_dirty,
         };
-        let view = frame.texture.create_view(&Default::default());
-        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
-
-        // egui-Texturen/Buffer aktualisieren.
-        let screen = ScreenDescriptor {
-            size_in_pixels: [self.gpu.config.width, self.gpu.config.height],
-            pixels_per_point: full.pixels_per_point,
-        };
-        for (id, delta) in &full.textures_delta.set {
-            self.egui_renderer
-                .update_texture(&self.gpu.device, &self.gpu.queue, *id, delta);
-        }
-        self.egui_renderer.update_buffers(
-            &self.gpu.device,
-            &self.gpu.queue,
-            &mut enc,
-            &tris,
-            &screen,
-        );
-
-        // Scratch-Buffer für die Bild-Quads (muss den Render-Pass überleben).
-        let mut img_scratch: Option<wgpu::Buffer> = None;
-        {
-            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("frame"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.05,
-                            g: 0.06,
-                            b: 0.08,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            // Bilder zuunterst, dann Linien/Fill, dann Handles.
-            self.images.draw(
-                &mut rp,
-                &self.gpu.device,
-                &self.gpu.queue,
-                &self.canvas.cam,
-                &self.session,
-                &mut img_scratch,
-            );
-            self.gpu.draw_canvas(&mut rp, count);
-            self.gpu.draw_overlay(&mut rp);
-            // egui obendrauf (eigener Lebenszeit-Scope via forget_lifetime).
-            let mut rp = rp.forget_lifetime();
-            self.egui_renderer.render(&mut rp, &tris, &screen);
-        }
-        self.gpu.queue.submit(Some(enc.finish()));
-        frame.present();
-
-        for id in &full.textures_delta.free {
-            self.egui_renderer.free_texture(id);
-        }
+        self.renderer.draw_frame(&self.window, scene, full, tris);
     }
 }
 

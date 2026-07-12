@@ -83,7 +83,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
 
     // Statuszeile unten (rein lesend).
     let (fps, tool_label, shapes, msg) = (
-        app.fps,
+        app.fps(),
         app.canvas.tool.label(),
         app.session.shapes.len(),
         app.project.msg.clone(),
