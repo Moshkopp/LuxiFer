@@ -625,3 +625,85 @@ fn pattern_fill_weist_fehler_stabil_ab() {
     assert_eq!(err.code(), "pattern_no_closed");
     assert_eq!(session.state().shapes.len(), shapes_before);
 }
+
+/// Erzeugt ein 20×20-PNG (weiß mit schwarzem 10×10-Quadrat in der Mitte) und
+/// importiert es in den Asset-Store des aktuellen Test-Datenverzeichnisses.
+fn import_test_square() -> String {
+    let img = image::GrayImage::from_fn(20, 20, |x, y| {
+        if (5..15).contains(&x) && (5..15).contains(&y) {
+            image::Luma([0u8])
+        } else {
+            image::Luma([255u8])
+        }
+    });
+    let mut png: Vec<u8> = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("PNG kodieren");
+    luxifer_core::import_image(&luxifer_core::assets_dir(), &png, "quadrat.png")
+        .expect("import_image")
+        .id
+}
+
+#[test]
+fn trace_image_erzeugt_geschlossene_konturen_in_mm() {
+    let _g = crate::test_env::with_temp_dir("trace");
+    let asset = import_test_square();
+
+    let mut state = AppState::new();
+    // 20 px auf 40 mm → 2 mm je Pixel; Quadrat liegt bei Pixel 5..15.
+    let img_idx = state.add_image(asset, 10.0, 10.0, 40.0, 40.0);
+    let mut session = EditorSession::new(state);
+    let shapes_before = session.state().shapes.len();
+
+    let idxs = session.trace_image(img_idx, 128, false).expect("Trace");
+    assert!(!idxs.is_empty());
+    assert!(session.state().shapes.len() > shapes_before);
+
+    // Kontur liegt in mm an der Bildbox: Quadrat ≈ (20..40) mm in beiden Achsen.
+    let (pts, closed) = session.state().shapes[idxs[0]].geo.outline_points();
+    assert!(closed, "Trace-Konturen sind geschlossen");
+    for (x, y) in pts {
+        assert!((19.0..=41.0).contains(&x) && (19.0..=41.0).contains(&y));
+    }
+
+    // Genau ein Undo-Schritt entfernt die Konturen wieder.
+    assert!(session.undo());
+    assert_eq!(session.state().shapes.len(), shapes_before);
+}
+
+#[test]
+fn trace_image_meldet_fehler_stabil() {
+    let _g = crate::test_env::with_temp_dir("trace_fehler");
+    let asset = import_test_square();
+
+    let mut state = AppState::new();
+    let img_idx = state.add_image(asset, 0.0, 0.0, 40.0, 40.0);
+    let rect_idx = state.add_shape(luxifer_core::Geo::Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 5.0,
+        h: 5.0,
+    });
+    let mut session = EditorSession::new(state);
+    let shapes_before = session.state().shapes.len();
+
+    // Kein Bild-Shape.
+    let err = session.trace_image(rect_idx, 128, false).unwrap_err();
+    assert_eq!(err.code(), "not_an_image");
+
+    // Schwelle findet nichts (alles heller als 0 → kein Vordergrund).
+    let err = session.trace_image(img_idx, 0, false).unwrap_err();
+    assert_eq!(err.code(), "trace_empty");
+    assert_eq!(
+        session.state().shapes.len(),
+        shapes_before,
+        "keine Mutation"
+    );
+
+    // Fehlendes Asset.
+    let mut state = AppState::new();
+    let idx = state.add_image("fehlt".into(), 0.0, 0.0, 10.0, 10.0);
+    let mut session = EditorSession::new(state);
+    let err = session.trace_image(idx, 128, false).unwrap_err();
+    assert_eq!(err.code(), "asset_read");
+}

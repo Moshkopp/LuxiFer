@@ -31,6 +31,78 @@ impl EditorSession {
         Ok(())
     }
 
+    /// Vektorisiert ein Bild-Shape (Trace): Konturen des Motivs als
+    /// geschlossene Polylinien in mm auf dem aktiven Zeichen-Layer, genau ein
+    /// Undo-Schritt. Die Tonwert-LUT des Bildes (Helligkeit/Kontrast/Gamma)
+    /// wirkt vor der Schwelle — was der Nutzer eingestellt hat, wird getract.
+    pub fn trace_image(
+        &mut self,
+        index: usize,
+        threshold: u8,
+        invert: bool,
+    ) -> Result<Vec<usize>, AppError> {
+        use luxifer_core::trace::{trace, TraceParams};
+        use luxifer_core::ImageMode;
+
+        let Some(Geo::Image {
+            asset,
+            x,
+            y,
+            w,
+            h,
+            params,
+        }) = self.state.shapes.get(index).map(|s| &s.geo)
+        else {
+            return Err(Self::no_image_shape(index));
+        };
+        let (asset, bx, by, bw, bh, params) = (asset.clone(), *x, *y, *w, *h, *params);
+
+        let (px, pw, ph) = luxifer_core::load_asset_luma(&luxifer_core::assets_dir(), &asset)
+            .map_err(|e| {
+                AppError::wrap(
+                    "asset_read",
+                    "Bild-Asset konnte nicht geladen werden.",
+                    e.to_string(),
+                )
+            })?;
+        // Nur die Tonwert-LUT anwenden (kein Dithering), dann tracen.
+        let lut = ImageParams {
+            mode: ImageMode::Grayscale,
+            ..params
+        };
+        let gray = luxifer_core::apply_params(&px, &lut, false);
+        let contours = trace(
+            &gray,
+            pw as usize,
+            ph as usize,
+            &TraceParams {
+                threshold,
+                invert,
+                ..Default::default()
+            },
+        );
+        if contours.is_empty() {
+            return Err(AppError::new(
+                "trace_empty",
+                "Keine Konturen gefunden — Schwelle anpassen?",
+            ));
+        }
+        // Pixel → mm über die Bildbox.
+        let (sx, sy) = (bw / pw as f64, bh / ph as f64);
+        let mm: Vec<(Vec<(f64, f64)>, bool)> = contours
+            .into_iter()
+            .map(|c| {
+                (
+                    c.into_iter()
+                        .map(|(px, py)| (bx + px * sx, by + py * sy))
+                        .collect(),
+                    true,
+                )
+            })
+            .collect();
+        Ok(self.state.add_polylines(mm))
+    }
+
     fn validate_image_params(params: &ImageParams) -> Result<(), AppError> {
         if !(0.1..=3.0).contains(&params.gamma) || !params.gamma.is_finite() {
             return Err(AppError::new(

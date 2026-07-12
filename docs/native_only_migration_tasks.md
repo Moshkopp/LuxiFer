@@ -359,7 +359,9 @@ Ziel: Vollständige Erzeugungs- und Bearbeitungsworkflows statt Import-Demos.
       `replace_text_block`).
 - [x] Fehlende/ungültige Fonts und nicht unterstützte Dateien behandelt
       (Font-Lesefehler/leere Konturen melden, Import-Fehler geloggt).
-- [ ] Trace-Workflow (Bild → Vektor) vollständig migrieren.
+- [x] Trace-Workflow (Bild → Vektor): `EditorSession::trace_image` mit
+      LUT-Vorverarbeitung; UI im Bild-Dialog (Schwelle/Invert); Fehlerpfade
+      getestet. (Bild-Zuschneiden bleibt eigenes offenes Feature.)
 
 Abnahme Phase 4:
 
@@ -619,8 +621,8 @@ Ausdrücklich **offen** (nicht als fertig behandeln):
 
 - Preview-Simulation (Scrubber/Abspielen): der Reiter selbst ist fertig
   (Cut/Fill/Travel, verarbeitete Rastertexturen, Legende — D2 abgeschlossen).
-- Trace (Bild → Vektor).
 - Bridge/Haltesteg (Stub) und Ecken-Fillet.
+- Bild-Zuschneiden (C3-Rest).
 - Bézier-Node-Editing (Anlegen vorhanden; Hit-Test/Knoten ziehen/teilen/
   löschen/glatt-eckig fehlen).
 - Projektbrowser: PNG-Thumbnails pro Version (Master-Detail-Browser mit
@@ -629,8 +631,8 @@ Ausdrücklich **offen** (nicht als fertig behandeln):
 - Live-Bildvorschau im Bildparameter-Dialog.
 - Demo-Startinhalt und „Aztec laden“ hinter einen Dev-Modus stellen.
 
-Nächste sinnvolle Schnitte in dieser Reihenfolge: Trace, Bridge (eigene
-Geste), dann Bézier-Node-Editing. Arbeitsgrundlage ist
+Nächste sinnvolle Schnitte in dieser Reihenfolge: Bridge (eigene Geste),
+dann Bézier-Node-Editing. Arbeitsgrundlage ist
 `docs/native_todo_bedienung.md`; nach jedem Schnitt diese Liste, die
 Bedienungsliste und die Funktionsmatrix pflegen.
 

@@ -11,3 +11,7 @@ luxifer-core = { path = "../core" }
 luxifer-driver-ruida = { path = "../drivers/ruida" }
 luxifer-driver-grbl = { path = "../drivers/grbl" }
 
+[dev-dependencies]
+# Nur für Tests: PNG-Testbilder erzeugen (Trace/Raster). Gleiche Version wie
+# der Core, verursacht also keinen zusätzlichen Build.
+image = { workspace = true }

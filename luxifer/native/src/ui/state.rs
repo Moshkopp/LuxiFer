@@ -12,10 +12,27 @@ pub struct LayerDialogState {
 }
 
 /// Entwurf des Bildparameter-Dialogs (Doppelklick auf ein Bild-Objekt).
+/// Enthält auch die Trace-Regler (Vektorisieren): reine Dialog-Drafts,
+/// erst „Vektorisieren" führt über die Session aus.
 pub struct ImageDialogState {
     /// Shape-Index des bearbeiteten Bildes.
     pub index: usize,
     pub params: luxifer_core::ImageParams,
+    /// Trace-Schwelle 0..=255 (Pixel darunter sind Motiv).
+    pub trace_threshold: u8,
+    /// Motiv/Hintergrund beim Trace tauschen (helles Motiv auf dunklem Grund).
+    pub trace_invert: bool,
+}
+
+impl ImageDialogState {
+    pub fn new(index: usize, params: luxifer_core::ImageParams) -> Self {
+        Self {
+            index,
+            params,
+            trace_threshold: 128,
+            trace_invert: false,
+        }
+    }
 }
 
 /// Entwurf des Text-Dialogs (Eingabe, Größe, gewählter Font-Index).

@@ -254,14 +254,17 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Bildparameter-Dialog: Entwurf als &mut; Speichern über die validierende
     // Session, Abbrechen verwirft.
     if let Some(state) = app.image_dialog.as_mut() {
-        match dialogs::image_dialog_window(ctx, &mut state.params) {
-            dialogs::DialogOutcome::None => {}
-            dialogs::DialogOutcome::Commit => {
+        match dialogs::image_dialog_window(ctx, state) {
+            dialogs::ImageDialogOutcome::None => {}
+            dialogs::ImageDialogOutcome::Save => {
                 if app.commit_image_dialog() {
                     app.image_dialog = None;
                 }
             }
-            dialogs::DialogOutcome::Cancel => app.image_dialog = None,
+            // Trace lässt den Dialog offen: Regler nachziehen und erneut
+            // vektorisieren ist der übliche Arbeitsfluss.
+            dialogs::ImageDialogOutcome::Trace => app.trace_image_dialog(),
+            dialogs::ImageDialogOutcome::Cancel => app.image_dialog = None,
         }
     }
 

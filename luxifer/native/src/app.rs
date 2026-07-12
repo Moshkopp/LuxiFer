@@ -497,10 +497,7 @@ impl App {
         if let Some(Geo::Image { params, .. }) =
             self.session.state().shapes.get(index).map(|s| &s.geo)
         {
-            self.image_dialog = Some(ImageDialogState {
-                index,
-                params: *params,
-            });
+            self.image_dialog = Some(ImageDialogState::new(index, *params));
         }
     }
 
@@ -520,6 +517,23 @@ impl App {
                 self.app_error = Some(error);
                 false
             }
+        }
+    }
+
+    /// Vektorisiert das Bild des offenen Dialogs (Trace) über die Session.
+    /// Der Dialog bleibt offen — Schwelle nachziehen und erneut tracen ist der
+    /// übliche Arbeitsfluss; jeder Lauf ist ein eigener Undo-Schritt.
+    pub fn trace_image_dialog(&mut self) {
+        let Some(st) = self.image_dialog.as_ref() else {
+            return;
+        };
+        let (index, threshold, invert) = (st.index, st.trace_threshold, st.trace_invert);
+        match self.session.trace_image(index, threshold, invert) {
+            Ok(idxs) => {
+                self.refresh_accent();
+                self.project_msg = format!("{} Konturen erzeugt.", idxs.len());
+            }
+            Err(error) => self.app_error = Some(error),
         }
     }
 

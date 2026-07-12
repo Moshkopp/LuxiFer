@@ -14,7 +14,7 @@ mod text;
 
 pub(super) use geo_op::geo_op_dialog_window;
 pub(super) use guard::guard_dialog;
-pub(super) use image::image_dialog_window;
+pub(super) use image::{image_dialog_window, ImageDialogOutcome};
 pub(super) use laser_settings::{laser_settings_window, LaserDialogOutcome};
 pub(super) use layer::layer_dialog_window;
 pub(super) use text::text_dialog_window;

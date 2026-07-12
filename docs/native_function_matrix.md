@@ -80,7 +80,7 @@ Quelle: `frontend/src-tauri/src/commands/shapes.rs`.
 | `hit_bezier_segment` | Core | **offen** | nur Core-Hit-Test, zoomabhängige Toleranz |
 | `toggle_node_smooth` | Core | **offen** | tangentiale Kopplung und Undo |
 | `delete_node` | Core | **offen** | Mindestknoten und Formlöschung klären |
-| `trace_image` | Core/Application | **offen** | Asset, Parameter, Ergebnis-/Fehlerzustand (Bedienungsliste C3) |
+| `trace_image` | Core/Application | über `EditorSession::trace_image` | Bild-Dialog (Schwelle/Invert); LUT wirkt vor der Schwelle; Fehlerpfade getestet |
 | `boolean_op` | Core/Application | über `EditorSession::boolean` | Union/Schnitt/Differenz mit Parameterdialog (`dialogs/geo_op.rs`) |
 | `offset_op` | Core/Application | über `EditorSession::offset` | Distanzdialog; Core hält harte Miter-Ecken bei konvexen Konturen |
 | `bridge_op` | Core/Application | **offen** (Stub) | UI meldet `not_migrated`; Geste, Breite, ungültige Treffer |

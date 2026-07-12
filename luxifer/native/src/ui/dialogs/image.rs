@@ -1,16 +1,29 @@
 //! Bildparameter-Dialog (Doppelklick auf ein Bild-Objekt). Bearbeitet die
-//! nicht-destruktiven Verarbeitungsparameter (ADR 0004); Native hält nur den
-//! Entwurf, Speichern läuft über `EditorSession::set_image_params`.
+//! nicht-destruktiven Verarbeitungsparameter (ADR 0004) und bietet das
+//! Vektorisieren (Trace) an; Native hält nur den Entwurf, Speichern läuft
+//! über `EditorSession::set_image_params`, Trace über
+//! `EditorSession::trace_image`.
 
-use luxifer_core::{ImageMode, ImageParams};
+use luxifer_core::ImageMode;
 
-use super::DialogOutcome;
+use super::super::state::ImageDialogState;
+
+/// Ergebnis des Bild-Dialogs. `Trace` vektorisiert das Bild mit den
+/// Trace-Reglern des Entwurfs (der Dialog bleibt dabei offen).
+#[derive(PartialEq, Eq)]
+pub(in crate::ui) enum ImageDialogOutcome {
+    None,
+    Save,
+    Cancel,
+    Trace,
+}
 
 pub(in crate::ui) fn image_dialog_window(
     ctx: &egui::Context,
-    p: &mut ImageParams,
-) -> DialogOutcome {
-    let mut outcome = DialogOutcome::None;
+    st: &mut ImageDialogState,
+) -> ImageDialogOutcome {
+    let mut outcome = ImageDialogOutcome::None;
+    let p = &mut st.params;
     egui::Window::new("Bild bearbeiten")
         .collapsible(false)
         .resizable(false)
@@ -79,12 +92,32 @@ pub(in crate::ui) fn image_dialog_window(
                 });
 
             ui.add_space(10.0);
+            ui.separator();
+            // Vektorisieren: Tonwert-LUT (oben) wirkt vor der Trace-Schwelle.
+            ui.strong("Vektorisieren (Trace)");
+            egui::Grid::new("image_trace")
+                .num_columns(2)
+                .spacing([8.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Schwelle");
+                    ui.add(egui::Slider::new(&mut st.trace_threshold, 0..=255));
+                    ui.end_row();
+                    ui.label("Invertieren");
+                    ui.checkbox(&mut st.trace_invert, "");
+                    ui.end_row();
+                });
+            if ui.button("Konturen erzeugen").clicked() {
+                outcome = ImageDialogOutcome::Trace;
+            }
+            ui.weak("Erzeugt geschlossene Konturen auf dem aktiven Zeichen-Layer.");
+
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.button("Speichern").clicked() {
-                    outcome = DialogOutcome::Commit;
+                    outcome = ImageDialogOutcome::Save;
                 }
                 if ui.button("Abbrechen").clicked() {
-                    outcome = DialogOutcome::Cancel;
+                    outcome = ImageDialogOutcome::Cancel;
                 }
             });
         });

@@ -37,7 +37,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 |----|--------|------|--------------|
 | C1 | ERLEDIGT | P1 | Bildtexturen werden nicht mehr von Scanlines der pinken Bild-Layer-Kennfarbe überzeichnet. |
 | C2 | UX | P2 | Bild-Doppelklick-Dialog hat keine Live-Vorschau der Einstellungen. |
-| C3 | FEHLT | P2 | Bildfunktionen fehlen: Vektorisieren (Trace), Zuschneiden. |
+| C3 | TEILWEISE | P2 | Vektorisieren (Trace) ist im Bild-Dialog (Schwelle/Invert, Konturen auf aktivem Zeichen-Layer, ein Undo je Lauf). Zuschneiden fehlt weiterhin. |
 
 ## D. Fills / Vorschau
 
@@ -95,6 +95,14 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   als stabilen Fehler sichtbar. Der Dialog erweitert den bestehenden
   GeoOp-Parameterdialog (vierte Variante); die Elementgröße ist bei „Linien"
   deaktiviert, weil sie dort keine Bedeutung hat.
+- C3/Trace (erledigt): `EditorSession::trace_image` lädt das Asset, wendet die
+  Tonwert-LUT des Bildes an (Helligkeit/Kontrast/Gamma wirken vor der
+  Schwelle) und tract über den Core; die Konturen landen skaliert in mm auf
+  dem aktiven Zeichen-Layer (ein Core-Undo über `add_polylines`). Die UI ist
+  eine „Vektorisieren"-Sektion im Bild-Dialog (Schwelle 0–255, Invertieren);
+  der Dialog bleibt nach dem Trace offen, damit man die Schwelle nachziehen
+  und erneut tracen kann. Fehlerpfade (kein Bild, fehlendes Asset, keine
+  Konturen) sind stabile `AppError`s ohne Mutation. Zuschneiden bleibt offen.
 - B1 (erledigt): `cavalier_contours` erzeugte standardmäßig runde Außen-Joins.
   Geschlossene konvexe Linienkonturen nutzen nun im Core Schnittpunkte
   benachbarter Parallelkanten (Miter); kollabierte Innenoffsets bleiben leer.
