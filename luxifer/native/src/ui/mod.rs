@@ -18,6 +18,7 @@ mod preview;
 mod project;
 mod state;
 mod status;
+mod toast;
 mod tools;
 mod topbar;
 
@@ -26,6 +27,7 @@ pub use state::{
     CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState,
     PendingProjectAction, ProjectBrowserState, TextDialogState,
 };
+pub use toast::Toasts;
 
 use egui::Color32;
 
@@ -88,15 +90,10 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
-    // Statuszeile unten (rein lesend).
-    let (fps, tool_label, shapes, msg) = (
-        app.fps(),
-        app.canvas.tool.label(),
-        app.session.shapes.len(),
-        app.project_msg.clone(),
-    );
+    // Statuszeile unten (rein lesend). Meldungen laufen über die Toasts.
+    let (fps, tool_label, shapes) = (app.fps(), app.canvas.tool.label(), app.session.shapes.len());
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-        status::status_bar(ui, fps, tool_label, shapes, &msg);
+        status::status_bar(ui, fps, tool_label, shapes);
     });
 
     match app.view {
@@ -353,6 +350,9 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             dialogs::DialogOutcome::Cancel => app.close_pending = false,
         }
     }
+
+    // Toasts zuletzt, damit sie über allen Panels liegen.
+    app.toasts.show(ctx);
 }
 
 /// Hält den Detail-/Vorschau-Cache des Projektbrowsers aktuell. Cache-Schlüssel
@@ -453,7 +453,6 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         .active_profile()
         .map(|p| p.id.clone())
         .unwrap_or_default();
-    let msg = app.laser_msg.clone();
     let actions = app.laser_backend.actions();
     let has = |a: JobAction| {
         actions
@@ -477,7 +476,6 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         active_id,
         slots,
         can_export,
-        msg,
     }
 }
 

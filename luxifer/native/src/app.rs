@@ -37,8 +37,9 @@ pub struct App {
     pub view: crate::tools::View,
     /// Projekt-/Versions-/Asset-Lebenszyklus (Application-Dienst).
     pub project: luxifer_application::ProjectService,
-    /// Kurze Erfolgs-/Statusmeldung zum Projekt (Fehler laufen über `app_error`).
-    pub project_msg: String,
+    /// Kurze Erfolgs-/Statusmeldungen als Toasts oben rechts (Fehler laufen
+    /// über `app_error` und bleiben stehen).
+    pub toasts: crate::ui::Toasts,
     /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
     pub new_project_name: String,
     /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
@@ -49,8 +50,6 @@ pub struct App {
     pub preview_show_travel: bool,
     pub laser: LaserUi,
     pub laser_backend: luxifer_application::LaserService,
-    /// Letzte Laser-Rückmeldung (Statuszeile im Panel).
-    pub laser_msg: String,
     /// Zentraler, nutzerlesbarer Fehlerkanal der Anwendungsschicht.
     pub app_error: Option<AppError>,
     /// Offener Laser-Einstellungen-Dialog (Profil-Bearbeitung) oder None.
@@ -134,14 +133,13 @@ impl App {
                 _ => crate::tools::View::Design,
             },
             project: luxifer_application::ProjectService::new(),
-            project_msg: String::new(),
+            toasts: Default::default(),
             new_project_name: String::new(),
             project_browser: Default::default(),
             preview_material: Default::default(),
             preview_show_travel: false,
             laser: LaserUi::default(),
             laser_backend: luxifer_application::LaserService::load(),
-            laser_msg: String::new(),
             app_error: None,
             laser_settings: None,
             accent,

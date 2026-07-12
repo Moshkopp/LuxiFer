@@ -61,7 +61,7 @@ impl App {
         match self.project.open(name) {
             Ok(state) => {
                 self.replace_editor_state(state);
-                self.project_msg = format!("Geöffnet: {name}");
+                self.toasts.success(format!("Geöffnet: {name}"));
                 self.view = crate::tools::View::Design;
             }
             Err(error) => self.app_error = Some(error),
@@ -80,7 +80,7 @@ impl App {
         match self.project.open_version(id) {
             Ok(state) => {
                 self.replace_editor_state(state);
-                self.project_msg = "Version geladen.".into();
+                self.toasts.success("Version geladen.");
                 self.view = crate::tools::View::Design;
             }
             Err(error) => self.app_error = Some(error),
@@ -100,9 +100,10 @@ impl App {
         match self.project.delete_version(id) {
             Ok(Some(state)) => {
                 self.replace_editor_state(state);
-                self.project_msg = "Version gelöscht — vorherige Version geladen.".into();
+                self.toasts
+                    .success("Version gelöscht — vorherige Version geladen.");
             }
-            Ok(None) => self.project_msg = "Version gelöscht.".into(),
+            Ok(None) => self.toasts.success("Version gelöscht."),
             Err(error) => self.app_error = Some(error),
         }
     }
@@ -114,7 +115,7 @@ impl App {
                 if self.project_browser.selected.as_deref() == Some(from) {
                     self.project_browser.selected = Some(to.to_string());
                 }
-                self.project_msg = format!("Umbenannt: {from} → {to}");
+                self.toasts.success(format!("Umbenannt: {from} → {to}"));
             }
             Err(error) => self.app_error = Some(error),
         }
@@ -124,7 +125,8 @@ impl App {
         match self.project.new_project(self.session.state(), name) {
             Ok(()) => {
                 self.session.mark_saved();
-                self.project_msg = format!("Neues Projekt: {}", name.trim());
+                self.toasts
+                    .success(format!("Neues Projekt: {}", name.trim()));
                 self.view = crate::tools::View::Design;
             }
             Err(error) => self.app_error = Some(error),
@@ -133,7 +135,7 @@ impl App {
 
     pub fn project_delete(&mut self, name: &str) {
         match self.project.delete(name) {
-            Ok(()) => self.project_msg = format!("Gelöscht: {name}"),
+            Ok(()) => self.toasts.success(format!("Gelöscht: {name}")),
             Err(error) => self.app_error = Some(error),
         }
     }
@@ -147,7 +149,9 @@ impl App {
             return;
         };
         match self.project.export(name, &target) {
-            Ok(()) => self.project_msg = format!("Exportiert: {}", target.display()),
+            Ok(()) => self
+                .toasts
+                .success(format!("Exportiert: {}", target.display())),
             Err(error) => self.app_error = Some(error),
         }
     }
@@ -156,7 +160,8 @@ impl App {
         match self.project.save(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
-                self.project_msg = format!("Gespeichert ({})", version.label);
+                self.toasts
+                    .success(format!("Gespeichert ({})", version.label));
             }
             Err(error) => self.app_error = Some(error),
         }
@@ -166,7 +171,8 @@ impl App {
         match self.project.save_version(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
-                self.project_msg = format!("Neue Version {}", version.label);
+                self.toasts
+                    .success(format!("Neue Version {}", version.label));
             }
             Err(error) => self.app_error = Some(error),
         }

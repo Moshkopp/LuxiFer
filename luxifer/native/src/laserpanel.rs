@@ -22,8 +22,6 @@ pub struct LaserView {
     pub slots: [Option<JobAction>; 6],
     /// Ob der aktive Treiber Datei-Export unterstützt.
     pub can_export: bool,
-    /// Letzte Treiber-Rückmeldung (Statuszeile).
-    pub msg: String,
 }
 
 /// Farb-Ton der Ampel-Kacheln.
@@ -155,13 +153,6 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     if view.can_export && ui.button("Als Datei exportieren").clicked() {
         actions.push(UiAction::LaserExport);
     }
-    // Treiber-Rückmeldung direkt bei den Job-Kacheln — dahin schaut man nach
-    // einem Klick auf Start/Stopp/Rahmen.
-    if !view.msg.is_empty() {
-        ui.add_space(4.0);
-        ui.label(RichText::new(&view.msg).small().weak());
-    }
-
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);

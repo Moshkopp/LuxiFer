@@ -32,18 +32,14 @@ pub(super) fn error_banner(
     actions
 }
 
-/// Statuszeile: FPS, aktives Werkzeug, Objektzahl und optionale Projektmeldung.
-/// Rein lesend.
-pub(super) fn status_bar(ui: &mut egui::Ui, fps: f32, tool: &str, shapes: usize, msg: &str) {
+/// Statuszeile: FPS, aktives Werkzeug und Objektzahl. Rein lesend —
+/// Erfolgs-/Statusmeldungen laufen über die Toasts oben rechts.
+pub(super) fn status_bar(ui: &mut egui::Ui, fps: f32, tool: &str, shapes: usize) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(format!("{fps:.0} fps")).monospace());
         ui.separator();
         ui.label(format!("Werkzeug: {tool}"));
         ui.separator();
         ui.label(format!("{shapes} Objekte"));
-        if !msg.is_empty() {
-            ui.separator();
-            ui.label(RichText::new(msg).weak());
-        }
     });
 }

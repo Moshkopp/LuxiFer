@@ -17,7 +17,6 @@ impl App {
 
     pub fn laser_select(&mut self, id: &str) {
         self.laser_backend.set_active(id);
-        self.laser_msg.clear();
     }
 
     pub fn laser_run(&mut self, action: luxifer_core::JobAction) {
@@ -28,7 +27,7 @@ impl App {
             .laser_backend
             .run_action(action, &shapes, &layers, start_mode, anchor)
         {
-            Ok(message) => self.laser_msg = message,
+            Ok(message) => self.toasts.success(message),
             Err(error) => self.app_error = Some(error),
         }
     }
@@ -56,7 +55,9 @@ impl App {
             .laser_backend
             .export_to(&path, &shapes, &layers, start_mode, anchor)
         {
-            Ok(()) => self.laser_msg = format!("Exportiert: {}", path.display()),
+            Ok(()) => self
+                .toasts
+                .success(format!("Exportiert: {}", path.display())),
             Err(error) => self.app_error = Some(error),
         }
     }

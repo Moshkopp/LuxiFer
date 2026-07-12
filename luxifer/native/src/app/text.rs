@@ -47,7 +47,7 @@ impl App {
             return false;
         };
         let Some(font_idx) = state.font_idx else {
-            self.laser_msg = "Kein Font gewählt".into();
+            self.toasts.error("Kein Font gewählt");
             return false;
         };
         let Some(font) = self.fonts.get(font_idx) else {
@@ -62,7 +62,7 @@ impl App {
         let font_data = match std::fs::read(&font_path) {
             Ok(data) => data,
             Err(error) => {
-                self.laser_msg = format!("Font lesen: {error}");
+                self.toasts.error(format!("Font lesen: {error}"));
                 return false;
             }
         };
@@ -86,11 +86,11 @@ impl App {
                 true
             }
             Ok(_) => {
-                self.laser_msg = "Text ergab keine Konturen".into();
+                self.toasts.error("Text ergab keine Konturen");
                 false
             }
             Err(error) => {
-                self.laser_msg = format!("Text-Fehler: {error}");
+                self.toasts.error(format!("Text-Fehler: {error}"));
                 false
             }
         }

@@ -44,7 +44,8 @@ impl App {
         match self.session.trace_image(index, threshold, invert) {
             Ok(indices) => {
                 self.refresh_accent();
-                self.project_msg = format!("{} Konturen erzeugt.", indices.len());
+                self.toasts
+                    .success(format!("{} Konturen erzeugt.", indices.len()));
             }
             Err(error) => self.app_error = Some(error),
         }
