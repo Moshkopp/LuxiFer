@@ -146,13 +146,15 @@ Root.
 
 Ziel: Ein kleiner, ehrlicher Editor, der zuverlässig benutzt werden kann.
 
-- [ ] Szene lesen und Render-Invalidierung aus Application-Zustand ableiten.
+- [x] Szene lesen und Render-Invalidierung aus Application-Zustand ableiten
+      (Core-`render_rev` statt Per-Frame-Hash; Auswahl liegt im Overlay).
 - [x] Auswahl: Klick, additiv, Rechteckauswahl, Auswahl löschen.
 - [x] Zeichnen: Rechteck, Ellipse, Linie, Polygon, Polylinie, Spline und Bézier
       einschließlich Abbruch und Abschluss.
 - [x] Transformieren: Verschieben, Skalieren, proportional Skalieren, Rotieren
       und Spiegeln laufen über `EditorSession`.
-- [ ] Transform-Handles und BBox ausschließlich aus kanonischer Core-Geometrie.
+- [x] Transform-Handles und BBox ausschließlich aus kanonischer Core-Geometrie
+      (`resize_to_cursor`/`keep_aspect`/`Handle::is_corner` im Core).
 - [x] Layer/Farbe: Aktivieren, Sichtbarkeit, Job-Aktivierung, Sperre, Air Assist
       und Reihenfolge laufen über `EditorSession`; Parameterdialog und
       numerische Layerwerte (`set_layer_params` mit Validierung) sind migriert.
@@ -165,14 +167,17 @@ Ziel: Ein kleiner, ehrlicher Editor, der zuverlässig benutzt werden kann.
       Undo-Schritt.
 - [x] Abbruch einer direkten Manipulationsgeste stellt den Ausgangszustand
       wieder her.
-- [ ] Native-spezifische Geometrie-/Snapshot-Duplikate aus `app.rs` entfernen,
-      sobald der Core/Application-Pfad sie ersetzt.
+- [x] Native-spezifische Geometrie-Duplikate aus `app.rs` entfernt
+      (`resize_target`/`keep_aspect`/`is_corner` → Core). Der Drag-Snapshot für
+      das Aufschaukel-Fix bleibt bewusst native Präsentationslogik.
 
 Abnahme Phase 2:
 
-- [ ] Automatisierte Tests für Auswahl- und Transformregeln.
+- [x] Automatisierte Tests für Auswahl- und Transformregeln (Core `interact`/
+      `state`, Application-Session).
 - [ ] Manueller Smoke-Test: zeichnen, mehrfach auswählen, bewegen, skalieren,
-      rotieren, Farbe ändern, sperren, Undo/Redo, löschen.
+      rotieren, Farbe ändern, sperren, Undo/Redo, löschen. (Offen: verlangt
+      interaktiven Fensterlauf; automatisierte Pfade sind grün.)
 - [ ] Keine bekannten Panics oder inkonsistenten Dirty-/Undo-Zustände.
 
 Zwischenstand 2026-07-12: `EditorSession` kapselt Klick-/additive Auswahl,
@@ -235,6 +240,30 @@ jetzt Strg (ein nacktes „z"/„y" war zuvor Undo/Redo). Die Ausführung
 Taste→Aktion-Zuordnung bleibt Native-Präsentation. Validierung: 268
 Workspace-Tests (17 Native, davon 6 Shortcut-Tests) und Clippy mit `-D warnings`
 grün; native App startet und rendert ohne Panic.
+
+Aufräumschnitt Render/Geometrie 2026-07-12 (Phase 2 abgeschlossen): Zwei
+verbliebene Aufräumpunkte erledigt.
+
+1. Render-Invalidierung aus dem Zustand statt Per-Frame-Hash: `AppState` führt
+   eine monoton steigende `render_rev`, die an derselben Stelle wie die
+   Bounds-Invalidierung steigt (jede Geometrie-/Struktur-Mutation, undo/redo).
+   Native vergleicht nur noch diese `u64` statt jeden Frame alle Shapes/Layer zu
+   hashen (`scene_fingerprint` entfällt). Die Auswahl-Akzentuierung wurde dazu
+   aus dem gecachten Vertex-Puffer ins Overlay gezogen (`selected_outlines`),
+   sodass der Cache rein an der Geometrie hängt; Auswahländerungen ohne Mutation
+   bauen ihn nicht mehr neu. `project_open` erzwingt den Neuaufbau, weil der
+   geladene State einen eigenen Zähler mitbringt. Nebenbei ein latenter
+   Bestandsfehler behoben: der Bild-Textur-Sync hing an einer stets falschen
+   Bedingung (`fp != last_fp` nach der Zuweisung) und lief faktisch nur über
+   `image_dirty`.
+2. Geometrie-Duplikate in den Core: `resize_to_cursor`, `keep_aspect` und
+   `Handle::is_corner` leben jetzt in `luxifer-core` (`interact.rs`) mit ihren
+   Tests; Native ruft nur noch auf. Der native Drag-Snapshot (Aufschaukel-Fix)
+   bleibt Präsentationslogik.
+
+Validierung: 270 Workspace-Tests (207 Core inkl. Revisions- und
+Geometrie-Tests, 12 Native) und Clippy mit `-D warnings` grün; native App
+startet und rendert ohne Panic.
 
 ## Phase 3 — Projekt, Versionen und Assets
 

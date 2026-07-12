@@ -18,9 +18,6 @@ use crate::scene_geo::{self, Vertex};
 use crate::tools::{Drag, LaserUi, Tool};
 use crate::ui;
 
-/// Ziel-Box beim Ziehen eines Skalier-Handles: die vom Handle bewegte(n)
-/// Kante(n) folgen dem Cursor `w` (mm), die gegenüberliegenden bleiben fix.
-/// Negative Größen werden normalisiert (Box klappt sauber um).
 /// Zeichnet ein gestricheltes Segment (Welt-mm) als kurze Striche. `scale` =
 /// Pixel pro mm, damit die Strichlänge am Bildschirm konstant wirkt.
 fn dashed_seg(v: &mut Vec<Vertex>, a: [f32; 2], b: [f32; 2], color: [f32; 4], scale: f32) {
@@ -41,89 +38,6 @@ fn dashed_seg(v: &mut Vec<Vertex>, a: [f32; 2], b: [f32; 2], color: [f32; 4], sc
         scene_geo::push_seg(v, s, e, color);
         t += step;
     }
-}
-
-/// Ist der Handle eine Ecke (skaliert beide Achsen)?
-pub fn is_corner(h: luxifer_core::Handle) -> bool {
-    use luxifer_core::Handle::*;
-    matches!(h, Nw | Ne | Sw | Se)
-}
-
-/// Zwingt die Ziel-Box aufs Start-Seitenverhältnis (proportionales Skalieren an
-/// Ecken). Der Faktor ist der betragsgrößere der beiden Achsen — so folgt die
-/// Ecke der Maus großzügig; die gegenüberliegende Ecke (fix bei `resize_target`)
-/// bleibt der Anker.
-pub fn keep_aspect(
-    start: luxifer_core::BBox,
-    handle: luxifer_core::Handle,
-    target: luxifer_core::BBox,
-) -> luxifer_core::BBox {
-    if start.w <= 0.0 || start.h <= 0.0 {
-        return target;
-    }
-    let fx = target.w / start.w;
-    let fy = target.h / start.h;
-    let f = if fx.abs() > fy.abs() { fx } else { fy };
-    let w = start.w * f;
-    let h = start.h * f;
-    // Anker = die gegenüberliegende Ecke (bleibt fix). x/y so, dass der Anker hält.
-    let anchor_x = if handle.moves_left() {
-        start.x + start.w
-    } else {
-        start.x
-    };
-    let anchor_y = if handle.moves_top() {
-        start.y + start.h
-    } else {
-        start.y
-    };
-    let x = if handle.moves_left() {
-        anchor_x - w
-    } else {
-        anchor_x
-    };
-    let y = if handle.moves_top() {
-        anchor_y - h
-    } else {
-        anchor_y
-    };
-    luxifer_core::BBox::new(
-        x.min(anchor_x),
-        y.min(anchor_y),
-        w.abs().max(0.1),
-        h.abs().max(0.1),
-    )
-}
-
-pub fn resize_target(
-    start: luxifer_core::BBox,
-    handle: luxifer_core::Handle,
-    w: [f64; 2],
-) -> luxifer_core::BBox {
-    let mut left = start.x;
-    let mut right = start.x + start.w;
-    let mut top = start.y;
-    let mut bottom = start.y + start.h;
-    if handle.moves_left() {
-        left = w[0];
-    }
-    if handle.moves_right() {
-        right = w[0];
-    }
-    if handle.moves_top() {
-        top = w[1];
-    }
-    if handle.moves_bottom() {
-        bottom = w[1];
-    }
-    let x = left.min(right);
-    let y = top.min(bottom);
-    luxifer_core::BBox::new(
-        x,
-        y,
-        (right - left).abs().max(0.1),
-        (bottom - top).abs().max(0.1),
-    )
 }
 
 pub struct App {
@@ -168,7 +82,9 @@ pub struct App {
     // der Zustand ändert — nicht pro Frame. Pan/Zoom lassen die Vertices
     // unberührt (die Projektion macht der Shader), daher bleiben sie gecacht.
     verts: Vec<Vertex>,
-    last_fp: u64,
+    /// Render-Revision (aus dem Core) beim letzten Vertex-Aufbau. Weicht die
+    /// aktuelle davon ab, wurde die Szene mutiert und der Cache muss neu.
+    last_render_rev: u64,
     /// Ob egui im letzten Frame einen sofortigen weiteren Repaint wollte
     /// (laufende Animation/Interaktion) — steuert die Render-Schleife.
     wants_repaint: bool,
@@ -283,7 +199,8 @@ impl App {
             last_frame: std::time::Instant::now(),
             fps: 0.0,
             verts: Vec::new(),
-            last_fp: 0,
+            // MAX erzwingt den Aufbau im ersten Frame (Core startet bei 0).
+            last_render_rev: u64::MAX,
             wants_repaint: false,
             images: crate::image_gpu::ImageStore::default(),
             image_dirty: false,
@@ -542,11 +459,11 @@ impl App {
                 orig,
             } => {
                 self.restore_snapshot(&orig);
-                let mut target = resize_target(start_box, handle, w);
+                let mut target = luxifer_core::resize_to_cursor(start_box, handle, w);
                 // Eck-Handles halten standardmäßig das Seitenverhältnis; Shift
                 // löst es (frei). Kanten-Handles skalieren nur eine Achse.
-                if is_corner(handle) && !self.shift_down {
-                    target = keep_aspect(start_box, handle, target);
+                if handle.is_corner() && !self.shift_down {
+                    target = luxifer_core::keep_aspect(start_box, handle, target);
                 }
                 self.session.scale_edit(start_box, target);
                 self.drag = Drag::Resize {
@@ -768,6 +685,10 @@ impl App {
             self.session.replace_state(state);
             self.refresh_accent();
             self.image_dirty = true;
+            // Der neue State führt seinen eigenen Revisionszähler; erzwinge den
+            // Vertex-Neuaufbau, statt auf einen zufälligen Zählervergleich zu
+            // vertrauen.
+            self.last_render_rev = u64::MAX;
             self.fit_all();
             self.view = crate::tools::View::Design;
         }
@@ -1079,37 +1000,6 @@ impl App {
         self.laser_settings = None;
     }
 
-    /// Billiger Fingerprint dessen, was die Vertices beeinflusst. Ändert er
-    /// sich, werden die Vertices neu gebaut — sonst bleibt der Cache. So kann
-    /// kein mutierender Pfad das Invalidieren „vergessen". Kamera ist bewusst
-    /// NICHT enthalten (Pan/Zoom projiziert der Shader, keine Neuberechnung).
-    fn scene_fingerprint(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.session.shapes.len().hash(&mut h);
-        self.session.selected.hash(&mut h);
-        self.poly_pts.len().hash(&mut h);
-        // Layer-Modus/Farbe/Sichtbarkeit beeinflussen Fill + Farbe.
-        for l in &self.session.layers {
-            l.color.hash(&mut h);
-            l.visible.hash(&mut h);
-            (l.mode as u8).hash(&mut h);
-        }
-        // Geometrie-Änderungen (Move/Draw/Import): BBox-Summe als grober Proxy,
-        // plus Rotation. Günstig und für Cache-Invalidierung ausreichend.
-        for s in &self.session.shapes {
-            let b = s.geo.bbox();
-            (b.x.to_bits(), b.y.to_bits(), b.w.to_bits(), b.h.to_bits()).hash(&mut h);
-            s.rotation.to_bits().hash(&mut h);
-            s.layer_id.hash(&mut h);
-        }
-        // Laufender Polygon-Zug (Live-Vorschau).
-        for p in &self.poly_pts {
-            (p.0.to_bits(), p.1.to_bits()).hash(&mut h);
-        }
-        h.finish()
-    }
-
     /// Halbe Handle-Kantenlänge in Welt-mm, damit sie am Bildschirm konstant
     /// ~7px groß wirken (unabhängig vom Zoom).
     fn handle_hw(&self) -> f32 {
@@ -1126,6 +1016,10 @@ impl App {
     /// Jeden Frame neu (kamera-abhängig), aber winzig.
     fn build_overlay(&self) -> Vec<Vertex> {
         let mut v = Vec::new();
+
+        // Selektierte Shapes in Akzentfarbe über die (auswahlfreien) gecachten
+        // Konturen legen — jeden Frame, damit der Vertex-Cache auswahlfrei bleibt.
+        v.extend(scene_geo::selected_outlines(&self.session, self.accent));
 
         let preview = [0.6, 0.8, 1.0, 0.9];
         // Live-Vorschau beim Aufziehen eines Rechtecks/einer Ellipse/Linie.
@@ -1228,6 +1122,18 @@ impl App {
             }
         }
 
+        // Auswahl-BBox toolunabhängig anzeigen (früher in build_vertices; jetzt
+        // im Overlay, damit der teure Vertex-Cache nicht an der Auswahl hängt).
+        if let Some(b) = self.session.selection_bbox() {
+            v.extend(scene_geo::rect_outline(
+                b.x as f32,
+                b.y as f32,
+                b.w as f32,
+                b.h as f32,
+                scene_geo::SEL_BOX_COLOR,
+            ));
+        }
+
         // Handles nur im Auswahl-Werkzeug und bei vorhandener Auswahl.
         if self.tool != Tool::Select {
             return v;
@@ -1262,21 +1168,14 @@ impl App {
         v
     }
 
-    /// Baut die Zeichendaten (Tisch-Gitter, Shapes, Auswahl-BBox, Polygon-Zug).
+    /// Baut die gecachten Zeichendaten (Tisch-Gitter, Shapes-Füllung/Kontur).
+    /// Die Auswahl-BBox liegt bewusst im Overlay, nicht hier — so hängt der
+    /// Vertex-Cache nur an der Geometrie (Render-Revision), nicht an der Auswahl.
     fn build_vertices(&self) -> Vec<Vertex> {
         let mut v = scene_geo::bed_grid(self.session.bed_w_mm as f32, self.session.bed_h_mm as f32);
         // Füllung zuerst (liegt unter den Konturen), dann die Umrisse.
         v.extend(scene_geo::fill_lines(&self.session));
-        v.extend(scene_geo::shape_lines(&self.session, self.accent));
-        if let Some(b) = self.session.selection_bbox() {
-            v.extend(scene_geo::rect_outline(
-                b.x as f32,
-                b.y as f32,
-                b.w as f32,
-                b.h as f32,
-                scene_geo::SEL_BOX_COLOR,
-            ));
-        }
+        v.extend(scene_geo::shape_lines(&self.session));
         // Der laufende Punkt-Zug (Polyline/Spline/Bézier/Polygon) wird im OVERLAY
         // gezeichnet (jeden Frame, damit das Gummiband der Maus folgt).
         v
@@ -1310,19 +1209,22 @@ impl App {
         let tris = self.egui_ctx.tessellate(full.shapes, full.pixels_per_point);
 
         // Canvas-Vertices nur neu bauen+hochladen, wenn sich die Szene änderte
-        // (nicht bei reinem Pan/Zoom — das macht der Shader). Das war der
-        // 3-fps-Killer: die Scanline-Füllung lief zuvor pro Frame.
-        let fp = self.scene_fingerprint();
-        if fp != self.last_fp {
-            self.last_fp = fp;
+        // (nicht bei reinem Pan/Zoom — das macht der Shader). Das Signal kommt
+        // aus dem Application-/Core-Zustand (Render-Revision), nicht mehr aus
+        // einem Per-Frame-Hash über alle Shapes. Das war der 3-fps-Killer.
+        let rev = self.session.render_rev();
+        let scene_changed = rev != self.last_render_rev;
+        if scene_changed {
+            self.last_render_rev = rev;
             self.verts = self.build_vertices();
             let verts = std::mem::take(&mut self.verts);
             self.gpu.upload_verts(&verts);
             self.verts = verts;
         }
         self.gpu.upload_camera(&self.cam);
-        // Bild-Texturen laden (nur wenn neue Bilder dazukamen).
-        if self.image_dirty || fp != self.last_fp {
+        // Bild-Texturen laden (nur wenn neue Bilder dazukamen oder die Szene
+        // sich änderte).
+        if self.image_dirty || scene_changed {
             self.images.sync(
                 &self.gpu.device,
                 &self.gpu.queue,
@@ -1433,36 +1335,6 @@ fn map_keycode(code: KeyCode) -> Option<crate::tools::Key> {
 
 #[cfg(test)]
 mod tests {
-    use super::resize_target;
-    use luxifer_core::{BBox, Handle};
-
-    #[test]
-    fn resize_se_zieht_rechte_untere_ecke() {
-        let start = BBox::new(0.0, 0.0, 100.0, 100.0);
-        // Se-Handle auf (150,120) ziehen: Ursprung bleibt, Box wird 150×120.
-        let t = resize_target(start, Handle::Se, [150.0, 120.0]);
-        assert!((t.x - 0.0).abs() < 1e-9 && (t.y - 0.0).abs() < 1e-9);
-        assert!((t.w - 150.0).abs() < 1e-9 && (t.h - 120.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn resize_nw_haelt_gegenueberliegende_ecke_fix() {
-        let start = BBox::new(0.0, 0.0, 100.0, 100.0);
-        // Nw auf (20,30): rechte-untere Ecke (100,100) bleibt fix.
-        let t = resize_target(start, Handle::Nw, [20.0, 30.0]);
-        assert!((t.x - 20.0).abs() < 1e-9 && (t.y - 30.0).abs() < 1e-9);
-        assert!((t.x + t.w - 100.0).abs() < 1e-9);
-        assert!((t.y + t.h - 100.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn resize_e_aendert_nur_breite() {
-        let start = BBox::new(10.0, 10.0, 50.0, 50.0);
-        let t = resize_target(start, Handle::E, [200.0, 999.0]);
-        assert!((t.y - 10.0).abs() < 1e-9 && (t.h - 50.0).abs() < 1e-9);
-        assert!((t.x + t.w - 200.0).abs() < 1e-9);
-    }
-
     /// Bild-Import-Kette: import_image (Store) → add_image → Geo::Image im State.
     /// Verifiziert die native Verdrahtung (Rendern selbst braucht die GPU).
     #[test]
@@ -1547,45 +1419,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn keep_aspect_haelt_verhaeltnis_und_anker() {
-        use super::{keep_aspect, resize_target};
-        use luxifer_core::Handle;
-        let start = BBox::new(0.0, 0.0, 100.0, 50.0); // 2:1
-                                                      // SE weit nach rechts ziehen (Höhe zieht wenig): frei wäre 300×60.
-        let free = resize_target(start, Handle::Se, [300.0, 60.0]);
-        let kept = keep_aspect(start, Handle::Se, free);
-        // Verhältnis muss 2:1 bleiben.
-        assert!(
-            (kept.w / kept.h - 2.0).abs() < 1e-6,
-            "Verhältnis {}",
-            kept.w / kept.h
-        );
-        // SE: obere-linke Ecke (0,0) bleibt Anker.
-        assert!((kept.x - 0.0).abs() < 1e-6 && (kept.y - 0.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn keep_aspect_nw_haelt_gegenecke() {
-        use super::{keep_aspect, resize_target};
-        use luxifer_core::Handle;
-        let start = BBox::new(0.0, 0.0, 100.0, 50.0);
-        // NW nach oben-links ziehen: Anker ist die untere-rechte Ecke (100,50).
-        let free = resize_target(start, Handle::Nw, [-100.0, -20.0]);
-        let kept = keep_aspect(start, Handle::Nw, free);
-        assert!((kept.w / kept.h - 2.0).abs() < 1e-6);
-        assert!(
-            (kept.x + kept.w - 100.0).abs() < 1e-6,
-            "rechte Kante {}",
-            kept.x + kept.w
-        );
-        assert!(
-            (kept.y + kept.h - 50.0).abs() < 1e-6,
-            "untere Kante {}",
-            kept.y + kept.h
-        );
-    }
-
     /// Reproduziert den Resize-Aufschaukel-Bug und beweist den Snapshot-Fix:
     /// Ohne Snapshot verdoppelt sich die Größe bei jedem scale_selection_to von
     /// derselben start_box. MIT Restore auf den Snapshot bleibt sie stabil.
@@ -1610,7 +1443,7 @@ mod tests {
             .collect();
 
         // Cursor bleibt konstant bei (150,100) — SE-Handle. 5 „Frames".
-        let target = resize_target(start, Handle::Se, [150.0, 100.0]);
+        let target = luxifer_core::resize_to_cursor(start, Handle::Se, [150.0, 100.0]);
         for _ in 0..5 {
             // Vor jedem Schritt Snapshot wiederherstellen (wie in on_cursor_move).
             for (i, sh) in &orig {

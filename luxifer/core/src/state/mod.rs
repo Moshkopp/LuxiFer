@@ -5,7 +5,7 @@
 //! manuell einen Layer an. Er klickt Farben; das System verwaltet Layer
 //! automatisch (`activate_color`) und räumt leere Layer weg (`remove_empty_layers`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crate::geometry::BBox;
 use crate::model::{Layer, Shape};
@@ -42,6 +42,11 @@ pub struct AppState {
     /// Abgeleiteter, nicht persistierter Geometrie-Cache für Interaktion.
     /// RefCell erlaubt lazy Aufbau in read-only Hit-Test-/BBox-Abfragen.
     shape_bounds: RefCell<Option<Vec<BBox>>>,
+    /// Monoton steigende Render-Revision: erhöht sich bei jeder Geometrie-/
+    /// Struktur-Mutation (an denselben Punkten wie die Bounds-Invalidierung).
+    /// Ein UI-Renderer vergleicht sie statt jeden Frame die Szene zu hashen.
+    /// Cell, weil `invalidate_shape_bounds` bewusst `&self` bleibt.
+    render_rev: Cell<u64>,
 }
 
 impl Default for AppState {
@@ -58,6 +63,7 @@ impl Default for AppState {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             shape_bounds: RefCell::new(None),
+            render_rev: Cell::new(0),
         }
     }
 }
@@ -98,6 +104,17 @@ impl AppState {
 
     pub(crate) fn invalidate_shape_bounds(&self) {
         *self.shape_bounds.borrow_mut() = None;
+        // Dieselbe Stelle markiert „Geometrie/Struktur geändert" für den
+        // Renderer: die Render-Revision steigt monoton mit.
+        self.render_rev.set(self.render_rev.get().wrapping_add(1));
+    }
+
+    /// Monoton steigende Render-Revision. Ändert sich genau dann, wenn eine
+    /// Mutation den Geometrie-Cache invalidiert. Ein Renderer invalidiert seinen
+    /// Vertex-Cache, sobald sich dieser Wert gegenüber dem letzten Frame ändert
+    /// — ohne die Szene selbst zu hashen.
+    pub fn render_rev(&self) -> u64 {
+        self.render_rev.get()
     }
 
     pub(crate) fn shape_bbox_cached(&self, index: usize) -> Option<BBox> {
@@ -187,6 +204,25 @@ mod tests {
         assert_eq!(s.shapes.len(), 1);
         assert_eq!(s.shapes[0].layer_id, 0);
         assert_eq!(s.selected, vec![0]);
+    }
+
+    #[test]
+    fn render_rev_steigt_bei_mutation_nicht_bei_read() {
+        let mut s = AppState::new();
+        let start = s.render_rev();
+        s.add_shape(rect());
+        let after_add = s.render_rev();
+        assert!(after_add > start, "Mutation muss die Revision erhöhen");
+        // Reine Lesezugriffe (BBox/Hit-Test) dürfen die Revision nicht bewegen.
+        let _ = s.selection_bbox();
+        assert_eq!(
+            s.render_rev(),
+            after_add,
+            "Read verändert die Revision nicht"
+        );
+        // Undo ist ebenfalls eine sichtbare Zustandsänderung → Revision steigt.
+        assert!(s.undo());
+        assert!(s.render_rev() > after_add);
     }
 
     #[test]

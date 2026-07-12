@@ -35,6 +35,11 @@ impl Handle {
         matches!(self, Handle::S | Handle::Sw | Handle::Se)
     }
 
+    /// Ist der Handle eine Ecke (skaliert beide Achsen)?
+    pub fn is_corner(&self) -> bool {
+        matches!(self, Handle::Nw | Handle::Ne | Handle::Sw | Handle::Se)
+    }
+
     /// Alle acht Handles mit ihrer Position an der Bounding-Box (Screen-frei, mm).
     pub fn positions(b: &BBox) -> [(Handle, (f64, f64)); 8] {
         let (x, y, w, h) = (b.x, b.y, b.w, b.h);
@@ -75,6 +80,79 @@ pub fn resize_bbox(start: BBox, handle: Handle, dx: f64, dy: f64) -> BBox {
         h += dy;
     }
     BBox::new(x, y, w, h)
+}
+
+/// Ziel-Box beim Ziehen eines Skalier-Handles auf die absolute Cursor-Position
+/// `cursor` (mm): die vom Handle bewegte(n) Kante(n) folgen dem Cursor, die
+/// gegenüberliegenden bleiben fix. Negative Größen werden normalisiert (Box
+/// klappt sauber um). Eine Mindestgröße von 0.1 mm verhindert eine Nullbox.
+pub fn resize_to_cursor(start: BBox, handle: Handle, cursor: [f64; 2]) -> BBox {
+    let mut left = start.x;
+    let mut right = start.x + start.w;
+    let mut top = start.y;
+    let mut bottom = start.y + start.h;
+    if handle.moves_left() {
+        left = cursor[0];
+    }
+    if handle.moves_right() {
+        right = cursor[0];
+    }
+    if handle.moves_top() {
+        top = cursor[1];
+    }
+    if handle.moves_bottom() {
+        bottom = cursor[1];
+    }
+    let x = left.min(right);
+    let y = top.min(bottom);
+    BBox::new(
+        x,
+        y,
+        (right - left).abs().max(0.1),
+        (bottom - top).abs().max(0.1),
+    )
+}
+
+/// Zwingt die Ziel-Box aufs Start-Seitenverhältnis (proportionales Skalieren an
+/// Ecken). Der Faktor ist der betragsgrößere der beiden Achsen — so folgt die
+/// Ecke der Maus großzügig; die gegenüberliegende Ecke (fix bei
+/// `resize_to_cursor`) bleibt der Anker.
+pub fn keep_aspect(start: BBox, handle: Handle, target: BBox) -> BBox {
+    if start.w <= 0.0 || start.h <= 0.0 {
+        return target;
+    }
+    let fx = target.w / start.w;
+    let fy = target.h / start.h;
+    let f = if fx.abs() > fy.abs() { fx } else { fy };
+    let w = start.w * f;
+    let h = start.h * f;
+    // Anker = die gegenüberliegende Ecke (bleibt fix). x/y so, dass der Anker hält.
+    let anchor_x = if handle.moves_left() {
+        start.x + start.w
+    } else {
+        start.x
+    };
+    let anchor_y = if handle.moves_top() {
+        start.y + start.h
+    } else {
+        start.y
+    };
+    let x = if handle.moves_left() {
+        anchor_x - w
+    } else {
+        anchor_x
+    };
+    let y = if handle.moves_top() {
+        anchor_y - h
+    } else {
+        anchor_y
+    };
+    BBox::new(
+        x.min(anchor_x),
+        y.min(anchor_y),
+        w.abs().max(0.1),
+        h.abs().max(0.1),
+    )
 }
 
 impl AppState {
@@ -195,6 +273,74 @@ mod tests {
     fn handle_positions_liefert_acht() {
         let b = BBox::new(0.0, 0.0, 10.0, 10.0);
         assert_eq!(Handle::positions(&b).len(), 8);
+    }
+
+    #[test]
+    fn resize_to_cursor_se_zieht_rechte_untere_ecke() {
+        let start = BBox::new(0.0, 0.0, 100.0, 100.0);
+        // Se-Handle auf (150,120) ziehen: Ursprung bleibt, Box wird 150×120.
+        let t = resize_to_cursor(start, Handle::Se, [150.0, 120.0]);
+        assert!((t.x - 0.0).abs() < 1e-9 && (t.y - 0.0).abs() < 1e-9);
+        assert!((t.w - 150.0).abs() < 1e-9 && (t.h - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resize_to_cursor_nw_haelt_gegenueberliegende_ecke_fix() {
+        let start = BBox::new(0.0, 0.0, 100.0, 100.0);
+        // Nw auf (20,30): rechte-untere Ecke (100,100) bleibt fix.
+        let t = resize_to_cursor(start, Handle::Nw, [20.0, 30.0]);
+        assert!((t.x - 20.0).abs() < 1e-9 && (t.y - 30.0).abs() < 1e-9);
+        assert!((t.x + t.w - 100.0).abs() < 1e-9);
+        assert!((t.y + t.h - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resize_to_cursor_e_aendert_nur_breite() {
+        let start = BBox::new(10.0, 10.0, 50.0, 50.0);
+        let t = resize_to_cursor(start, Handle::E, [200.0, 999.0]);
+        assert!((t.y - 10.0).abs() < 1e-9 && (t.h - 50.0).abs() < 1e-9);
+        assert!((t.x + t.w - 200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn keep_aspect_haelt_verhaeltnis_und_anker() {
+        let start = BBox::new(0.0, 0.0, 100.0, 50.0); // 2:1
+                                                      // SE weit nach rechts (Höhe zieht wenig): frei wäre 300×60.
+        let free = resize_to_cursor(start, Handle::Se, [300.0, 60.0]);
+        let kept = keep_aspect(start, Handle::Se, free);
+        // Verhältnis muss 2:1 bleiben.
+        assert!(
+            (kept.w / kept.h - 2.0).abs() < 1e-6,
+            "Verhältnis {}",
+            kept.w / kept.h
+        );
+        // SE: obere-linke Ecke (0,0) bleibt Anker.
+        assert!((kept.x - 0.0).abs() < 1e-6 && (kept.y - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn keep_aspect_nw_haelt_gegenecke() {
+        let start = BBox::new(0.0, 0.0, 100.0, 50.0);
+        // NW nach oben-links: Anker ist die untere-rechte Ecke (100,50).
+        let free = resize_to_cursor(start, Handle::Nw, [-100.0, -20.0]);
+        let kept = keep_aspect(start, Handle::Nw, free);
+        assert!((kept.w / kept.h - 2.0).abs() < 1e-6);
+        assert!(
+            (kept.x + kept.w - 100.0).abs() < 1e-6,
+            "rechte Kante {}",
+            kept.x + kept.w
+        );
+        assert!(
+            (kept.y + kept.h - 50.0).abs() < 1e-6,
+            "untere Kante {}",
+            kept.y + kept.h
+        );
+    }
+
+    #[test]
+    fn is_corner_erkennt_ecken() {
+        assert!(Handle::Se.is_corner() && Handle::Nw.is_corner());
+        assert!(!Handle::N.is_corner() && !Handle::E.is_corner());
     }
 
     #[test]

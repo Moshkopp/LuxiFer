@@ -43,7 +43,7 @@ pub use assets::{
 };
 pub use geo_ops::BoolOp;
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
-pub use interact::Handle;
+pub use interact::{keep_aspect, resize_to_cursor, Handle};
 pub use job::{
     Anchor, DriverError, JobLayer, JobParams, JobPlan, LayerWork, MachineDriver, MachineStatus,
     Path, StartMode,

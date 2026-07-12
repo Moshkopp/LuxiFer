@@ -46,24 +46,44 @@ fn world_outline(shape: &luxifer_core::model::Shape) -> (Vec<(f64, f64)>, bool) 
 
 /// Baut die Linien-Vertices (LineList) für alle sichtbaren Shapes. Selektierte
 /// Shapes bekommen die Akzentfarbe, sonst die Layer-Farbe.
-pub fn shape_lines(state: &AppState, accent: [u8; 3]) -> Vec<Vertex> {
+/// Konturen aller sichtbaren Shapes in Layer-Farbe. Bewusst OHNE Auswahl-
+/// Einfärbung: Die Akzentuierung selektierter Shapes liegt im Overlay
+/// (`selected_outlines`), damit dieser gecachte Puffer nur an der Geometrie
+/// hängt und nicht bei jeder Auswahländerung neu gebaut werden muss.
+pub fn shape_lines(state: &AppState) -> Vec<Vertex> {
     let mut v = Vec::new();
-    for (i, shape) in state.shapes.iter().enumerate() {
+    for shape in &state.shapes {
         let layer = state.layers.get(shape.layer_id);
         let visible = layer.map(|l| l.visible).unwrap_or(true);
         if !visible {
             continue;
         }
-        let selected = state.selected.contains(&i);
         let base = layer.map(|l| l.color).unwrap_or([200, 200, 200]);
-        let color = if selected {
-            col(accent, 1.0)
-        } else {
-            col(base, 1.0)
-        };
-
         let (pts, closed) = world_outline(shape);
-        push_polyline(&mut v, &pts, closed, color);
+        push_polyline(&mut v, &pts, closed, col(base, 1.0));
+    }
+    v
+}
+
+/// Konturen der aktuell selektierten Shapes in Akzentfarbe — jeden Frame im
+/// Overlay über die gecachten Konturen gezeichnet. Nur die Auswahl, daher
+/// billig; unsichtbare Layer bleiben ausgespart.
+pub fn selected_outlines(state: &AppState, accent: [u8; 3]) -> Vec<Vertex> {
+    let mut v = Vec::new();
+    for &i in &state.selected {
+        let Some(shape) = state.shapes.get(i) else {
+            continue;
+        };
+        let visible = state
+            .layers
+            .get(shape.layer_id)
+            .map(|l| l.visible)
+            .unwrap_or(true);
+        if !visible {
+            continue;
+        }
+        let (pts, closed) = world_outline(shape);
+        push_polyline(&mut v, &pts, closed, col(accent, 1.0));
     }
     v
 }
