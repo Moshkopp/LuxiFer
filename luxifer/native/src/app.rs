@@ -261,8 +261,15 @@ impl App {
     /// aktives Feld ließe sonst Delete/Werkzeugwechsel/Undo durch und würde die
     /// Szene hinter dem Dialog verändern.
     fn input_blocked(&self) -> bool {
-        self.egui_ctx.wants_keyboard_input()
-            || self.layer_dialog.is_some()
+        self.egui_ctx.wants_keyboard_input() || self.modal_open()
+    }
+
+    /// Ob gerade ein modaler Dialog offen ist. Solange das gilt, ignoriert der
+    /// UI-Root die von den (nicht modalen egui-)Panels gelieferten Aktionen —
+    /// sonst könnte man Undo/Werkzeugwechsel/Text… auslösen, während ein Dialog
+    /// seinen Entwurf bearbeitet, und die Szene würde sich darunter ändern.
+    pub fn modal_open(&self) -> bool {
+        self.layer_dialog.is_some()
             || self.image_dialog.is_some()
             || self.geo_op_dialog.is_some()
             || self.text_dialog.is_some()
@@ -357,6 +364,11 @@ impl App {
     /// bestehenden Methoden bzw. der `EditorSession`.
     pub fn dispatch(&mut self, action: crate::ui::UiAction) {
         use crate::ui::UiAction as A;
+        // Bei offenem modalem Dialog ignoriert der Root die (nicht modalen)
+        // Panel-Aktionen — nur die Fehleranzeige lässt sich noch schließen.
+        if self.modal_open() && action != A::DismissError {
+            return;
+        }
         match action {
             A::Align(kind) => self.align(kind),
             A::Distribute(kind) => self.distribute(kind),
