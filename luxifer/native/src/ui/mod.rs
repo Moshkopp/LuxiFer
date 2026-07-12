@@ -138,11 +138,15 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             egui::CentralPanel::default().show(ctx, |ui| project::project_browser(ui, app));
         }
         View::Design | View::Laser => {
+            let cur_tool = app.tool;
             let left = egui::SidePanel::left("tools")
                 .exact_width(96.0)
                 .resizable(false)
-                .show(ctx, |ui| tools::tools_panel(ui, app));
+                .show(ctx, |ui| tools::tools_panel(ui, cur_tool));
             app.left_w = left.response.rect.width();
+            for action in left.inner {
+                app.dispatch(action);
+            }
 
             let is_laser = app.view == View::Laser;
             let right = egui::SidePanel::right("inspector")

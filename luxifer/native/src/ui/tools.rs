@@ -3,7 +3,7 @@
 
 use egui::Color32;
 
-use crate::app::App;
+use super::action::UiAction;
 use crate::tools::Tool;
 
 /// Quadratischer Icon-Button (Werkzeugleiste). `on` = aktiv (Akzent),
@@ -65,14 +65,15 @@ fn tool_grid(ui: &mut egui::Ui, side: f32, gap: f32, cur: Tool, tools: &[Tool]) 
 }
 
 /// 2-spaltige Werkzeugleiste, 5 Gruppen wie die Tauri-ToolsPanel — nur Icons.
-pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
+/// `cur` = aktives Werkzeug (nur für die Markierung). Gibt die Absichten zurück.
+pub(super) fn tools_panel(ui: &mut egui::Ui, cur: Tool) -> Vec<UiAction> {
     use crate::tools::ToolAction as A;
+    let mut actions = Vec::new();
     ui.add_space(4.0);
     let full = ui.available_width();
     let gap = 4.0;
     let side = ((full - gap) / 2.0).clamp(24.0, 42.0);
 
-    let cur = app.tool;
     // Gruppe 1: Auswahl (breit über beide Spalten).
     if icon_button(
         ui,
@@ -82,7 +83,7 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
         cur == Tool::Select,
         false,
     ) {
-        app.tool = Tool::Select;
+        actions.push(UiAction::SelectTool(Tool::Select));
     }
     divider(ui);
     // Gruppe 2: Zeichnen & Formen.
@@ -101,24 +102,24 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
             Tool::Bezier,
         ],
     ) {
-        app.tool = t;
+        actions.push(UiAction::SelectTool(t));
     }
     // Text (Sofort-Aktion) + Node (Werkzeug) in derselben Gruppe.
     egui::Grid::new("tg_textnode")
         .spacing([gap, gap])
         .show(ui, |ui| {
             if icon_button(ui, side, "text", "Text einfügen (Text→Pfad)", false, false) {
-                app.open_text_dialog();
+                actions.push(UiAction::OpenTextDialog);
             }
             if icon_button(
                 ui,
                 side,
                 "node",
                 "Knoten bearbeiten",
-                app.tool == Tool::Node,
+                cur == Tool::Node,
                 false,
             ) {
-                app.tool = Tool::Node;
+                actions.push(UiAction::SelectTool(Tool::Node));
             }
             ui.end_row();
         });
@@ -129,11 +130,11 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
         .show(ui, |ui| {
             icon_button(ui, side, "trim", "Trimmen (Vorschau)", false, true);
             if icon_button(ui, side, "bridge", "Haltesteg (Klick+Ziehen)", false, false) {
-                app.begin_action(A::Bridge);
+                actions.push(UiAction::ToolAction(A::Bridge));
             }
             ui.end_row();
             if icon_button(ui, side, "boolean", "Boolean (Auswahl)", false, false) {
-                app.begin_action(A::Boolean);
+                actions.push(UiAction::ToolAction(A::Boolean));
             }
             if icon_button(
                 ui,
@@ -143,7 +144,7 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
                 false,
                 false,
             ) {
-                app.begin_action(A::Fillet);
+                actions.push(UiAction::ToolAction(A::Fillet));
             }
             ui.end_row();
             if icon_button(
@@ -154,7 +155,7 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
                 false,
                 false,
             ) {
-                app.begin_action(A::PatternFill);
+                actions.push(UiAction::ToolAction(A::PatternFill));
             }
             if icon_button(
                 ui,
@@ -164,7 +165,7 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
                 false,
                 false,
             ) {
-                app.begin_action(A::Offset);
+                actions.push(UiAction::ToolAction(A::Offset));
             }
             ui.end_row();
             if icon_button(
@@ -172,10 +173,10 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
                 side,
                 "measure",
                 "Messen (Klick+Ziehen)",
-                app.tool == Tool::Measure,
+                cur == Tool::Measure,
                 false,
             ) {
-                app.tool = Tool::Measure;
+                actions.push(UiAction::SelectTool(Tool::Measure));
             }
             ui.end_row();
         });
@@ -185,10 +186,10 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
         .spacing([gap, gap])
         .show(ui, |ui| {
             if icon_button(ui, side, "mirror-h", "Horizontal spiegeln", false, false) {
-                app.mirror_h();
+                actions.push(UiAction::MirrorH);
             }
             if icon_button(ui, side, "mirror-v", "Vertikal spiegeln", false, false) {
-                app.mirror_v();
+                actions.push(UiAction::MirrorV);
             }
             ui.end_row();
         });
@@ -205,7 +206,7 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
                 false,
                 false,
             ) {
-                app.insert_coasters(false);
+                actions.push(UiAction::InsertCoasters(false));
             }
             if icon_button(
                 ui,
@@ -215,10 +216,11 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
                 false,
                 false,
             ) {
-                app.insert_coasters(true);
+                actions.push(UiAction::InsertCoasters(true));
             }
             ui.end_row();
         });
+    actions
 }
 
 /// Dünner horizontaler Trenner zwischen Werkzeuggruppen.

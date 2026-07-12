@@ -92,7 +92,7 @@ impl Tool {
 
 /// Sofort-Befehl auf der Auswahl (kein Zeichenmodus). Entspricht den `action`-
 /// Werkzeugen der Tauri-ToolsPanel + den Arrange-Aktionen.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolAction {
     Boolean,
     Fillet,

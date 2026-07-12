@@ -623,6 +623,12 @@ impl App {
             A::NestFill(gap) => self.nest_fill(gap),
             A::PickColor(color) => self.pick_color(color),
             A::SelectShape(shape) => self.active_shape = shape,
+            A::SelectTool(tool) => self.tool = tool,
+            A::ToolAction(a) => self.begin_action(a),
+            A::OpenTextDialog => self.open_text_dialog(),
+            A::MirrorH => self.mirror_h(),
+            A::MirrorV => self.mirror_v(),
+            A::InsertCoasters(round) => self.insert_coasters(round),
         }
     }
 

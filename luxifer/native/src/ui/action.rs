@@ -9,6 +9,8 @@
 
 use luxifer_core::{Align, Distribute, PolyShape};
 
+use crate::tools::{Tool, ToolAction};
+
 /// Eine vom UI ausgelöste Absicht. Rein beschreibend — kein Verhalten.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UiAction {
@@ -28,4 +30,16 @@ pub enum UiAction {
     PickColor([u8; 3]),
     /// Aktive Polygon-Form wählen (Präsentationszustand).
     SelectShape(PolyShape),
+    /// Aktives Werkzeug wählen (Präsentationszustand).
+    SelectTool(Tool),
+    /// Sofort-Operation auf der Auswahl (Boolean/Fillet/Offset/…).
+    ToolAction(ToolAction),
+    /// Text-Dialog öffnen.
+    OpenTextDialog,
+    /// Auswahl horizontal spiegeln.
+    MirrorH,
+    /// Auswahl vertikal spiegeln.
+    MirrorV,
+    /// Untersetzer einfügen (`round` = rund statt eckig).
+    InsertCoasters(bool),
 }
