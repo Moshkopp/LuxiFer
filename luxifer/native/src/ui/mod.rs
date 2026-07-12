@@ -84,7 +84,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Statuszeile unten (rein lesend).
     let (fps, tool_label, shapes, msg) = (
         app.fps,
-        app.tool.label(),
+        app.canvas.tool.label(),
         app.session.shapes.len(),
         app.project.msg.clone(),
     );
@@ -109,7 +109,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             }
         }
         View::Design | View::Laser => {
-            let cur_tool = app.tool;
+            let cur_tool = app.canvas.tool;
             let left = egui::SidePanel::left("tools")
                 .exact_width(96.0)
                 .resizable(false)
@@ -152,8 +152,8 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             // Farbpalette (+ Form-Wähler beim Polygon-Werkzeug) als Dock am
             // unteren Canvas-Rand (nur Design), zentriert wie in der Tauri-App.
             if !is_laser {
-                let show_shapes = app.tool == Tool::Polygon;
-                let active_shape = app.active_shape;
+                let show_shapes = app.canvas.tool == Tool::Polygon;
+                let active_shape = app.canvas.active_shape;
                 let accent = app.accent;
                 let actions = egui::TopBottomPanel::bottom("palette_dock")
                     .show_separator_line(true)

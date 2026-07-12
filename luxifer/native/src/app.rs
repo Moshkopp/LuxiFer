@@ -13,6 +13,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Window;
 
 use crate::camera::Camera;
+use crate::canvas::CanvasState;
 use crate::gpu::Gpu;
 use crate::scene_geo::Vertex;
 use crate::tools::{Drag, LaserUi, Tool};
@@ -22,10 +23,8 @@ pub struct App {
     pub window: Arc<Window>,
     pub gpu: Gpu,
     pub session: EditorSession,
-    pub cam: Camera,
-    pub tool: Tool,
-    /// Aktive Polygon-Form (Dreieck/Stern/… — beim Polygon-Werkzeug aufgezogen).
-    pub active_shape: luxifer_core::PolyShape,
+    /// Interaktions-/Kamerazustand des Canvas (Werkzeug, Geste, Cursor, Kamera).
+    pub canvas: CanvasState,
     pub view: crate::tools::View,
     pub project: crate::project::ProjectBackend,
     /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
@@ -38,15 +37,8 @@ pub struct App {
     pub app_error: Option<AppError>,
     /// Offener Laser-Einstellungen-Dialog (Profil-Bearbeitung) oder None.
     pub laser_settings: Option<luxifer_core::LaserProfile>,
-    pub drag: Drag,
     /// Aktive Zeichenfarbe für die Palette-Markierung (aus dem Core gespiegelt).
     pub accent: [u8; 3],
-    cursor: [f32; 2],
-    space_down: bool,
-    ctrl_down: bool,
-    shift_down: bool,
-    // Polygon-Zug (Welt-Punkte), bis Doppelklick/Enter schließt.
-    poly_pts: Vec<(f64, f64)>,
     // egui.
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -120,9 +112,7 @@ impl App {
             window,
             gpu,
             session: EditorSession::new(state),
-            cam,
-            tool: Tool::Select,
-            active_shape: luxifer_core::PolyShape::Penta,
+            canvas: CanvasState::new(cam),
             // Start-Ansicht per Env (Testhilfe): LUXI_TAB=laser.
             view: if std::env::var("LUXI_TAB").as_deref() == Ok("laser") {
                 crate::tools::View::Laser
@@ -136,13 +126,7 @@ impl App {
             laser_msg: String::new(),
             app_error: None,
             laser_settings: None,
-            drag: Drag::None,
             accent,
-            cursor: [0.0, 0.0],
-            space_down: false,
-            ctrl_down: false,
-            shift_down: false,
-            poly_pts: Vec::new(),
             egui_ctx,
             egui_state,
             egui_renderer,
@@ -177,14 +161,14 @@ impl App {
         // Modifier immer mitschreiben — auch wenn egui das Event konsumiert,
         // sonst geht der Shift-/Ctrl-Status beim Zeichnen/Resizen verloren.
         if let WindowEvent::ModifiersChanged(m) = event {
-            self.ctrl_down = m.state().control_key();
-            self.shift_down = m.state().shift_key();
+            self.canvas.ctrl_down = m.state().control_key();
+            self.canvas.shift_down = m.state().shift_key();
         }
 
         if resp.consumed {
             // Trotzdem Cursor mitschreiben, damit Canvas-Koordinaten stimmen.
             if let WindowEvent::CursorMoved { position, .. } = event {
-                self.cursor = [position.x as f32, position.y as f32];
+                self.canvas.cursor = [position.x as f32, position.y as f32];
             }
             return resp.repaint;
         }
@@ -192,15 +176,15 @@ impl App {
         match event {
             WindowEvent::Resized(sz) => {
                 self.gpu.resize(sz.width, sz.height);
-                self.cam.viewport = [sz.width as f32, sz.height as f32];
+                self.canvas.cam.viewport = [sz.width as f32, sz.height as f32];
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if let Some(key) = map_keycode(code) {
                         let mods = crate::tools::Mods {
-                            ctrl: self.ctrl_down,
-                            shift: self.shift_down,
+                            ctrl: self.canvas.ctrl_down,
+                            shift: self.canvas.shift_down,
                         };
                         let blocked = self.input_blocked();
                         if let Some(shortcut) =
@@ -214,7 +198,7 @@ impl App {
             WindowEvent::CursorMoved { position, .. } => {
                 let new = [position.x as f32, position.y as f32];
                 self.on_cursor_move(new);
-                self.cursor = new;
+                self.canvas.cursor = new;
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 self.on_mouse(*button, *state == ElementState::Pressed);
@@ -224,15 +208,13 @@ impl App {
                     MouseScrollDelta::LineDelta(_, y) => *y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
                 };
-                self.cam.zoom_at(1.12_f32.powf(s), self.cursor);
+                self.canvas
+                    .cam
+                    .zoom_at(1.12_f32.powf(s), self.canvas.cursor);
             }
             _ => {}
         }
         true
-    }
-
-    fn world(&self) -> [f64; 2] {
-        self.cam.screen_to_world(self.cursor)
     }
 
     pub fn delete_selected(&mut self) {
@@ -275,10 +257,10 @@ impl App {
                 }
             }
             S::Cancel => {
-                self.poly_pts.clear();
+                self.canvas.poly_pts.clear();
                 if self.session.edit_active() {
                     self.session.cancel_edit();
-                    self.drag = Drag::None;
+                    self.canvas.drag = Drag::None;
                 } else {
                     self.session.clear_selection();
                 }
@@ -286,31 +268,31 @@ impl App {
             S::FinishPolygon => self.finish_polygon(),
             S::Undo => self.undo(),
             S::Redo => self.redo(),
-            S::SelectTool(tool) => self.tool = tool,
-            S::PanModifier(down) => self.space_down = down,
+            S::SelectTool(tool) => self.canvas.tool = tool,
+            S::PanModifier(down) => self.canvas.space_down = down,
         }
     }
 
     fn on_mouse(&mut self, button: MouseButton, pressed: bool) {
-        let w = self.world();
+        let w = self.canvas.world();
         match button {
             MouseButton::Middle => {
-                self.drag = if pressed { Drag::Pan } else { Drag::None };
+                self.canvas.drag = if pressed { Drag::Pan } else { Drag::None };
             }
             MouseButton::Left if pressed => {
-                if self.space_down {
-                    self.drag = Drag::Pan;
+                if self.canvas.space_down {
+                    self.canvas.drag = Drag::Pan;
                     return;
                 }
-                match self.tool {
+                match self.canvas.tool {
                     Tool::Select | Tool::Node => self.begin_select(w),
                     // Aufzieh-Werkzeuge (Zentrum/Ecke → Maus).
                     Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Line | Tool::Measure => {
-                        self.drag = Drag::DrawBox { start: w }
+                        self.canvas.drag = Drag::DrawBox { start: w }
                     }
                     // Punkt-für-Punkt-Werkzeuge sammeln in poly_pts.
                     Tool::Polyline | Tool::Spline | Tool::Bezier => {
-                        self.poly_pts.push((w[0], w[1]))
+                        self.canvas.poly_pts.push((w[0], w[1]))
                     }
                 }
             }
@@ -345,14 +327,14 @@ impl App {
         // Zuerst: wurde ein Transform-Handle der aktuellen Auswahl getroffen?
         if let Some(b) = self.session.selection_bbox() {
             // etwas großzügiger als sichtbar; Handle-Geometrie aus canvas::overlay.
-            let pick = crate::canvas::overlay::handle_hw(self.cam.scale) as f64 * 1.8;
+            let pick = crate::canvas::overlay::handle_hw(self.canvas.cam.scale) as f64 * 1.8;
             // Rotate-Handle?
-            let rp = crate::canvas::overlay::rotate_handle_pos(&b, self.cam.scale);
+            let rp = crate::canvas::overlay::rotate_handle_pos(&b, self.canvas.cam.scale);
             if (w[0] - rp[0]).hypot(w[1] - rp[1]) <= pick {
                 self.session.begin_edit();
                 let pivot = [b.x + b.w / 2.0, b.y + b.h / 2.0];
                 let angle = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
-                self.drag = Drag::Rotate {
+                self.canvas.drag = Drag::Rotate {
                     pivot,
                     start_angle: angle,
                     orig: self.snapshot_selection(),
@@ -363,7 +345,7 @@ impl App {
             for (handle, (hx, hy)) in luxifer_core::Handle::positions(&b) {
                 if (w[0] - hx).abs() <= pick && (w[1] - hy).abs() <= pick {
                     self.session.begin_edit();
-                    self.drag = Drag::Resize {
+                    self.canvas.drag = Drag::Resize {
                         handle,
                         start_box: b,
                         orig: self.snapshot_selection(),
@@ -373,31 +355,33 @@ impl App {
             }
         }
 
-        let tol = 4.0 / self.cam.scale as f64;
-        let hit = self.session.select_at(w[0], w[1], tol, self.shift_down);
-        if self.shift_down {
-            self.drag = Drag::None;
+        let tol = 4.0 / self.canvas.cam.scale as f64;
+        let hit = self
+            .session
+            .select_at(w[0], w[1], tol, self.canvas.shift_down);
+        if self.canvas.shift_down {
+            self.canvas.drag = Drag::None;
         } else if hit.is_some() {
             self.session.begin_edit();
-            self.drag = Drag::MoveShapes { last: w };
+            self.canvas.drag = Drag::MoveShapes { last: w };
         } else {
-            self.drag = Drag::Marquee { start: w };
+            self.canvas.drag = Drag::Marquee { start: w };
         }
     }
 
     fn on_cursor_move(&mut self, new: [f32; 2]) {
-        let dx = new[0] - self.cursor[0];
-        let dy = new[1] - self.cursor[1];
-        let w = self.cam.screen_to_world(new);
+        let dx = new[0] - self.canvas.cursor[0];
+        let dy = new[1] - self.canvas.cursor[1];
+        let w = self.canvas.cam.screen_to_world(new);
         // Erst die reinen Kamera-/Move-Fälle (kein Snapshot nötig).
-        match &mut self.drag {
+        match &mut self.canvas.drag {
             Drag::Pan => {
-                self.cam.pan_pixels(dx, dy);
+                self.canvas.cam.pan_pixels(dx, dy);
                 return;
             }
             Drag::MoveShapes { last } => {
                 let last = *last;
-                self.drag = Drag::MoveShapes { last: w };
+                self.canvas.drag = Drag::MoveShapes { last: w };
                 self.session.translate_edit(w[0] - last[0], w[1] - last[1]);
                 return;
             }
@@ -405,7 +389,7 @@ impl App {
         }
         // Resize/Rotate: immer vom Snapshot (Ausgangszustand) rechnen, damit sich
         // die Transformation nicht Schritt für Schritt aufschaukelt.
-        match std::mem::replace(&mut self.drag, Drag::None) {
+        match std::mem::replace(&mut self.canvas.drag, Drag::None) {
             Drag::Resize {
                 handle,
                 start_box,
@@ -415,11 +399,11 @@ impl App {
                 let mut target = luxifer_core::resize_to_cursor(start_box, handle, w);
                 // Eck-Handles halten standardmäßig das Seitenverhältnis; Shift
                 // löst es (frei). Kanten-Handles skalieren nur eine Achse.
-                if handle.is_corner() && !self.shift_down {
+                if handle.is_corner() && !self.canvas.shift_down {
                     target = luxifer_core::keep_aspect(start_box, handle, target);
                 }
                 self.session.scale_edit(start_box, target);
-                self.drag = Drag::Resize {
+                self.canvas.drag = Drag::Resize {
                     handle,
                     start_box,
                     orig,
@@ -434,18 +418,18 @@ impl App {
                 let a = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
                 let delta_deg = (a - start_angle).to_degrees();
                 self.session.rotate_edit(delta_deg);
-                self.drag = Drag::Rotate {
+                self.canvas.drag = Drag::Rotate {
                     pivot,
                     start_angle,
                     orig,
                 };
             }
-            other => self.drag = other,
+            other => self.canvas.drag = other,
         }
     }
 
     fn finish_drag(&mut self, w: [f64; 2]) {
-        match std::mem::replace(&mut self.drag, Drag::None) {
+        match std::mem::replace(&mut self.canvas.drag, Drag::None) {
             Drag::Marquee { start } => {
                 if (start[0] - w[0]).abs() > 1.0 || (start[1] - w[1]).abs() > 1.0 {
                     self.session.select_rect(start, w);
@@ -461,25 +445,29 @@ impl App {
 
     fn finish_box(&mut self, a: [f64; 2], b: [f64; 2]) {
         // Messen: nichts erzeugen (nur Anzeige während des Ziehens).
-        if self.tool == Tool::Measure {
+        if self.canvas.tool == Tool::Measure {
             return;
         }
         // Polygon: Form vom Zentrum `a` mit Radius = Abstand zur Maus aufziehen
         // (wie Tauri: ondrawpolygon(shape, cx, cy, r, rot)).
-        if self.tool == Tool::Polygon {
-            if self.session.add_polygon(self.active_shape, a, b).is_some() {
+        if self.canvas.tool == Tool::Polygon {
+            if self
+                .session
+                .add_polygon(self.canvas.active_shape, a, b)
+                .is_some()
+            {
                 self.refresh_accent();
             }
             return;
         }
         // Linie: 2-Punkt-Polyline (auch bei kleinem Zug erlaubt).
-        if self.tool == Tool::Line {
+        if self.canvas.tool == Tool::Line {
             if self.session.add_line(a, b).is_some() {
                 self.refresh_accent();
             }
             return;
         }
-        let shape = match self.tool {
+        let shape = match self.canvas.tool {
             Tool::Ellipse => BoxShape::Ellipse,
             _ => BoxShape::Rect,
         };
@@ -491,8 +479,8 @@ impl App {
     /// Schließt den punktbasierten Zug ab (Enter/Doppelklick). Je nach Werkzeug:
     /// Polygon (geschlossen), Polylinie (offen), Spline (glatt), Bézier (Feder).
     fn finish_polygon(&mut self) {
-        let pts = std::mem::take(&mut self.poly_pts);
-        let path = match self.tool {
+        let pts = std::mem::take(&mut self.canvas.poly_pts);
+        let path = match self.canvas.tool {
             Tool::Polyline => PointPath::Polyline,
             Tool::Spline => PointPath::Spline,
             Tool::Bezier => PointPath::Bezier,
@@ -575,8 +563,8 @@ impl App {
             A::Nest(gap) => self.nest(gap),
             A::NestFill(gap) => self.nest_fill(gap),
             A::PickColor(color) => self.pick_color(color),
-            A::SelectShape(shape) => self.active_shape = shape,
-            A::SelectTool(tool) => self.tool = tool,
+            A::SelectShape(shape) => self.canvas.active_shape = shape,
+            A::SelectTool(tool) => self.canvas.tool = tool,
             A::ToolAction(a) => self.begin_action(a),
             A::OpenTextDialog => self.open_text_dialog(),
             A::MirrorH => self.mirror_h(),
@@ -865,9 +853,9 @@ impl App {
         let b =
             luxifer_core::geometry::BBox::union_all(self.session.shapes.iter().map(|s| s.bbox()));
         if let Some(b) = b {
-            self.cam.fit_bbox([b.x, b.y, b.w, b.h], 0.85);
+            self.canvas.cam.fit_bbox([b.x, b.y, b.w, b.h], 0.85);
         } else {
-            self.cam.fit_bbox(
+            self.canvas.cam.fit_bbox(
                 [0.0, 0.0, self.session.bed_w_mm, self.session.bed_h_mm],
                 0.85,
             );
@@ -1041,7 +1029,7 @@ impl App {
             self.gpu.upload_verts(&verts);
             self.verts = verts;
         }
-        self.gpu.upload_camera(&self.cam);
+        self.gpu.upload_camera(&self.canvas.cam);
         // Bild-Texturen laden (nur wenn neue Bilder dazukamen oder die Szene
         // sich änderte).
         if self.image_dirty || scene_changed {
@@ -1060,12 +1048,12 @@ impl App {
             crate::canvas::overlay::overlay_vertices(&crate::canvas::overlay::OverlayInput {
                 session: &self.session,
                 accent: self.accent,
-                drag: &self.drag,
-                tool: self.tool,
-                active_shape: self.active_shape,
-                poly_pts: &self.poly_pts,
-                world_cursor: self.world(),
-                cam_scale: self.cam.scale,
+                drag: &self.canvas.drag,
+                tool: self.canvas.tool,
+                active_shape: self.canvas.active_shape,
+                poly_pts: &self.canvas.poly_pts,
+                world_cursor: self.canvas.world(),
+                cam_scale: self.canvas.cam.scale,
             });
         self.gpu.upload_overlay(&overlay);
 
@@ -1125,7 +1113,7 @@ impl App {
                 &mut rp,
                 &self.gpu.device,
                 &self.gpu.queue,
-                &self.cam,
+                &self.canvas.cam,
                 &self.session,
                 &mut img_scratch,
             );

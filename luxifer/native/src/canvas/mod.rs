@@ -11,3 +11,6 @@
 
 pub mod overlay;
 pub mod scene;
+pub mod state;
+
+pub use state::CanvasState;
