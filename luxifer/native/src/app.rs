@@ -21,6 +21,7 @@ use crate::ui::{
     TextDialogState,
 };
 
+mod image;
 mod text;
 
 pub struct App {
@@ -509,52 +510,6 @@ impl App {
         }
     }
 
-    /// Öffnet den Bildparameter-Dialog mit den aktuellen Werten des Bild-Shapes.
-    pub fn open_image_dialog(&mut self, index: usize) {
-        use luxifer_core::Geo;
-        if let Some(Geo::Image { params, .. }) =
-            self.session.state().shapes.get(index).map(|s| &s.geo)
-        {
-            self.image_dialog = Some(ImageDialogState::new(index, *params));
-        }
-    }
-
-    /// Übernimmt den Bildparameter-Entwurf über die Session (validiert, ein
-    /// Undo-Schritt). Erfolg → Dialog schließen; Fehler → offen + Fehlerkanal.
-    pub fn commit_image_dialog(&mut self) -> bool {
-        let Some(st) = self.image_dialog.as_ref() else {
-            return false;
-        };
-        let (index, params) = (st.index, st.params);
-        match self.session.set_image_params(index, params) {
-            Ok(()) => {
-                self.image_dirty = true;
-                true
-            }
-            Err(error) => {
-                self.app_error = Some(error);
-                false
-            }
-        }
-    }
-
-    /// Vektorisiert das Bild des offenen Dialogs (Trace) über die Session.
-    /// Der Dialog bleibt offen — Schwelle nachziehen und erneut tracen ist der
-    /// übliche Arbeitsfluss; jeder Lauf ist ein eigener Undo-Schritt.
-    pub fn trace_image_dialog(&mut self) {
-        let Some(st) = self.image_dialog.as_ref() else {
-            return;
-        };
-        let (index, threshold, invert) = (st.index, st.trace_threshold, st.trace_invert);
-        match self.session.trace_image(index, threshold, invert) {
-            Ok(idxs) => {
-                self.refresh_accent();
-                self.project_msg = format!("{} Konturen erzeugt.", idxs.len());
-            }
-            Err(error) => self.app_error = Some(error),
-        }
-    }
-
     /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset/Muster
     /// öffnen einen Parameterdialog; Bridge braucht eine eigene Geste und
     /// meldet das vorerst.
@@ -800,103 +755,6 @@ impl App {
                 self.project_msg = format!("Neue Version {}", v.label);
             }
             Err(error) => self.app_error = Some(error),
-        }
-    }
-
-    /// Öffnet einen nativen Datei-Dialog und importiert SVG/DXF über den Core.
-    /// Danach Kamera auf die neue Geometrie einpassen.
-    pub fn import_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Vektor", &["svg", "dxf"])
-            .pick_file()
-        {
-            self.import_path(&path);
-        }
-    }
-
-    /// Bild importieren (Asset-Store) und als Image-Shape platzieren.
-    pub fn import_image_dialog(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("Bild", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
-            .pick_file()
-        else {
-            return;
-        };
-        self.import_image_path(&path);
-    }
-
-    /// Bilddatei in den Asset-Store importieren und als Image-Shape platzieren.
-    fn import_image_path(&mut self, path: &std::path::Path) {
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) => {
-                log::error!("Bild lesen: {e}");
-                return;
-            }
-        };
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("bild")
-            .to_string();
-        match luxifer_core::import_image(&luxifer_core::assets_dir(), &bytes, &name) {
-            Ok(meta) => {
-                // Pixel → mm bei 254 DPI (10 px/mm), wie der Core-Default.
-                let w_mm = meta.width as f64 / 10.0;
-                let h_mm = meta.height as f64 / 10.0;
-                let idx = self
-                    .session
-                    .add_image(meta.id.clone(), 20.0, 20.0, w_mm, h_mm);
-                self.session.selected = vec![idx];
-                self.image_dirty = true;
-                self.fit_all();
-                log::info!(
-                    "Bild importiert: {} ({}×{})",
-                    meta.id,
-                    meta.width,
-                    meta.height
-                );
-            }
-            Err(e) => log::error!("Bild-Import fehlgeschlagen: {e}"),
-        }
-    }
-
-    /// Importiert eine Datei direkt nach Endung — Vektor (SVG/DXF) oder Bild.
-    /// Nutzt der „Aztec laden"-Schnellknopf und das CLI-Argument.
-    pub fn import_path(&mut self, path: &std::path::Path) {
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if matches!(
-            ext.as_str(),
-            "png" | "jpg" | "jpeg" | "bmp" | "gif" | "webp"
-        ) {
-            self.import_image_path(path);
-            return;
-        }
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) => {
-                log::error!("Datei lesen: {e}");
-                return;
-            }
-        };
-        match luxifer_core::import::import_vector(&bytes, &ext) {
-            Ok(contours) => {
-                let t = std::time::Instant::now();
-                self.session.add_polylines(contours);
-                self.refresh_accent();
-                self.fit_all();
-                log::info!(
-                    "Import {}: {} Shapes in {:?}",
-                    path.display(),
-                    self.session.shapes.len(),
-                    t.elapsed()
-                );
-            }
-            Err(e) => log::error!("Import fehlgeschlagen: {e}"),
         }
     }
 
