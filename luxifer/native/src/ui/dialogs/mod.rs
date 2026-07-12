@@ -5,12 +5,14 @@
 //! `&mut`-Draft (nicht `&mut App`) und meldet nur, ob der Nutzer übernehmen oder
 //! abbrechen will. Den Draft-Lebenszyklus (Übernahme/Verwerfen) führt der Root.
 
+mod geo_op;
 mod guard;
 mod image;
 mod laser_settings;
 mod layer;
 mod text;
 
+pub(super) use geo_op::geo_op_dialog_window;
 pub(super) use guard::guard_dialog;
 pub(super) use image::image_dialog_window;
 pub(super) use laser_settings::{laser_settings_window, LaserDialogOutcome};

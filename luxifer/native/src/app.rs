@@ -16,7 +16,10 @@ use crate::canvas::CanvasState;
 use crate::gpu::Gpu;
 use crate::render::Renderer;
 use crate::tools::{Drag, LaserUi};
-use crate::ui::{self, ImageDialogState, LayerDialogState, PendingProjectAction, TextDialogState};
+use crate::ui::{
+    self, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState, PendingProjectAction,
+    TextDialogState,
+};
 
 pub struct App {
     pub window: Arc<Window>,
@@ -55,6 +58,8 @@ pub struct App {
     pub layer_dialog: Option<LayerDialogState>,
     /// Offener Bildparameter-Dialog (Doppelklick auf Bild) oder None.
     pub image_dialog: Option<ImageDialogState>,
+    /// Offener Geometrie-Parameterdialog (Boolean/Offset/Fillet) oder None.
+    pub geo_op_dialog: Option<GeoOpDialogState>,
     /// Projektaktion, die auf Bestätigung wartet (Dirty-Guard) oder None.
     pub pending_project: Option<PendingProjectAction>,
     /// Ob der Nutzer das Fenster schließen will und der Dirty-Guard dafür einen
@@ -132,6 +137,7 @@ impl App {
             text_dialog: None,
             layer_dialog: None,
             image_dialog: None,
+            geo_op_dialog: None,
             pending_project: None,
             close_pending: false,
             should_exit: false,
@@ -254,6 +260,7 @@ impl App {
         self.egui_ctx.wants_keyboard_input()
             || self.layer_dialog.is_some()
             || self.image_dialog.is_some()
+            || self.geo_op_dialog.is_some()
             || self.text_dialog.is_some()
             || self.laser_settings.is_some()
     }
@@ -333,18 +340,6 @@ impl App {
     }
     pub fn nest_fill(&mut self, gap: f64) {
         let result = self.session.nest_fill(gap);
-        self.report(result);
-    }
-    pub fn boolean(&mut self, op: luxifer_core::BoolOp) {
-        let result = self.session.boolean(op);
-        self.report(result);
-    }
-    pub fn offset(&mut self, dist: f64) {
-        let result = self.session.offset(dist);
-        self.report(result);
-    }
-    pub fn fillet(&mut self, radius: f64) {
-        let result = self.session.fillet(radius);
         self.report(result);
     }
     pub fn selection_count(&self) -> usize {
@@ -471,15 +466,15 @@ impl App {
         }
     }
 
-    /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset laufen mit
-    /// sinnvollen Defaults (Parameter-Feinjustage folgt als Dialog); Bridge/
-    /// Muster brauchen Interaktion/mehr Parameter und melden das vorerst.
+    /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset öffnen einen
+    /// Parameterdialog (Variante bzw. Distanz/Radius); Bridge/Muster brauchen
+    /// Interaktion/mehr Parameter und melden das vorerst.
     pub fn begin_action(&mut self, a: crate::tools::ToolAction) {
         use crate::tools::ToolAction as A;
         match a {
-            A::Boolean => self.boolean(luxifer_core::BoolOp::Union),
-            A::Fillet => self.fillet(2.0),
-            A::Offset => self.offset(2.0),
+            A::Boolean => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Boolean)),
+            A::Fillet => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Fillet)),
+            A::Offset => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Offset)),
             A::PatternFill => {
                 self.app_error = Some(AppError::new(
                     "not_migrated",
@@ -491,6 +486,27 @@ impl App {
                     "not_migrated",
                     "Haltestege sind noch nicht migriert.",
                 ))
+            }
+        }
+    }
+
+    /// Führt die im Geometrie-Dialog parametrierte Operation über die Session
+    /// aus. Erfolg → Dialog schließen; Auswahl-/Voraussetzungsfehler → offen +
+    /// Fehlerkanal.
+    pub fn commit_geo_op(&mut self) -> bool {
+        let Some(st) = self.geo_op_dialog.as_ref() else {
+            return false;
+        };
+        let result = match st.kind {
+            GeoOpKind::Boolean => self.session.boolean(st.bool_op),
+            GeoOpKind::Offset => self.session.offset(st.distance),
+            GeoOpKind::Fillet => self.session.fillet(st.radius),
+        };
+        match result {
+            Ok(()) => true,
+            Err(error) => {
+                self.app_error = Some(error);
+                false
             }
         }
     }

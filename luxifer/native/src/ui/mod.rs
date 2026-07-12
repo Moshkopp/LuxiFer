@@ -21,7 +21,10 @@ mod tools;
 mod topbar;
 
 pub use action::UiAction;
-pub use state::{ImageDialogState, LayerDialogState, PendingProjectAction, TextDialogState};
+pub use state::{
+    GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState, PendingProjectAction,
+    TextDialogState,
+};
 
 use egui::Color32;
 
@@ -236,6 +239,20 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 }
             }
             dialogs::DialogOutcome::Cancel => app.image_dialog = None,
+        }
+    }
+
+    // Geometrie-Parameterdialog (Boolean/Offset/Fillet): Entwurf als &mut,
+    // Ausführung über die Session.
+    if let Some(st) = app.geo_op_dialog.as_mut() {
+        match dialogs::geo_op_dialog_window(ctx, st) {
+            dialogs::DialogOutcome::None => {}
+            dialogs::DialogOutcome::Commit => {
+                if app.commit_geo_op() {
+                    app.geo_op_dialog = None;
+                }
+            }
+            dialogs::DialogOutcome::Cancel => app.geo_op_dialog = None,
         }
     }
 

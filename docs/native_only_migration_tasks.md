@@ -311,15 +311,18 @@ Versionsliste/Detailansicht in der UI; atomisches Speichern bei Teilfehlern.
 
 Ziel: Vollständige Erzeugungs- und Bearbeitungsworkflows statt Import-Demos.
 
-- [ ] Nativen Dateidialog nur als Pfadlieferant behandeln.
-- [ ] SVG- und DXF-Import inklusive Warnungen/Fehlern migrieren.
-- [ ] Bildimport mit Asset-Anlage und Textur-Invalidierung migrieren.
-- [ ] Bildparameter: Modus, Schwelle, Helligkeit, Kontrast, Gamma und Invert.
-- [ ] Bildvorschau/Dithering ohne dauerhafte UI-Kopie des Assetzustands.
-- [ ] Systemfonts auflisten, Textvorschau, Text anlegen und Text editieren.
-- [ ] Fehlende/ungültige Fonts und nicht unterstützte Dateien verständlich
-      behandeln.
-- [ ] Trace-Workflow vollständig migrieren.
+- [x] Nativer Dateidialog ist nur Pfadlieferant (rfd; Abbruch mutiert nichts).
+- [x] SVG-/DXF-Import mit Fehlerbehandlung (`import_path` über den Core).
+- [x] Bildimport mit Asset-Anlage und Textur-Invalidierung (`image_dirty`).
+- [x] Bildparameter: Modus, Schwelle, Helligkeit, Kontrast, Gamma und Invert
+      (`EditorSession::set_image_params`, validiert; Dialog per Doppelklick).
+- [ ] Live-Bildvorschau/Dithering im Dialog (aktuell wirkt der Parameterwechsel
+      erst nach Übernahme über die Textur-Neuberechnung; Live-Vorschau offen).
+- [x] Systemfonts auflisten, Text anlegen und Text editieren (Doppelklick →
+      `replace_text_block`).
+- [x] Fehlende/ungültige Fonts und nicht unterstützte Dateien behandelt
+      (Font-Lesefehler/leere Konturen melden, Import-Fehler geloggt).
+- [ ] Trace-Workflow (Bild → Vektor) vollständig migrieren.
 
 Abnahme Phase 4:
 

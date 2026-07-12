@@ -39,6 +39,37 @@ impl Default for TextDialogState {
     }
 }
 
+/// Welche parametrierte Geometrieoperation der Dialog bearbeitet.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GeoOpKind {
+    Boolean,
+    Offset,
+    Fillet,
+}
+
+/// Entwurf des Geometrie-Parameterdialogs (Boolean-Variante, Offset-Distanz,
+/// Fillet-Radius). Reiner UI-Zustand; die Ausführung läuft über die Session.
+pub struct GeoOpDialogState {
+    pub kind: GeoOpKind,
+    /// Boolean-Variante (nur bei `Boolean`).
+    pub bool_op: luxifer_core::BoolOp,
+    /// Distanz in mm (Offset).
+    pub distance: f64,
+    /// Radius in mm (Fillet).
+    pub radius: f64,
+}
+
+impl GeoOpDialogState {
+    pub fn new(kind: GeoOpKind) -> Self {
+        Self {
+            kind,
+            bool_op: luxifer_core::BoolOp::Union,
+            distance: 2.0,
+            radius: 2.0,
+        }
+    }
+}
+
 /// Eine Projektaktion, die den aktuellen Editorzustand ersetzen würde und
 /// deshalb bei ungespeicherten Änderungen erst bestätigt werden muss
 /// (Dirty-Guard). Wird ausgeführt, sobald der Nutzer „Verwerfen" wählt.
