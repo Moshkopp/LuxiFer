@@ -7,7 +7,7 @@
 //! migrierten Panels ab. Panels, die noch `&mut App` erhalten, tragen hier noch
 //! nichts bei.
 
-use luxifer_core::{Align, Distribute};
+use luxifer_core::{Align, Distribute, PolyShape};
 
 /// Eine vom UI ausgelöste Absicht. Rein beschreibend — kein Verhalten.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -24,4 +24,8 @@ pub enum UiAction {
     Nest(f64),
     /// Bett mit der Auswahl füllen (Abstand mm).
     NestFill(f64),
+    /// Farbe aktivieren (Farbe = Layer).
+    PickColor([u8; 3]),
+    /// Aktive Polygon-Form wählen (Präsentationszustand).
+    SelectShape(PolyShape),
 }

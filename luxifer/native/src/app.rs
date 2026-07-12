@@ -621,6 +621,8 @@ impl App {
             A::Ungroup => self.ungroup(),
             A::Nest(gap) => self.nest(gap),
             A::NestFill(gap) => self.nest_fill(gap),
+            A::PickColor(color) => self.pick_color(color),
+            A::SelectShape(shape) => self.active_shape = shape,
         }
     }
 

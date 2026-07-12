@@ -161,17 +161,30 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             // Farbpalette (+ Form-Wähler beim Polygon-Werkzeug) als Dock am
             // unteren Canvas-Rand (nur Design), zentriert wie in der Tauri-App.
             if !is_laser {
-                egui::TopBottomPanel::bottom("palette_dock")
+                let show_shapes = app.tool == Tool::Polygon;
+                let active_shape = app.active_shape;
+                let accent = app.accent;
+                let actions = egui::TopBottomPanel::bottom("palette_dock")
                     .show_separator_line(true)
                     .show(ctx, |ui| {
+                        let mut actions = Vec::new();
                         ui.add_space(6.0);
-                        if app.tool == Tool::Polygon {
-                            ui.vertical_centered(|ui| palette::shape_picker(ui, app));
+                        if show_shapes {
+                            ui.vertical_centered(|ui| {
+                                actions.extend(palette::shape_picker(ui, active_shape))
+                            });
                             ui.add_space(4.0);
                         }
-                        ui.vertical_centered(|ui| palette::palette_panel(ui, app));
+                        ui.vertical_centered(|ui| {
+                            actions.extend(palette::palette_panel(ui, accent))
+                        });
                         ui.add_space(6.0);
-                    });
+                        actions
+                    })
+                    .inner;
+                for action in actions {
+                    app.dispatch(action);
+                }
             }
         }
     }

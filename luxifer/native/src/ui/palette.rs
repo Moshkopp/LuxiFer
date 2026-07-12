@@ -1,14 +1,18 @@
 //! Farbpalette und Form-Wähler (unteres Dock im Design-Reiter).
+//!
+//! Über die `UiAction`-Grenze (ADR 0011): beide Panels lesen nur ihren
+//! aktiven Wert und liefern Absichten zurück, statt `App` zu mutieren.
 
 use egui::{Color32, RichText};
-use luxifer_core::model::SWATCH_COLORS;
+use luxifer_core::{model::SWATCH_COLORS, PolyShape};
 
+use super::action::UiAction;
 use super::c32;
 use super::tools::icon_button;
-use crate::app::App;
 
 /// Form-Wähler für das Polygon-Werkzeug (Dreieck/Stern/… wie Tauri-ShapesPanel).
-pub(super) fn shape_picker(ui: &mut egui::Ui, app: &mut App) {
+/// `active` = aktuell gewählte Form (nur für die Markierung).
+pub(super) fn shape_picker(ui: &mut egui::Ui, active: PolyShape) -> Vec<UiAction> {
     use luxifer_core::PolyShape as P;
     let shapes = [
         (P::Tri, "tri"),
@@ -21,20 +25,23 @@ pub(super) fn shape_picker(ui: &mut egui::Ui, app: &mut App) {
         (P::Gear, "gear"),
         (P::Heart, "heart"),
     ];
+    let mut actions = Vec::new();
     ui.horizontal(|ui| {
         for (shape, icon) in shapes {
-            let on = app.active_shape == shape;
+            let on = active == shape;
             if icon_button(ui, 30.0, icon, "", on, false) {
-                app.active_shape = shape;
+                actions.push(UiAction::SelectShape(shape));
             }
         }
     });
+    actions
 }
 
-pub(super) fn palette_panel(ui: &mut egui::Ui, app: &mut App) {
+/// `active` = aktive Zeichenfarbe (nur für die Markierung des Swatches).
+pub(super) fn palette_panel(ui: &mut egui::Ui, active: [u8; 3]) -> Vec<UiAction> {
     ui.label(RichText::new("FARBE").small().weak());
     ui.add_space(6.0);
-    let active = app.accent;
+    let mut actions = Vec::new();
     ui.horizontal_wrapped(|ui| {
         for &sw in SWATCH_COLORS {
             let is_active = sw == active;
@@ -54,8 +61,9 @@ pub(super) fn palette_panel(ui: &mut egui::Ui, app: &mut App) {
                     .circle_stroke(rect.center(), r, (1.5, Color32::WHITE));
             }
             if resp.clicked() {
-                app.pick_color(sw);
+                actions.push(UiAction::PickColor(sw));
             }
         }
     });
+    actions
 }
