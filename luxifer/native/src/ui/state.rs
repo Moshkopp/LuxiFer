@@ -24,6 +24,8 @@ pub struct TextDialogState {
     pub size_mm: f64,
     /// Index in der Font-Liste, oder None (kein Font gewählt).
     pub font_idx: Option<usize>,
+    /// Shape-Index des editierten Textblocks, oder None (neuer Text).
+    pub edit_index: Option<usize>,
 }
 
 impl Default for TextDialogState {
@@ -32,6 +34,7 @@ impl Default for TextDialogState {
             text: "Text".into(),
             size_mm: 20.0,
             font_idx: None,
+            edit_index: None,
         }
     }
 }

@@ -205,15 +205,29 @@ impl App {
     }
 
     /// Öffnet den passenden Editor für einen doppelt angeklickten Shape:
-    /// Bildparameter bei einem Bild-Objekt (weitere Editoren folgen).
+    /// Bildparameter bei einem Bild-Objekt, Text-Editor bei einem Textblock.
     fn edit_shape(&mut self, index: usize) {
         use luxifer_core::Geo;
-        let is_image = matches!(
-            self.session.state().shapes.get(index).map(|s| &s.geo),
-            Some(Geo::Image { .. })
-        );
-        if is_image {
+        let shapes = &self.session.state().shapes;
+        let Some(hit) = shapes.get(index) else {
+            return;
+        };
+        if matches!(hit.geo, Geo::Image { .. }) {
             self.open_image_dialog(index);
+            return;
+        }
+        // Textblock: die Meta liegt am ersten Shape der Gruppe. Anker suchen.
+        let anchor = if hit.text_meta.is_some() {
+            Some(index)
+        } else {
+            hit.group_id.and_then(|g| {
+                shapes
+                    .iter()
+                    .position(|s| s.group_id == Some(g) && s.text_meta.is_some())
+            })
+        };
+        if let Some(a) = anchor {
+            self.open_text_editor(a);
         }
     }
 
@@ -630,6 +644,35 @@ impl App {
         self.text_dialog = Some(st);
     }
 
+    /// Öffnet den Text-Dialog zum Editieren eines bestehenden Textblocks
+    /// (Doppelklick). Füllt Text/Größe/Font aus der am Shape gespeicherten Meta.
+    pub fn open_text_editor(&mut self, index: usize) {
+        if self.fonts.is_empty() {
+            self.fonts = crate::fonts::list_fonts();
+        }
+        let Some(meta) = self
+            .session
+            .state()
+            .shapes
+            .get(index)
+            .and_then(|s| s.text_meta.clone())
+        else {
+            return;
+        };
+        // Font in der Liste anhand des Pfads wiederfinden (sonst erster Font).
+        let font_idx = self
+            .fonts
+            .iter()
+            .position(|f| f.path.to_string_lossy() == meta.font_path)
+            .or(if self.fonts.is_empty() { None } else { Some(0) });
+        self.text_dialog = Some(TextDialogState {
+            text: meta.text,
+            size_mm: meta.size_mm,
+            font_idx,
+            edit_index: Some(index),
+        });
+    }
+
     /// Setzt den Text als Pfad-Shapes (Text→Kontur über den Core) und platziert
     /// ihn. Gibt bei Erfolg true zurück (Dialog schließen).
     pub fn commit_text(&mut self) -> bool {
@@ -653,6 +696,7 @@ impl App {
                 return false;
             }
         };
+        let edit_index = st.edit_index;
         match luxifer_core::text::text_to_contours(&font_data, &text, size) {
             Ok(contours) if !contours.is_empty() => {
                 let meta = luxifer_core::TextMeta {
@@ -660,8 +704,16 @@ impl App {
                     font_path: font_path.to_string_lossy().to_string(),
                     size_mm: size,
                 };
-                let idxs = self.session.add_text_block(contours, meta);
-                self.session.selected = idxs;
+                if let Some(index) = edit_index {
+                    // Bestehenden Textblock atomar ersetzen.
+                    self.session.state_mut_for_migration().push_undo();
+                    self.session
+                        .state_mut_for_migration()
+                        .replace_text_block(index, contours, meta);
+                } else {
+                    let idxs = self.session.add_text_block(contours, meta);
+                    self.session.selected = idxs;
+                }
                 self.refresh_accent();
                 self.fit_all();
                 true
