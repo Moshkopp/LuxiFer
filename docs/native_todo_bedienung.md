@@ -57,8 +57,8 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | E5 | ERLEDIGT | P1 | Laser-Tab: Panel lief über den rechten Rand hinaus (Profilzeile zu breit), die Ebenenliste fehlte, und die Treiber-Rückmeldung stand unsichtbar ganz unten. Jetzt: Ebenenliste + Positionsfreigabe in eigenem linken Panel (resizierbar, scrollt), Laser-Bedienpanel rechts, Rückmeldung bei den Job-Kacheln. |
 | E6 | ERLEDIGT | P1 | Job-Buttons schlugen IMMER fehl („Laser-Aktion fehlgeschlagen [laser_action]"): Der LaserService rief nie `connect()` auf — jede Geräteaktion lief in `NotConnected`. Jetzt verbindet er vor verbindungsbedürftigen Aktionen (Export weiterhin ohne Gerät); das Fehlerbanner zeigt zusätzlich die technische Ursache. HW-verifiziert: Absolut fährt korrekt. |
 | E7 | ERLEDIGT | P1 | Startmodus „Aktuelle Position"/„Benutzerursprung" fuhr trotzdem absolut (an HW beobachtet): Dem Ruida-Job fehlten F-Block + zweiter BBox-Satz — ohne diese Register ignoriert der Controller das Startmodus-Byte der Preamble. **HW-verifiziert: Start fährt jetzt relativ korrekt.** |
-| E8 | ERLEDIGT | P1 | Rahmen/Gummiband ignorierten den Startmodus (fuhren immer die absolute Job-BBox ab, an HW beobachtet) und nullten die Leistung nicht. Jetzt Referenzlogik: Ankerpunkt der Rahmen-BBox landet auf Kopfposition bzw. Benutzerursprung; Leistungsregister werden im Rahmen-Paket genullt. **HW-Abnahme steht aus.** |
-| E9 | ERLEDIGT | P1 | Startmarker im Laser-Canvas fehlte: grünes Fadenkreuz am gewählten Job-Nullpunkt-Anker der Job-BBox (nur bei relativem Startmodus, wie in der Tauri-App). |
+| E8 | ERLEDIGT | P1 | Rahmen/Gummiband ignorierten den Startmodus (fuhren immer die absolute Job-BBox ab, an HW beobachtet) und nullten die Leistung nicht. Jetzt Referenzlogik: Ankerpunkt der Rahmen-BBox landet auf Kopfposition bzw. Benutzerursprung; Leistungsregister werden im Rahmen-Paket genullt. **HW-verifiziert.** |
+| E9 | ERLEDIGT | P1 | Startmarker im Laser-Canvas fehlte: grünes Fadenkreuz am gewählten Job-Nullpunkt-Anker der Job-BBox (nur bei relativem Startmodus, wie in der Tauri-App). HW-/Sichtabnahme durch den Nutzer bestätigt. |
 
 ## F. Header / Werkzeug-Zugänge
 
