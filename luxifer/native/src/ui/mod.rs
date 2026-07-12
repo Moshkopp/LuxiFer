@@ -25,7 +25,8 @@ mod topbar;
 pub use action::UiAction;
 pub use state::{
     CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState,
-    PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState, TextDialogState,
+    PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState, SettingsDialogState,
+    TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -42,7 +43,7 @@ pub(super) fn c32(rgb: [u8; 3]) -> Color32 {
 
 pub fn build(ctx: &egui::Context, app: &mut App) {
     use crate::tools::View;
-    apply_theme(ctx);
+    apply_theme(ctx, &app.ui_settings.theme);
 
     // Oben: Reiter | Undo/Redo + Datei-Aktionen | Projektname.
     let view = app.view;
@@ -324,6 +325,20 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
+    // Einstellungen: Entwurf als &mut; Klemmen/Speichern macht der Core beim
+    // Übernehmen, native wendet Theme/Raster an.
+    if let Some(st) = app.settings_dialog.as_mut() {
+        match dialogs::settings_dialog_window(ctx, st) {
+            dialogs::DialogOutcome::None => {}
+            dialogs::DialogOutcome::Commit => {
+                if app.commit_settings_dialog() {
+                    app.settings_dialog = None;
+                }
+            }
+            dialogs::DialogOutcome::Cancel => app.settings_dialog = None,
+        }
+    }
+
     // „Neues Projekt"-Maske: Entwurf als &mut; Anlegen über den validierenden
     // ProjectService (leerer Name → Fehler, Maske bleibt offen).
     if let Some(st) = app.project_save_dialog.as_mut() {
@@ -492,11 +507,20 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
     }
 }
 
+/// Skaliert einen Farbton auf eine Zielhelligkeit (für die Button-Fläche:
+/// die Intensität regelt, wie stark der gewählte Ton durchkommt).
+fn scale_rgb(hue: [u8; 3], f: f32) -> Color32 {
+    let s = |c: u8| (c as f32 * f).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(s(hue[0]), s(hue[1]), s(hue[2]))
+}
+
 /// Dunkles Theme, an den Svelte-Look angelehnt (kühles Blau-Grau).
 /// Theme nah am Tauri-Design (app.css): kühles Blau-Grau, Akzent nur am aktiven
 /// Element, sanfte Rundungen und ein bisschen mehr Luft. Bewusst ohne echtes
 /// Glas/Blur (das kann egui nicht), aber mit denselben Farbwerten.
-fn apply_theme(ctx: &egui::Context) {
+/// Akzent- und Buttonfarbe kommen aus den GUI-Settings (ADR 0002); mit den
+/// Default-Settings entspricht das exakt dem bisherigen festen Look.
+fn apply_theme(ctx: &egui::Context, theme: &luxifer_core::Theme) {
     use egui::{Rounding, Stroke};
     let bg = Color32::from_rgb(0x10, 0x12, 0x16); // --bg
     let panel = Color32::from_rgb(0x17, 0x1a, 0x20); // --panel
@@ -504,7 +528,17 @@ fn apply_theme(ctx: &egui::Context) {
     let border = Color32::from_rgb(0x2a, 0x2e, 0x36); // --border
     let text = Color32::from_rgb(0xec, 0xee, 0xf1); // --text
     let muted = Color32::from_rgb(0x9a, 0xa0, 0xa9); // --muted
-    let accent = Color32::from_rgb(0x3B, 0x82, 0xF6); // --accent
+
+    // Akzent: voller Farbton für Kanten/Text, Intensität steuert die Füllungen
+    // (Default 0.7 → 0.85/0.9, die bisherigen festen Werte).
+    let accent = c32(theme.accent.hue);
+    let ai = theme.accent.intensity as f32;
+    let accent_sel = accent.gamma_multiply((ai + 0.2).min(1.0));
+    let accent_fill = accent.gamma_multiply((ai + 0.15).min(1.0));
+    // Button-Fläche: Farbton auf Panel-Helligkeit skaliert (Default ≈ panel-2).
+    let bi = theme.button.intensity as f32;
+    let button_fill = scale_rgb(theme.button.hue, bi * 0.6);
+    let button_hover = scale_rgb(theme.button.hue, bi * 0.78);
 
     let mut v = egui::Visuals::dark();
     v.panel_fill = panel;
@@ -514,7 +548,7 @@ fn apply_theme(ctx: &egui::Context) {
     v.override_text_color = Some(text);
     v.window_stroke = Stroke::new(1.0, border);
     v.window_rounding = Rounding::same(12.0);
-    v.selection.bg_fill = accent.gamma_multiply(0.9);
+    v.selection.bg_fill = accent_sel;
     v.selection.stroke = Stroke::new(1.0, accent);
     v.hyperlink_color = accent;
 
@@ -523,25 +557,25 @@ fn apply_theme(ctx: &egui::Context) {
     v.widgets.noninteractive.bg_fill = panel;
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, muted);
     v.widgets.noninteractive.rounding = r;
-    v.widgets.inactive.bg_fill = panel2;
-    v.widgets.inactive.weak_bg_fill = panel2;
+    v.widgets.inactive.bg_fill = button_fill;
+    v.widgets.inactive.weak_bg_fill = button_fill;
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
     v.widgets.inactive.rounding = r;
     v.widgets.inactive.bg_stroke = Stroke::new(1.0, border);
     // Hover: leicht anheben.
-    v.widgets.hovered.bg_fill = Color32::from_rgb(0x25, 0x2a, 0x33);
-    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x25, 0x2a, 0x33);
+    v.widgets.hovered.bg_fill = button_hover;
+    v.widgets.hovered.weak_bg_fill = button_hover;
     v.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.5));
     v.widgets.hovered.rounding = r;
     // Aktiv/gedrückt: Akzent trägt.
-    v.widgets.active.bg_fill = accent.gamma_multiply(0.85);
-    v.widgets.active.weak_bg_fill = accent.gamma_multiply(0.85);
+    v.widgets.active.bg_fill = accent_fill;
+    v.widgets.active.weak_bg_fill = accent_fill;
     v.widgets.active.fg_stroke = Stroke::new(1.0, text);
     v.widgets.active.bg_stroke = Stroke::new(1.0, accent);
     v.widgets.active.rounding = r;
     // „open" (ComboBox aufgeklappt etc.)
-    v.widgets.open.bg_fill = panel2;
+    v.widgets.open.bg_fill = button_fill;
     v.widgets.open.rounding = r;
 
     ctx.set_visuals(v);

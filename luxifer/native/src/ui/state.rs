@@ -126,6 +126,12 @@ pub struct ProjectBrowserState {
     pub cached: Option<CachedProjectDetail>,
 }
 
+/// Entwurf des Einstellungen-Dialogs: Kopie der GUI-Settings; Klemmen und
+/// Persistenz macht der Core (`UiSettings::sanitize`/`save`) beim Übernehmen.
+pub struct SettingsDialogState {
+    pub draft: luxifer_core::UiSettings,
+}
+
 /// Entwurf der „Neues Projekt"-Maske (Strg+S ohne offenes Projekt bzw.
 /// „Neues Projekt…" im Projekt-Reiter): Name + Beschreibung. Kurzlebig —
 /// Anlegen läuft über den validierenden `ProjectService`.

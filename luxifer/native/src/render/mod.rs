@@ -39,6 +39,8 @@ pub struct FrameScene<'a> {
     pub preview_material: PreviewMaterial,
     /// Leerfahrten in der Vorschau zeichnen (Kennzahlen zählen immer).
     pub preview_show_travel: bool,
+    /// Hauptraster des Tisch-Gitters in mm (GUI-Settings).
+    pub grid_mm: f32,
 }
 
 pub struct Renderer {
@@ -233,7 +235,7 @@ impl Renderer {
         }
         if scene_changed {
             self.last_render_rev = rev;
-            let geometry = base_vertices(scene.session);
+            let geometry = base_vertices(scene.session, scene.grid_mm);
             self.background_end = geometry.background_end;
             self.verts = geometry.vertices;
             self.preview_legend = None;

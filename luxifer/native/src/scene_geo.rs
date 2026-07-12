@@ -222,37 +222,37 @@ pub fn fill_rect(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex>
     ]
 }
 
-pub fn bed_grid(w: f32, h: f32) -> Vec<Vertex> {
+/// `major_mm` = Hauptraster aus den GUI-Settings; das Feinraster ist ein
+/// Fünftel davon (wie das alte 10/50-Verhältnis).
+pub fn bed_grid(w: f32, h: f32, major_mm: f32) -> Vec<Vertex> {
     // Bett-Fläche zuunterst, etwas heller als der Fenster-Hintergrund.
     let mut v = fill_rect(0.0, 0.0, w, h, [0.10, 0.11, 0.13, 1.0]);
-    let minor = 10.0_f32;
-    let major = 50.0_f32;
+    let major = major_mm.max(1.0);
+    let minor = major / 5.0;
     let fine = [1.0, 1.0, 1.0, 0.05];
     let coarse = [1.0, 1.0, 1.0, 0.12];
 
-    // Vertikale Linien.
-    let mut x = 0.0;
-    while x <= w + 0.01 {
-        let is_major = (x % major).abs() < 0.01 || ((x % major) - major).abs() < 0.01;
-        push_seg(
-            &mut v,
-            [x, 0.0],
-            [x, h],
-            if is_major { coarse } else { fine },
-        );
-        x += minor;
+    // Linien über den Schritt-Index statt Modulo — bei krummen Rasterweiten
+    // driftet Float-Modulo und Hauptlinien würden zufällig „fein".
+    let mut i = 0u32;
+    loop {
+        let x = i as f32 * minor;
+        if x > w + 0.01 {
+            break;
+        }
+        let color = if i.is_multiple_of(5) { coarse } else { fine };
+        push_seg(&mut v, [x, 0.0], [x, h], color);
+        i += 1;
     }
-    // Horizontale Linien.
-    let mut y = 0.0;
-    while y <= h + 0.01 {
-        let is_major = (y % major).abs() < 0.01 || ((y % major) - major).abs() < 0.01;
-        push_seg(
-            &mut v,
-            [0.0, y],
-            [w, y],
-            if is_major { coarse } else { fine },
-        );
-        y += minor;
+    let mut i = 0u32;
+    loop {
+        let y = i as f32 * minor;
+        if y > h + 0.01 {
+            break;
+        }
+        let color = if i.is_multiple_of(5) { coarse } else { fine };
+        push_seg(&mut v, [0.0, y], [w, y], color);
+        i += 1;
     }
     // Bett-Rahmen kräftiger.
     for seg in rect_outline(0.0, 0.0, w, h, BED_COLOR) {

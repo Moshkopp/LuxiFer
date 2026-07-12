@@ -54,6 +54,8 @@ pub enum UiAction {
     MoveLayer { from: usize, to: usize },
     /// „Neues Projekt"-Maske (Name + Beschreibung) öffnen.
     OpenProjectSaveDialog,
+    /// Einstellungen-Dialog (Arbeitsplatz, Theme, Raster) öffnen.
+    OpenSettings,
     /// Aktuelles Projekt als neue Version speichern.
     SaveProjectVersion,
     /// Projekt mit diesem Namen öffnen.

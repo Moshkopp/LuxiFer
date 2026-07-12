@@ -25,6 +25,7 @@ mod editor;
 mod image;
 mod laser;
 mod project;
+mod settings;
 mod text;
 
 pub struct App {
@@ -42,6 +43,10 @@ pub struct App {
     pub toasts: crate::ui::Toasts,
     /// Offene „Neues Projekt"-Maske (Name + Beschreibung) oder None.
     pub project_save_dialog: Option<crate::ui::ProjectSaveDialogState>,
+    /// Persistente GUI-Einstellungen (Arbeitsplatz, Theme, Raster) — ADR 0002.
+    pub ui_settings: luxifer_core::UiSettings,
+    /// Offener Einstellungen-Dialog (Entwurf) oder None.
+    pub settings_dialog: Option<crate::ui::SettingsDialogState>,
     /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
     pub project_browser: crate::ui::ProjectBrowserState,
     /// Material-Vorlage der Laser-Vorschau (Präsentationszustand).
@@ -135,6 +140,8 @@ impl App {
             project: luxifer_application::ProjectService::new(),
             toasts: Default::default(),
             project_save_dialog: None,
+            ui_settings: luxifer_core::UiSettings::load(),
+            settings_dialog: None,
             project_browser: Default::default(),
             preview_material: Default::default(),
             preview_show_travel: false,
@@ -263,6 +270,7 @@ impl App {
             || self.text_dialog.is_some()
             || self.laser_settings.is_some()
             || self.project_save_dialog.is_some()
+            || self.settings_dialog.is_some()
             || self.pending_project.is_some()
             || self.close_pending
     }
@@ -331,6 +339,7 @@ impl App {
             A::OpenLayerDialog(index) => self.open_layer_dialog(index),
             A::MoveLayer { from, to } => self.move_layer(from, to),
             A::OpenProjectSaveDialog => self.open_project_save_dialog(),
+            A::OpenSettings => self.open_settings_dialog(),
             A::SaveProjectVersion => self.project_save_version(),
             A::OpenProject(name) => self.project_open(&name),
             A::DeleteProject(name) => self.project_delete(&name),
@@ -475,6 +484,7 @@ impl App {
             selection_only: self.laser.selection_only,
             preview_material: self.preview_material,
             preview_show_travel: self.preview_show_travel,
+            grid_mm: self.ui_settings.grid_size_mm as f32,
         };
         self.renderer.draw_frame(&self.window, scene, full, tris);
     }

@@ -11,6 +11,7 @@ mod image;
 mod laser_settings;
 mod layer;
 mod project_save;
+mod settings;
 mod text;
 
 pub(super) use geo_op::geo_op_dialog_window;
@@ -19,6 +20,7 @@ pub(super) use image::{image_dialog_window, ImageDialogOutcome};
 pub(super) use laser_settings::{laser_settings_window, LaserDialogOutcome};
 pub(super) use layer::layer_dialog_window;
 pub(super) use project_save::project_save_dialog_window;
+pub(super) use settings::settings_dialog_window;
 pub(super) use text::text_dialog_window;
 
 /// Was ein Dialog nach einem Frame will. `None` = weiter offen, keine Aktion.

@@ -47,6 +47,9 @@ pub(super) fn topbar(ui: &mut egui::Ui, view: View, project_name: &str) -> Vec<U
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button("⚙").on_hover_text("Einstellungen").clicked() {
+                actions.push(UiAction::OpenSettings);
+            }
             ui.label(RichText::new(project_name).weak());
         });
     });
