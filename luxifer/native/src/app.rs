@@ -20,6 +20,58 @@ use crate::ui;
 /// Ziel-Box beim Ziehen eines Skalier-Handles: die vom Handle bewegte(n)
 /// Kante(n) folgen dem Cursor `w` (mm), die gegenüberliegenden bleiben fix.
 /// Negative Größen werden normalisiert (Box klappt sauber um).
+/// Ist der Handle eine Ecke (skaliert beide Achsen)?
+pub fn is_corner(h: luxifer_core::Handle) -> bool {
+    use luxifer_core::Handle::*;
+    matches!(h, Nw | Ne | Sw | Se)
+}
+
+/// Zwingt die Ziel-Box aufs Start-Seitenverhältnis (proportionales Skalieren an
+/// Ecken). Der Faktor ist der betragsgrößere der beiden Achsen — so folgt die
+/// Ecke der Maus großzügig; die gegenüberliegende Ecke (fix bei `resize_target`)
+/// bleibt der Anker.
+pub fn keep_aspect(
+    start: luxifer_core::BBox,
+    handle: luxifer_core::Handle,
+    target: luxifer_core::BBox,
+) -> luxifer_core::BBox {
+    if start.w <= 0.0 || start.h <= 0.0 {
+        return target;
+    }
+    let fx = target.w / start.w;
+    let fy = target.h / start.h;
+    let f = if fx.abs() > fy.abs() { fx } else { fy };
+    let w = start.w * f;
+    let h = start.h * f;
+    // Anker = die gegenüberliegende Ecke (bleibt fix). x/y so, dass der Anker hält.
+    let anchor_x = if handle.moves_left() {
+        start.x + start.w
+    } else {
+        start.x
+    };
+    let anchor_y = if handle.moves_top() {
+        start.y + start.h
+    } else {
+        start.y
+    };
+    let x = if handle.moves_left() {
+        anchor_x - w
+    } else {
+        anchor_x
+    };
+    let y = if handle.moves_top() {
+        anchor_y - h
+    } else {
+        anchor_y
+    };
+    luxifer_core::BBox::new(
+        x.min(anchor_x),
+        y.min(anchor_y),
+        w.abs().max(0.1),
+        h.abs().max(0.1),
+    )
+}
+
 pub fn resize_target(
     start: luxifer_core::BBox,
     handle: luxifer_core::Handle,
@@ -213,6 +265,13 @@ impl App {
         // egui zuerst — verschluckt es das Event (Panel getroffen), geht es nicht
         // an den Canvas.
         let resp = self.egui_state.on_window_event(&self.window, event);
+        // Modifier immer mitschreiben — auch wenn egui das Event konsumiert,
+        // sonst geht der Shift-/Ctrl-Status beim Zeichnen/Resizen verloren.
+        if let WindowEvent::ModifiersChanged(m) = event {
+            self.ctrl_down = m.state().control_key();
+            self.shift_down = m.state().shift_key();
+        }
+
         if resp.consumed {
             // Trotzdem Cursor mitschreiben, damit Canvas-Koordinaten stimmen.
             if let WindowEvent::CursorMoved { position, .. } = event {
@@ -225,10 +284,6 @@ impl App {
             WindowEvent::Resized(sz) => {
                 self.gpu.resize(sz.width, sz.height);
                 self.cam.viewport = [sz.width as f32, sz.height as f32];
-            }
-            WindowEvent::ModifiersChanged(m) => {
-                self.ctrl_down = m.state().control_key();
-                self.shift_down = m.state().shift_key();
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
@@ -407,7 +462,12 @@ impl App {
                 orig,
             } => {
                 self.restore_snapshot(&orig);
-                let target = resize_target(start_box, handle, w);
+                let mut target = resize_target(start_box, handle, w);
+                // Eck-Handles halten standardmäßig das Seitenverhältnis; Shift
+                // löst es (frei). Kanten-Handles skalieren nur eine Achse.
+                if is_corner(handle) && !self.shift_down {
+                    target = keep_aspect(start_box, handle, target);
+                }
                 self.state.scale_selection_to(start_box, target);
                 self.drag = Drag::Resize {
                     handle,
@@ -1184,6 +1244,45 @@ mod tests {
         let restored = loaded.into_state();
         assert_eq!(restored.shapes.len(), n_shapes);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn keep_aspect_haelt_verhaeltnis_und_anker() {
+        use super::{keep_aspect, resize_target};
+        use luxifer_core::Handle;
+        let start = BBox::new(0.0, 0.0, 100.0, 50.0); // 2:1
+                                                      // SE weit nach rechts ziehen (Höhe zieht wenig): frei wäre 300×60.
+        let free = resize_target(start, Handle::Se, [300.0, 60.0]);
+        let kept = keep_aspect(start, Handle::Se, free);
+        // Verhältnis muss 2:1 bleiben.
+        assert!(
+            (kept.w / kept.h - 2.0).abs() < 1e-6,
+            "Verhältnis {}",
+            kept.w / kept.h
+        );
+        // SE: obere-linke Ecke (0,0) bleibt Anker.
+        assert!((kept.x - 0.0).abs() < 1e-6 && (kept.y - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn keep_aspect_nw_haelt_gegenecke() {
+        use super::{keep_aspect, resize_target};
+        use luxifer_core::Handle;
+        let start = BBox::new(0.0, 0.0, 100.0, 50.0);
+        // NW nach oben-links ziehen: Anker ist die untere-rechte Ecke (100,50).
+        let free = resize_target(start, Handle::Nw, [-100.0, -20.0]);
+        let kept = keep_aspect(start, Handle::Nw, free);
+        assert!((kept.w / kept.h - 2.0).abs() < 1e-6);
+        assert!(
+            (kept.x + kept.w - 100.0).abs() < 1e-6,
+            "rechte Kante {}",
+            kept.x + kept.w
+        );
+        assert!(
+            (kept.y + kept.h - 50.0).abs() < 1e-6,
+            "untere Kante {}",
+            kept.y + kept.h
+        );
     }
 
     /// Reproduziert den Resize-Aufschaukel-Bug und beweist den Snapshot-Fix:
