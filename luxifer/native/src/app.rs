@@ -335,7 +335,12 @@ impl App {
                         }
                         KeyCode::Escape if pressed => {
                             self.poly_pts.clear();
-                            self.session.selected.clear();
+                            if self.session.edit_active() {
+                                self.session.cancel_edit();
+                                self.drag = Drag::None;
+                            } else {
+                                self.session.clear_selection();
+                            }
                         }
                         KeyCode::Enter if pressed => self.finish_polygon(),
                         KeyCode::KeyV if pressed => self.tool = Tool::Select,
@@ -447,7 +452,7 @@ impl App {
                                                       // Rotate-Handle?
             let rp = self.rotate_handle_pos(&b);
             if (w[0] - rp[0]).hypot(w[1] - rp[1]) <= pick {
-                self.session.push_undo();
+                self.session.begin_edit();
                 let pivot = [b.x + b.w / 2.0, b.y + b.h / 2.0];
                 let angle = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
                 self.drag = Drag::Rotate {
@@ -460,7 +465,7 @@ impl App {
             // Skalier-Handle?
             for (handle, (hx, hy)) in luxifer_core::Handle::positions(&b) {
                 if (w[0] - hx).abs() <= pick && (w[1] - hy).abs() <= pick {
-                    self.session.push_undo();
+                    self.session.begin_edit();
                     self.drag = Drag::Resize {
                         handle,
                         start_box: b,
@@ -472,13 +477,13 @@ impl App {
         }
 
         let tol = 4.0 / self.cam.scale as f64;
-        if let Some(idx) = self.session.hit_test(w[0], w[1], tol) {
-            if !self.session.selected.contains(&idx) {
-                self.session.selected = vec![idx];
-            }
+        let hit = self.session.select_at(w[0], w[1], tol, self.shift_down);
+        if self.shift_down {
+            self.drag = Drag::None;
+        } else if hit.is_some() {
+            self.session.begin_edit();
             self.drag = Drag::MoveShapes { last: w };
         } else {
-            self.session.selected.clear();
             self.drag = Drag::Marquee { start: w };
         }
     }
@@ -496,8 +501,7 @@ impl App {
             Drag::MoveShapes { last } => {
                 let last = *last;
                 self.drag = Drag::MoveShapes { last: w };
-                self.session
-                    .translate_selected(w[0] - last[0], w[1] - last[1]);
+                self.session.translate_edit(w[0] - last[0], w[1] - last[1]);
                 return;
             }
             _ => {}
@@ -517,7 +521,7 @@ impl App {
                 if is_corner(handle) && !self.shift_down {
                     target = keep_aspect(start_box, handle, target);
                 }
-                self.session.scale_selection_to(start_box, target);
+                self.session.scale_edit(start_box, target);
                 self.drag = Drag::Resize {
                     handle,
                     start_box,
@@ -532,7 +536,7 @@ impl App {
                 self.restore_snapshot(&orig);
                 let a = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
                 let delta_deg = (a - start_angle).to_degrees();
-                self.session.rotate_selection(delta_deg);
+                self.session.rotate_edit(delta_deg);
                 self.drag = Drag::Rotate {
                     pivot,
                     start_angle,
@@ -547,12 +551,12 @@ impl App {
         match std::mem::replace(&mut self.drag, Drag::None) {
             Drag::Marquee { start } => {
                 if (start[0] - w[0]).abs() > 1.0 || (start[1] - w[1]).abs() > 1.0 {
-                    self.session.select_in_rect(start[0], start[1], w[0], w[1]);
+                    self.session.select_rect(start, w);
                 }
             }
             Drag::DrawBox { start } => self.finish_box(start, w),
             Drag::MoveShapes { .. } | Drag::Resize { .. } | Drag::Rotate { .. } => {
-                self.session.discard_last_undo_if_no_change();
+                self.session.commit_edit();
             }
             _ => {}
         }

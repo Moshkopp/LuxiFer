@@ -138,17 +138,20 @@ Methoden ergänzen und den Direktzugriff schrittweise verkleinern.
 Ziel: Ein kleiner, ehrlicher Editor, der zuverlässig benutzt werden kann.
 
 - [ ] Szene lesen und Render-Invalidierung aus Application-Zustand ableiten.
-- [ ] Auswahl: Klick, additiv, Rechteckauswahl, Auswahl löschen.
+- [x] Auswahl: Klick, additiv, Rechteckauswahl, Auswahl löschen.
 - [ ] Zeichnen: Rechteck, Ellipse, Linie, Polygon einschließlich Abbruch und
       Abschluss.
 - [ ] Transformieren: Verschieben, Skalieren, proportional Skalieren, Rotieren,
-      Spiegeln.
+      Spiegeln (Move/Resize/Rotate besitzen jetzt einen gemeinsamen
+      Application-Gestenlebenszyklus; Spiegeln folgt als eigener Schnitt).
 - [ ] Transform-Handles und BBox ausschließlich aus kanonischer Core-Geometrie.
 - [ ] Layer/Farbe: aktivieren, Parameter, Sichtbarkeit, Sperre, Reihenfolge.
 - [ ] Löschen, Gruppieren, Aufheben, Undo und Redo.
 - [ ] Tastaturkürzel einschließlich Fokusregeln für Textfelder/Dialoge.
-- [ ] Jede Geste erzeugt genau einen sinnvollen Undo-Schritt.
-- [ ] Abbruch einer Geste stellt den Ausgangszustand wieder her.
+- [x] Jede direkte Move-/Resize-/Rotate-Geste erzeugt genau einen sinnvollen
+      Undo-Schritt.
+- [x] Abbruch einer direkten Manipulationsgeste stellt den Ausgangszustand
+      wieder her.
 - [ ] Native-spezifische Geometrie-/Snapshot-Duplikate aus `app.rs` entfernen,
       sobald der Core/Application-Pfad sie ersetzt.
 
@@ -158,6 +161,13 @@ Abnahme Phase 2:
 - [ ] Manueller Smoke-Test: zeichnen, mehrfach auswählen, bewegen, skalieren,
       rotieren, Farbe ändern, sperren, Undo/Redo, löschen.
 - [ ] Keine bekannten Panics oder inkonsistenten Dirty-/Undo-Zustände.
+
+Zwischenstand 2026-07-12: `EditorSession` kapselt Klick-/additive Auswahl,
+Gruppenerweiterung, Marquee und den Gestenlebenszyklus
+`begin_edit/commit_edit/cancel_edit`. Damit wurde ein Native-Fehler behoben:
+Move-Drag legte zuvor keinen eigenen Undo-Punkt an, verwarf beim Loslassen aber
+potenziell den letzten fremden Undo-Eintrag. Validierung: 242 Workspace-Tests
+und Clippy mit `-D warnings` grün.
 
 ## Phase 3 — Projekt, Versionen und Assets
 

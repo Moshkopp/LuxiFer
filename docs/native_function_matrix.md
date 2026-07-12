@@ -39,17 +39,17 @@ Quelle: `frontend/src-tauri/src/commands/edit.rs`.
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
 | `activate_color` | Core/Application | prüfen | Auswahl umlayern oder Pending-Farbe; leere Layer vermeiden |
-| `select_at` | Core | prüfen | additiv, leerer Klick, Toleranz aus Kamera |
-| `select_rect` | Core | prüfen | beide Ziehrichtungen, rotierte Shapes |
+| `select_at` | Core/Application | über `EditorSession` | additiv, leerer Klick, Gruppen und Kameratoleranz angebunden |
+| `select_rect` | Core/Application | über `EditorSession` | beide Ziehrichtungen, Gruppen und rotierte BBox über Core |
 | `group_op` | Core/Application | vorhanden, prüfen | Auswahlvoraussetzung und Undo |
 | `ungroup_op` | Core/Application | vorhanden, prüfen | gemischte Auswahl und Undo |
-| `move_selected` | Core | vorhanden, prüfen | Gestensnapshot nur einmal; Bézier/Text synchron |
-| `scale_selected` | Core | vorhanden, prüfen | Anker, Seitenverhältnis, Flip-Regel, Undo |
-| `rotate_selected` | Core | vorhanden, prüfen | Pivot und Bézier/Text synchron |
+| `move_selected` | Core/Application | Session-Geste | genau ein Undo, Cancel stellt Ausgangszustand her |
+| `scale_selected` | Core/Application | Session-Geste | Lebenszyklus/Undo migriert; Anker/Flip weiter prüfen |
+| `rotate_selected` | Core/Application | Session-Geste | Lebenszyklus/Undo migriert; Pivot/Metadaten weiter prüfen |
 | `align` | Core/Application | vorhanden, prüfen | Gruppen als Einheit; alle Varianten |
 | `distribute` | Core/Application | vorhanden, prüfen | Gruppen und Mindestanzahl |
 | `mirror` | Core/Application | vorhanden, prüfen | horizontal/vertikal und Metadaten |
-| `clear_selection` | Core | prüfen | keine unnötige Dirty-/Undo-Änderung |
+| `clear_selection` | Core/Application | über `EditorSession` | keine Dirty-/Undo-Änderung; Escape ohne aktive Geste |
 | `delete_selected` | Core/Application | über `EditorSession` | Fehler ohne Auswahl sowie Löschen/Undo/Redo getestet |
 | `set_layer_params` | Core/Application | teilweise | alle Laser-/Rasterparameter validieren |
 | `toggle_layer` | Core/Application | teilweise | sichtbar, enabled, locked, active eindeutig |
