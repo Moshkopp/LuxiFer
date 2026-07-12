@@ -1,5 +1,6 @@
 mod actions;
 mod drawing;
+mod images;
 mod layers;
 mod selection;
 

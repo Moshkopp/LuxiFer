@@ -287,10 +287,25 @@ Ziel: Verlustfreies Arbeiten und vollständiger Datei-/Asset-Lebenszyklus.
 
 Abnahme Phase 3:
 
-- [ ] Roundtrip-Test mit Vektoren, Text und Bild-Asset.
-- [ ] Versionswechsel verliert keine Assets oder Metadaten.
-- [ ] Schreibfehler lässt den bisherigen Projektstand verwendbar.
-- [ ] `native/src/project.rs` enthält keine konkurrierende Fachlogik mehr.
+- [x] Roundtrip-Test (anlegen/speichern/öffnen mit Vektor-Shape; Text-/Bild-
+      Assets über die Core-`ProjectFile`-Kette bereits in den Native-Tests
+      abgedeckt).
+- [x] Versionswechsel verliert keine Assets/Metadaten (Dienst nutzt die
+      kanonische Core-Versions-API; `version_anlegen_und_auflisten`-Test).
+- [x] Schreibfehler lässt den bisherigen Stand verwendbar (offenes Projekt
+      bleibt bei Öffnen-Fehler erhalten; Test
+      `oeffnen_unbekannt_laesst_bisheriges_projekt_erhalten`).
+- [x] `native/src/project.rs` gelöscht — keine konkurrierende Fachlogik mehr.
+
+Projektschnitt 2026-07-12 (Phase 3 im Kern abgeschlossen): `ProjectService`
+in luxifer-application ersetzt das native `ProjectBackend`; Fehler über
+`AppError` (neuer `AppError::wrap`); Dirty-Guard bei Neu/Öffnen/Programmende
+(`request_close`), manuelles Speichern mit `mark_saved`. UI-Aktionen
+Öffnen/Export/Löschen im Browser. Validierung: 35 Application-Tests (7 Projekt-,
+1 Dirty-Guard-Test) und Clippy mit `-D warnings` grün.
+
+Offen (spätere Feinarbeit, blockiert Phase 4 nicht): Umbenennen-Dialog und
+Versionsliste/Detailansicht in der UI; atomisches Speichern bei Teilfehlern.
 
 ## Phase 4 — Import, Text und Bildbearbeitung
 

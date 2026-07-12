@@ -409,3 +409,77 @@ fn layer_verschieben_behaelt_shape_zuordnung_und_ist_undo_faehig() {
     assert_eq!(session.layers[1].color, second_color);
     assert_eq!(session.shapes[1].layer_id, 1);
 }
+
+fn session_with_image() -> EditorSession {
+    let mut state = AppState::new();
+    state.add_image("asset-1".into(), 0.0, 0.0, 40.0, 30.0);
+    state.selected.clear();
+    EditorSession::new(state)
+}
+
+#[test]
+fn bildparameter_setzen_ist_ein_undo_schritt() {
+    use luxifer_core::{ImageMode, ImageParams};
+    let mut session = session_with_image();
+    session.state_mut_for_migration().dirty = false;
+    let params = ImageParams {
+        mode: ImageMode::Floyd,
+        brightness: 20,
+        gamma: 1.5,
+        ..Default::default()
+    };
+
+    session.set_image_params(0, params).unwrap();
+    assert!(session.dirty);
+    if let luxifer_core::Geo::Image { params: p, .. } = &session.shapes[0].geo {
+        assert_eq!(p.mode, ImageMode::Floyd);
+        assert_eq!(p.brightness, 20);
+    } else {
+        panic!("erwartet Geo::Image");
+    }
+    // Genau ein Undo-Schritt: danach ist die Historie leer (kein Setup-Undo).
+    assert!(session.undo());
+    if let luxifer_core::Geo::Image { params: p, .. } = &session.shapes[0].geo {
+        assert_eq!(p.mode, ImageMode::Grayscale);
+    }
+}
+
+#[test]
+fn bildparameter_auf_nicht_bild_liefert_fehler() {
+    use luxifer_core::ImageParams;
+    let mut session = session_with_rect(); // Rechteck, kein Bild
+    session.state_mut_for_migration().dirty = false;
+    let error = session
+        .set_image_params(0, ImageParams::default())
+        .unwrap_err();
+    assert_eq!(error.code(), "not_an_image");
+    assert!(!session.dirty);
+}
+
+#[test]
+fn ungueltiges_gamma_wird_abgewiesen() {
+    use luxifer_core::ImageParams;
+    let mut session = session_with_image();
+    session.state_mut_for_migration().dirty = false;
+    let params = ImageParams {
+        gamma: 5.0, // außerhalb 0.1..3.0
+        ..Default::default()
+    };
+    let error = session.set_image_params(0, params).unwrap_err();
+    assert_eq!(error.code(), "image_gamma");
+    assert!(!session.dirty);
+}
+
+#[test]
+fn ungueltige_helligkeit_wird_abgewiesen() {
+    use luxifer_core::ImageParams;
+    let mut session = session_with_image();
+    session.state_mut_for_migration().dirty = false;
+    let params = ImageParams {
+        brightness: 200,
+        ..Default::default()
+    };
+    let error = session.set_image_params(0, params).unwrap_err();
+    assert_eq!(error.code(), "image_brightness");
+    assert!(!session.dirty);
+}
