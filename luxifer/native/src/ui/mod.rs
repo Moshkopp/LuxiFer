@@ -3,10 +3,12 @@
 //! Aktionen laufen über den Core — die Panels halten keinen eigenen Wahrheits-
 //! Zustand.
 //!
-//! Die einzelnen Panels und Dialoge liegen in den Untermodulen. Dieser
-//! Root komponiert nur den Frame und hält das Theme. (Mechanischer Split; die
-//! Panels bekommen vorerst weiterhin `&mut App` — die `UiAction`-Grenze folgt
-//! als eigener Schritt.)
+//! Die einzelnen Panels und Dialoge liegen in den Untermodulen. Nur dieser
+//! Root kennt `App`: Er liest Werte, führt Draft-Lebenszyklen und dispatcht die
+//! von den Panels gelieferten `UiAction`s (ADR 0011). Die Panels/Dialoge selbst
+//! erhalten `&`-Sichten bzw. `&mut`-Entwürfe und geben Absichten zurück — sie
+//! greifen nicht mehr auf `App` zu. Ausnahme bleibt vorerst `laserpanel`, das
+//! als eigenes größeres Modul noch nicht migriert ist.
 
 mod action;
 mod arrange;

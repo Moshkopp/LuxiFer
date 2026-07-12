@@ -397,10 +397,21 @@ Regel für die weitere Migration:
 Das `UiAction`-Enum wächst dabei schnittweise mit; noch nicht migrierte Panels
 behalten vorübergehend `&mut App`.
 
-Nächste geplante Schnitte: übrige Aktions-Panels (tools, layers, palette) auf
-`UiAction` umstellen; parallel Overlay-/Cache-Erzeugung aus `app.rs` nach
-`canvas/`, dann der Render-Frame nach `render/`, dann Maus-/Gestensteuerung.
-Zuletzt die Reduktion von `App` auf einen Composition Root.
+UiAction-Grenze 2026-07-12 (alle Panels/Dialoge migriert): Nach dem Piloten
+wurden panelweise umgestellt: `palette`/`shape_picker`, `tools`, `layers` (mit
+`LayerRow`-View-Model), `project` (Textfeld-Entwurf als `&mut String`),
+`topbar` (aus `build` ausgelagert), Fehler-/Statuszeile (`ui/status.rs`) sowie
+alle drei Dialoge (Layer/Text/Laser). Dialoge melden über `DialogOutcome` bzw.
+`LaserDialogOutcome`, ihr Entwurf wird als `&mut`-Draft gereicht, der
+Draft-Lebenszyklus liegt am Root. Ergebnis: Nur noch `ui/mod.rs` (Composition
+Root) kennt `App`; kein Panel-/Dialog-Modul importiert `App` mehr. Offen bleibt
+allein `laserpanel` (eigenes ~420-Zeilen-Modul, bewusst separat) sowie die
+reine Panelbreiten-Rückschreibung (`left_w`/`right_w`, Layout, kein Fachzustand).
+
+Nächste geplante Schnitte: `laserpanel` auf dieselbe Grenze bringen; parallel
+Overlay-/Cache-Erzeugung aus `app.rs` nach `canvas/`, dann der Render-Frame nach
+`render/`, dann Maus-/Gestensteuerung. Zuletzt die Reduktion von `App` auf einen
+Composition Root.
 - [ ] UI-Größen, DPI-Skalierung und Ultrawide-/kleine Fenster testen.
 - [ ] Tooltips, deaktivierte Zustände, Fokus und Tastaturnavigation.
 - [ ] Rechte Panels sinnvoll skalierbar/resizable machen.
