@@ -18,7 +18,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
 | A1 | ERLEDIGT | P1 | Auswahl-Werkzeug zeichnet einen bildschirmkonstant gestrichelten Marquee-Rahmen. |
-| A2 | REG | P1 | Bézier-Tool arbeitet nicht wie in Tauri (Inkscape-like): Klick + gehaltene Maustaste erzeugt Anker und zieht die Tangente/Kurve mit der Maus. |
+| A2 | ERLEDIGT | P1 | Bézier-Feder: Drücken setzt Anker, Ziehen erzeugt symmetrische Tangenten; Enter schließt den Entwurf ab. |
 | A3 | UX | P2 | Spline/Polyline/Bézier: Klick auf ersten Node ODER Enter schließt die Form; Startnode leuchtet farbig, wenn die Maus in die Nähe kommt (kein Zielen nötig). |
 | A4 | ERLEDIGT | P1 | Strg+Z = Undo, Strg+Shift+Z und Strg+Y = Redo. |
 | A5 | UX | P3 | Undo/Redo sollen als Icons in den Header. |
@@ -84,3 +84,6 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   aufgebautes Overlay gezeichnet; der Geometrie-Cache bleibt auswahlfrei.
 - A4 (erledigt): `Strg+Shift+Z` wird vor `Strg+Z` ausgewertet und löst Redo
   aus. `Strg+Y` bleibt als Alias erhalten; Fokus-/Modal-Gate bleibt wirksam.
+- A2 (erledigt): Der Canvas hält während des Zeichnens echte `BezierNode`-Drafts.
+  Beim Drag entstehen `h_in`/`h_out`, das Overlay zeigt Kurve, Tangenten und
+  Anker live; die Application übernimmt den fertigen Pfad als einen Undo-Schritt.

@@ -56,8 +56,14 @@ impl CanvasState {
                         self.drag = Drag::DrawBox { start: w }
                     }
                     // Punkt-für-Punkt-Werkzeuge sammeln in poly_pts.
-                    Tool::Polyline | Tool::Spline | Tool::Bezier => {
-                        self.poly_pts.push((w[0], w[1]))
+                    Tool::Polyline | Tool::Spline => self.poly_pts.push((w[0], w[1])),
+                    // Bézier-Feder: Drücken setzt den Anker, Ziehen formt eine
+                    // symmetrische Tangente für Ein- und Ausgang.
+                    Tool::Bezier => {
+                        let node = self.bezier_nodes.len();
+                        self.bezier_nodes
+                            .push(luxifer_core::bezier::BezierNode::corner((w[0], w[1])));
+                        self.drag = Drag::BezierHandle { node };
                     }
                 }
             }
@@ -153,6 +159,16 @@ impl CanvasState {
                 self.cursor = new;
                 return;
             }
+            Drag::BezierHandle { node } => {
+                if let Some(n) = self.bezier_nodes.get_mut(*node) {
+                    let dx = w[0] - n.p.0;
+                    let dy = w[1] - n.p.1;
+                    n.h_out = Some((w[0], w[1]));
+                    n.h_in = Some((n.p.0 - dx, n.p.1 - dy));
+                }
+                self.cursor = new;
+                return;
+            }
             _ => {}
         }
         // Resize/Rotate: immer vom Snapshot (Ausgangszustand) rechnen, damit sich
@@ -208,6 +224,7 @@ impl CanvasState {
                 false
             }
             Drag::DrawBox { start } => self.finish_box(session, start, w),
+            Drag::BezierHandle { .. } => false,
             Drag::MoveShapes { .. } | Drag::Resize { .. } | Drag::Rotate { .. } => {
                 session.commit_edit();
                 false
@@ -241,13 +258,51 @@ impl CanvasState {
     /// Polylinie (offen), Spline (glatt), Bézier (Feder). Gibt true zurück, wenn
     /// ein Shape entstand.
     pub fn finish_polygon(&mut self, session: &mut EditorSession) -> bool {
+        if self.tool == Tool::Bezier {
+            self.poly_pts.clear();
+            let nodes = std::mem::take(&mut self.bezier_nodes);
+            return session.add_bezier_nodes(nodes).is_some();
+        }
         let pts = std::mem::take(&mut self.poly_pts);
         let path = match self.tool {
             Tool::Polyline => PointPath::Polyline,
             Tool::Spline => PointPath::Spline,
-            Tool::Bezier => PointPath::Bezier,
+            Tool::Bezier => unreachable!("Bézier-Knoten wurden bereits behandelt"),
             _ => return false,
         };
         session.add_point_path(path, pts).is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::camera::Camera;
+    use winit::event::MouseButton;
+
+    #[test]
+    fn bezier_drag_erzeugt_symmetrische_tangenten_und_fertigen_pfad() {
+        let mut canvas = CanvasState::new(Camera::new());
+        canvas.tool = Tool::Bezier;
+        let mut session = EditorSession::default();
+
+        canvas.cursor = canvas.cam.world_to_screen([10.0, 10.0]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_cursor_move(&mut session, canvas.cam.world_to_screen([15.0, 12.0]));
+        canvas.on_mouse(&mut session, MouseButton::Left, false);
+
+        canvas.cursor = canvas.cam.world_to_screen([30.0, 20.0]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_mouse(&mut session, MouseButton::Left, false);
+
+        assert_eq!(canvas.bezier_nodes[0].h_out, Some((15.0, 12.0)));
+        assert_eq!(canvas.bezier_nodes[0].h_in, Some((5.0, 8.0)));
+        assert!(canvas.finish_polygon(&mut session));
+        assert!(canvas.bezier_nodes.is_empty());
+        assert_eq!(session.shapes.len(), 1);
+        assert_eq!(
+            session.shapes[0].bezier.as_ref().unwrap().nodes[0].h_out,
+            Some((15.0, 12.0))
+        );
     }
 }

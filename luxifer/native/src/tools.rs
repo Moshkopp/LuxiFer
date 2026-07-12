@@ -207,6 +207,10 @@ pub enum Drag {
     DrawBox {
         start: [f64; 2],
     },
+    /// Tangente des zuletzt gesetzten Bézier-Ankers aufziehen.
+    BezierHandle {
+        node: usize,
+    },
     /// Auswahl über ein Handle skalieren. `handle` = gezogene Ecke/Kante,
     /// `start_box` = Auswahl-BBox bei Drag-Beginn, `orig` = Snapshot der
     /// selektierten Shapes bei Drag-Beginn (Index + Shape). So wird bei jedem

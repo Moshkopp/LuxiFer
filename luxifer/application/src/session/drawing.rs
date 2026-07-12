@@ -71,4 +71,16 @@ impl EditorSession {
         };
         Some(index)
     }
+
+    /// Übernimmt einen in der UI aufgebauten Bézier-Entwurf als einen
+    /// zusammenhängenden, undo-fähigen Anwendungsschritt.
+    pub fn add_bezier_nodes(
+        &mut self,
+        nodes: Vec<luxifer_core::bezier::BezierNode>,
+    ) -> Option<usize> {
+        if nodes.len() < 2 {
+            return None;
+        }
+        Some(self.state.add_bezier_nodes(nodes, false))
+    }
 }

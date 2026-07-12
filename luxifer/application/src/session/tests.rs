@@ -155,6 +155,23 @@ fn punktpfade_werden_nach_typ_im_core_erzeugt() {
 }
 
 #[test]
+fn fertige_bezier_knoten_behalten_ihre_tangenten() {
+    let nodes = vec![
+        luxifer_core::bezier::BezierNode {
+            p: (0.0, 0.0),
+            h_in: Some((-5.0, 0.0)),
+            h_out: Some((5.0, 0.0)),
+        },
+        luxifer_core::bezier::BezierNode::corner((20.0, 10.0)),
+    ];
+    let mut session = EditorSession::default();
+    let index = session.add_bezier_nodes(nodes.clone()).unwrap();
+    assert_eq!(session.shapes[index].bezier.as_ref().unwrap().nodes, nodes);
+    assert!(session.undo());
+    assert!(session.shapes.is_empty());
+}
+
+#[test]
 fn auswahloperation_ohne_voraussetzung_mutiert_nicht() {
     let mut session = EditorSession::default();
     let error = session.align(Align::Left).unwrap_err();

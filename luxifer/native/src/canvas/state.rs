@@ -20,6 +20,8 @@ pub struct CanvasState {
     pub shift_down: bool,
     /// Punkt-Zug (Welt-Punkte), bis Doppelklick/Enter schließt.
     pub poly_pts: Vec<(f64, f64)>,
+    /// Native Bézier-Feder: Anker samt beim Ziehen erzeugten Tangenten.
+    pub bezier_nodes: Vec<luxifer_core::bezier::BezierNode>,
     /// Letzter Links-Klick (Zeit + Weltposition) für die Doppelklick-Erkennung.
     last_click: Option<(std::time::Instant, [f64; 2])>,
 }
@@ -36,6 +38,7 @@ impl CanvasState {
             ctrl_down: false,
             shift_down: false,
             poly_pts: Vec::new(),
+            bezier_nodes: Vec::new(),
             last_click: None,
         }
     }

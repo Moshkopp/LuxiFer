@@ -293,6 +293,7 @@ impl App {
             }
             S::Cancel => {
                 self.canvas.poly_pts.clear();
+                self.canvas.bezier_nodes.clear();
                 if self.session.edit_active() {
                     self.session.cancel_edit();
                     self.canvas.drag = Drag::None;
@@ -1020,6 +1021,7 @@ impl App {
                 tool: self.canvas.tool,
                 active_shape: self.canvas.active_shape,
                 poly_pts: &self.canvas.poly_pts,
+                bezier_nodes: &self.canvas.bezier_nodes,
                 world_cursor: self.canvas.world(),
                 cam_scale: self.canvas.cam.scale,
             },

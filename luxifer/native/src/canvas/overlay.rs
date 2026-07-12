@@ -17,6 +17,7 @@ pub struct OverlayInput<'a> {
     pub tool: Tool,
     pub active_shape: PolyShape,
     pub poly_pts: &'a [(f64, f64)],
+    pub bezier_nodes: &'a [luxifer_core::bezier::BezierNode],
     /// Weltkoordinaten des Cursors (mm) — vom Root aus Kamera + Cursor bestimmt.
     pub world_cursor: [f64; 2],
     /// Kamera-Skalierung (px/mm) für bildschirmkonstante Markergrößen.
@@ -150,9 +151,7 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
 
     // Live-Vorschau des Punkt-Zugs (Polyline/Spline/Bézier/Polygon): gesetzte
     // Segmente + gestricheltes Gummiband zur Maus + Punkt-Marker, wie Tauri.
-    if !input.poly_pts.is_empty()
-        && matches!(input.tool, Tool::Polyline | Tool::Spline | Tool::Bezier)
-    {
+    if !input.poly_pts.is_empty() && matches!(input.tool, Tool::Polyline | Tool::Spline) {
         let col = [0.9, 0.9, 0.95, 0.9];
         // Gesetzte Segmente.
         for wnd in input.poly_pts.windows(2) {
@@ -181,6 +180,58 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
                 [0.3, 0.51, 0.97, 1.0]
             };
             v.extend(scene_geo::handle_marker(p.0 as f32, p.1 as f32, hw, c));
+        }
+    }
+
+    if input.tool == Tool::Bezier && !input.bezier_nodes.is_empty() {
+        let path = luxifer_core::bezier::BezierPath {
+            nodes: input.bezier_nodes.to_vec(),
+            closed: false,
+        };
+        let flat = path.flatten();
+        for edge in flat.windows(2) {
+            scene_geo::push_seg(
+                &mut v,
+                [edge[0].0 as f32, edge[0].1 as f32],
+                [edge[1].0 as f32, edge[1].1 as f32],
+                [0.9, 0.9, 0.95, 0.9],
+            );
+        }
+        let last = input.bezier_nodes.last().unwrap();
+        dashed_seg(
+            &mut v,
+            [last.p.0 as f32, last.p.1 as f32],
+            [cur[0] as f32, cur[1] as f32],
+            [1.0, 1.0, 1.0, 0.4],
+            input.cam_scale,
+        );
+        let hw = 3.0 / input.cam_scale;
+        for (i, node) in input.bezier_nodes.iter().enumerate() {
+            for handle in [node.h_in, node.h_out].into_iter().flatten() {
+                scene_geo::push_seg(
+                    &mut v,
+                    [node.p.0 as f32, node.p.1 as f32],
+                    [handle.0 as f32, handle.1 as f32],
+                    [0.55, 0.65, 0.8, 0.65],
+                );
+                v.extend(scene_geo::handle_marker(
+                    handle.0 as f32,
+                    handle.1 as f32,
+                    hw * 0.75,
+                    [0.55, 0.65, 0.8, 1.0],
+                ));
+            }
+            let color = if i == 0 {
+                [0.25, 0.72, 0.5, 1.0]
+            } else {
+                [0.3, 0.51, 0.97, 1.0]
+            };
+            v.extend(scene_geo::handle_marker(
+                node.p.0 as f32,
+                node.p.1 as f32,
+                hw,
+                color,
+            ));
         }
     }
 
