@@ -21,6 +21,8 @@ use crate::ui::{
     TextDialogState,
 };
 
+mod text;
+
 pub struct App {
     pub window: Arc<Window>,
     pub session: EditorSession,
@@ -798,104 +800,6 @@ impl App {
                 self.project_msg = format!("Neue Version {}", v.label);
             }
             Err(error) => self.app_error = Some(error),
-        }
-    }
-
-    /// Öffnet den Text-Dialog und scannt bei Bedarf die System-Fonts.
-    pub fn open_text_dialog(&mut self) {
-        if self.fonts.is_empty() {
-            self.fonts = crate::fonts::list_fonts();
-        }
-        let mut st = TextDialogState::default();
-        // Ersten Font vorwählen.
-        if !self.fonts.is_empty() {
-            st.font_idx = Some(0);
-        }
-        self.text_dialog = Some(st);
-    }
-
-    /// Öffnet den Text-Dialog zum Editieren eines bestehenden Textblocks
-    /// (Doppelklick). Füllt Text/Größe/Font aus der am Shape gespeicherten Meta.
-    pub fn open_text_editor(&mut self, index: usize) {
-        if self.fonts.is_empty() {
-            self.fonts = crate::fonts::list_fonts();
-        }
-        let Some(meta) = self
-            .session
-            .state()
-            .shapes
-            .get(index)
-            .and_then(|s| s.text_meta.clone())
-        else {
-            return;
-        };
-        // Font in der Liste anhand des Pfads wiederfinden (sonst erster Font).
-        let font_idx = self
-            .fonts
-            .iter()
-            .position(|f| f.path.to_string_lossy() == meta.font_path)
-            .or(if self.fonts.is_empty() { None } else { Some(0) });
-        self.text_dialog = Some(TextDialogState {
-            text: meta.text,
-            size_mm: meta.size_mm,
-            font_idx,
-            edit_index: Some(index),
-        });
-    }
-
-    /// Setzt den Text als Pfad-Shapes (Text→Kontur über den Core) und platziert
-    /// ihn. Gibt bei Erfolg true zurück (Dialog schließen).
-    pub fn commit_text(&mut self) -> bool {
-        let Some(st) = self.text_dialog.as_ref() else {
-            return false;
-        };
-        let Some(fi) = st.font_idx else {
-            self.laser_msg = "Kein Font gewählt".into();
-            return false;
-        };
-        let Some(font) = self.fonts.get(fi) else {
-            return false;
-        };
-        let text = st.text.clone();
-        let size = st.size_mm;
-        let font_path = font.path.clone();
-        let font_data = match std::fs::read(&font_path) {
-            Ok(d) => d,
-            Err(e) => {
-                self.laser_msg = format!("Font lesen: {e}");
-                return false;
-            }
-        };
-        let edit_index = st.edit_index;
-        match luxifer_core::text::text_to_contours(&font_data, &text, size) {
-            Ok(contours) if !contours.is_empty() => {
-                let meta = luxifer_core::TextMeta {
-                    text,
-                    font_path: font_path.to_string_lossy().to_string(),
-                    size_mm: size,
-                };
-                if let Some(index) = edit_index {
-                    // Bestehenden Textblock atomar ersetzen.
-                    if let Err(error) = self.session.replace_text_block(index, contours, meta) {
-                        self.app_error = Some(error);
-                        return false;
-                    }
-                } else {
-                    let idxs = self.session.add_text_block(contours, meta);
-                    self.session.selected = idxs;
-                }
-                self.refresh_accent();
-                self.fit_all();
-                true
-            }
-            Ok(_) => {
-                self.laser_msg = "Text ergab keine Konturen".into();
-                false
-            }
-            Err(e) => {
-                self.laser_msg = format!("Text-Fehler: {e}");
-                false
-            }
         }
     }
 
