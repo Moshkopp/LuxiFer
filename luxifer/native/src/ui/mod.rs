@@ -25,7 +25,7 @@ mod topbar;
 pub use action::UiAction;
 pub use state::{
     CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState,
-    PendingProjectAction, ProjectBrowserState, TextDialogState,
+    PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState, TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -108,7 +108,6 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 .show(ctx, |ui| {
                     project::project_browser(
                         ui,
-                        &mut app.new_project_name,
                         &mut app.project_browser,
                         &projects,
                         open_name.as_deref(),
@@ -325,11 +324,25 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
+    // „Neues Projekt"-Maske: Entwurf als &mut; Anlegen über den validierenden
+    // ProjectService (leerer Name → Fehler, Maske bleibt offen).
+    if let Some(st) = app.project_save_dialog.as_mut() {
+        match dialogs::project_save_dialog_window(ctx, st) {
+            dialogs::DialogOutcome::None => {}
+            dialogs::DialogOutcome::Commit => {
+                if app.commit_project_save_dialog() {
+                    app.project_save_dialog = None;
+                }
+            }
+            dialogs::DialogOutcome::Cancel => app.project_save_dialog = None,
+        }
+    }
+
     // Dirty-Guard: eine Projektaktion (Neu/Öffnen) wartet auf Bestätigung, weil
     // sie ungespeicherte Änderungen verwerfen würde.
     if let Some(pending) = app.pending_project.as_ref() {
         let label = match pending {
-            PendingProjectAction::New(_) => "Neues Projekt anlegen",
+            PendingProjectAction::New { .. } => "Neues Projekt anlegen",
             PendingProjectAction::Open(_) => "Projekt öffnen",
             PendingProjectAction::OpenVersion(_) => "Version laden",
             PendingProjectAction::DeleteVersion(_) => "Löschen der aktuellen Version",

@@ -127,8 +127,13 @@ impl ProjectService {
     // ---- Lebenszyklus -------------------------------------------------------
 
     /// Neues Projekt aus dem aktuellen Zustand anlegen und sofort speichern.
-    /// Der Name darf nicht leer sein.
-    pub fn new_project(&mut self, state: &AppState, name: &str) -> Result<(), AppError> {
+    /// Der Name darf nicht leer sein; die Beschreibung ist optional.
+    pub fn new_project(
+        &mut self,
+        state: &AppState,
+        name: &str,
+        description: &str,
+    ) -> Result<(), AppError> {
         let name = name.trim();
         if name.is_empty() {
             return Err(AppError::new(
@@ -137,6 +142,7 @@ impl ProjectService {
             ));
         }
         let mut pf = ProjectFile::from_state(state, name, Vec::new());
+        pf.description = description.trim().to_string();
         pf.save_to_dir(&Self::dir()).map_err(|e| {
             AppError::wrap("project_write", "Projekt konnte nicht angelegt werden.", e)
         })?;

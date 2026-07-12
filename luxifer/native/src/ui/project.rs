@@ -85,13 +85,11 @@ fn draw_preview(ui: &mut egui::Ui, preview: &ProjectPreview) {
     }
 }
 
-/// `draft_name` = kurzlebiger „Neu"-Namensentwurf; `browser` = Auswahl/Drafts
-/// samt vom Root gefülltem Detail-Cache; `projects` = vorhandene Projekte;
-/// `open_name` = Name des offenen Projekts; `dirty` = ungespeicherte Änderungen
-/// (nur Anzeige).
+/// `browser` = Auswahl/Drafts samt vom Root gefülltem Detail-Cache;
+/// `projects` = vorhandene Projekte; `open_name` = Name des offenen Projekts;
+/// `dirty` = ungespeicherte Änderungen (nur Anzeige).
 pub(super) fn project_browser(
     ui: &mut egui::Ui,
-    draft_name: &mut String,
     browser: &mut ProjectBrowserState,
     projects: &[ProjectInfo],
     open_name: Option<&str>,
@@ -99,10 +97,15 @@ pub(super) fn project_browser(
 ) -> Vec<UiAction> {
     let mut actions = Vec::new();
 
-    // Kopfzeile: Neu anlegen + offenes Projekt speichern.
+    // Kopfzeile: „Neues Projekt…" öffnet die Maske (Name + Beschreibung);
+    // ein „Speichern"-Button ist bewusst weggelassen — Speichern läuft über
+    // Strg+S (bzw. Shift+Strg+S für eine neue Version).
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.heading("Projekte");
+        if ui.button("Neues Projekt…").clicked() {
+            actions.push(UiAction::OpenProjectSaveDialog);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let has_open = open_name.is_some();
             if ui
@@ -111,29 +114,10 @@ pub(super) fn project_browser(
             {
                 actions.push(UiAction::SaveProjectVersion);
             }
-            if ui
-                .add_enabled(has_open, egui::Button::new("Speichern"))
-                .clicked()
-            {
-                actions.push(UiAction::SaveProject);
-            }
             if dirty {
                 ui.colored_label(ui.visuals().warn_fg_color, "● ungespeichert");
             }
         });
-    });
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label("Neu:");
-        ui.add(
-            egui::TextEdit::singleline(draft_name)
-                .hint_text("Projektname")
-                .desired_width(200.0),
-        );
-        if ui.button("Anlegen").clicked() {
-            // Der Root liest den Entwurf und leert ihn.
-            actions.push(UiAction::NewProject);
-        }
     });
     ui.add_space(8.0);
     ui.separator();

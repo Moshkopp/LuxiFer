@@ -40,8 +40,8 @@ pub struct App {
     /// Kurze Erfolgs-/Statusmeldungen als Toasts oben rechts (Fehler laufen
     /// über `app_error` und bleiben stehen).
     pub toasts: crate::ui::Toasts,
-    /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
-    pub new_project_name: String,
+    /// Offene „Neues Projekt"-Maske (Name + Beschreibung) oder None.
+    pub project_save_dialog: Option<crate::ui::ProjectSaveDialogState>,
     /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
     pub project_browser: crate::ui::ProjectBrowserState,
     /// Material-Vorlage der Laser-Vorschau (Präsentationszustand).
@@ -134,7 +134,7 @@ impl App {
             },
             project: luxifer_application::ProjectService::new(),
             toasts: Default::default(),
-            new_project_name: String::new(),
+            project_save_dialog: None,
             project_browser: Default::default(),
             preview_material: Default::default(),
             preview_show_travel: false,
@@ -262,6 +262,7 @@ impl App {
             || self.geo_op_dialog.is_some()
             || self.text_dialog.is_some()
             || self.laser_settings.is_some()
+            || self.project_save_dialog.is_some()
             || self.pending_project.is_some()
             || self.close_pending
     }
@@ -329,13 +330,7 @@ impl App {
             A::ToggleLayer(index, toggle) => self.toggle_layer(index, toggle),
             A::OpenLayerDialog(index) => self.open_layer_dialog(index),
             A::MoveLayer { from, to } => self.move_layer(from, to),
-            A::NewProject => {
-                // Draft-Lebenszyklus liegt am Root: Namen auslesen, anlegen, leeren.
-                let name = self.new_project_name.clone();
-                self.project_new(&name);
-                self.new_project_name.clear();
-            }
-            A::SaveProject => self.project_save(),
+            A::OpenProjectSaveDialog => self.open_project_save_dialog(),
             A::SaveProjectVersion => self.project_save_version(),
             A::OpenProject(name) => self.project_open(&name),
             A::DeleteProject(name) => self.project_delete(&name),

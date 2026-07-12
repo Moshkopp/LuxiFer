@@ -97,8 +97,8 @@ impl GeoOpDialogState {
 /// (Dirty-Guard). Wird ausgeführt, sobald der Nutzer „Verwerfen" wählt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PendingProjectAction {
-    /// Neues Projekt mit diesem Namen anlegen.
-    New(String),
+    /// Neues Projekt aus dem Maskenentwurf anlegen.
+    New { name: String, description: String },
     /// Projekt mit diesem Namen öffnen.
     Open(String),
     /// Eine Version des offenen Projekts laden (Versions-ID).
@@ -124,6 +124,17 @@ pub struct ProjectBrowserState {
     /// Gecachte Detailsicht + Vektor-Miniatur des markierten Projekts.
     /// `cache_key` macht den Cache gegen Umbenennen/Speichern/Editieren stabil.
     pub cached: Option<CachedProjectDetail>,
+}
+
+/// Entwurf der „Neues Projekt"-Maske (Strg+S ohne offenes Projekt bzw.
+/// „Neues Projekt…" im Projekt-Reiter): Name + Beschreibung. Kurzlebig —
+/// Anlegen läuft über den validierenden `ProjectService`.
+#[derive(Default)]
+pub struct ProjectSaveDialogState {
+    pub name: String,
+    pub description: String,
+    /// Einmal-Flag: das Namensfeld beim ersten Frame fokussieren.
+    pub focus_name: bool,
 }
 
 /// Gecachte Browser-Detailsicht: Metadaten/Versionen aus der Application und

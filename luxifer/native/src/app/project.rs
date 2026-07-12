@@ -12,17 +12,11 @@ impl App {
         }
     }
 
-    pub fn project_new(&mut self, name: &str) {
-        if self.session.is_dirty() {
-            self.pending_project = Some(PendingProjectAction::New(name.to_string()));
-        } else {
-            self.do_project_new(name);
-        }
-    }
-
     pub fn confirm_pending_project(&mut self) {
         match self.pending_project.take() {
-            Some(PendingProjectAction::New(name)) => self.do_project_new(&name),
+            Some(PendingProjectAction::New { name, description }) => {
+                self.do_project_new(&name, &description);
+            }
             Some(PendingProjectAction::Open(name)) => self.do_project_open(&name),
             Some(PendingProjectAction::OpenVersion(id)) => self.do_project_open_version(&id),
             Some(PendingProjectAction::DeleteVersion(id)) => self.do_project_delete_version(&id),
@@ -121,15 +115,25 @@ impl App {
         }
     }
 
-    fn do_project_new(&mut self, name: &str) {
-        match self.project.new_project(self.session.state(), name) {
+    /// Legt das Projekt aus dem aktuellen Canvas an. Der Guard greift nur, wenn
+    /// ein ANDERES offenes Projekt ungespeicherte Änderungen trägt (siehe
+    /// `commit_project_save_dialog`) — ohne offenes Projekt geht nichts
+    /// verloren, der aktuelle Stand wird gerade zum neuen Projekt.
+    fn do_project_new(&mut self, name: &str, description: &str) -> bool {
+        match self
+            .project
+            .new_project(self.session.state(), name, description)
+        {
             Ok(()) => {
                 self.session.mark_saved();
                 self.toasts
                     .success(format!("Neues Projekt: {}", name.trim()));
-                self.view = crate::tools::View::Design;
+                true
             }
-            Err(error) => self.app_error = Some(error),
+            Err(error) => {
+                self.app_error = Some(error);
+                false
+            }
         }
     }
 
@@ -156,7 +160,14 @@ impl App {
         }
     }
 
+    /// Strg+S: offenes Projekt in-place speichern; ohne offenes Projekt öffnet
+    /// sich stattdessen die „Neues Projekt"-Maske (Name + Beschreibung) direkt
+    /// im Designer.
     pub fn project_save(&mut self) {
+        if !self.project.has_open() {
+            self.open_project_save_dialog();
+            return;
+        }
         match self.project.save(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
@@ -167,7 +178,13 @@ impl App {
         }
     }
 
+    /// Shift+Strg+S: neue Version. Ohne offenes Projekt gilt dasselbe wie bei
+    /// Strg+S — erst benennen.
     pub fn project_save_version(&mut self) {
+        if !self.project.has_open() {
+            self.open_project_save_dialog();
+            return;
+        }
         match self.project.save_version(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
@@ -176,5 +193,31 @@ impl App {
             }
             Err(error) => self.app_error = Some(error),
         }
+    }
+
+    /// Öffnet die „Neues Projekt"-Maske (Name + Beschreibung) als modalen
+    /// Dialog — die aktuelle Ansicht bleibt stehen.
+    pub fn open_project_save_dialog(&mut self) {
+        self.project_save_dialog = Some(crate::ui::ProjectSaveDialogState {
+            focus_name: true,
+            ..Default::default()
+        });
+    }
+
+    /// Legt das Projekt aus dem Maskenentwurf an. Bei Erfolg true (Dialog
+    /// schließen); bei Validierungsfehler (leerer Name) bleibt die Maske offen.
+    /// Trägt ein anderes offenes Projekt ungespeicherte Änderungen, übernimmt
+    /// der Dirty-Guard (Dialog schließt, Bestätigung folgt).
+    pub fn commit_project_save_dialog(&mut self) -> bool {
+        let Some(st) = self.project_save_dialog.as_ref() else {
+            return false;
+        };
+        let name = st.name.clone();
+        let description = st.description.clone();
+        if self.session.is_dirty() && self.project.has_open() {
+            self.pending_project = Some(PendingProjectAction::New { name, description });
+            return true;
+        }
+        self.do_project_new(&name, &description)
     }
 }

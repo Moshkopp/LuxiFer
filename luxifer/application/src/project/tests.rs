@@ -26,7 +26,7 @@ fn anlegen_speichern_oeffnen_roundtrip() {
     let state = state_with_rect();
     let n = state.shapes.len();
 
-    svc.new_project(&state, "  Erstes  ").unwrap();
+    svc.new_project(&state, "  Erstes  ", "").unwrap();
     // Name wird getrimmt.
     assert_eq!(svc.open_name(), Some("Erstes"));
     assert!(svc.has_open());
@@ -42,10 +42,24 @@ fn anlegen_speichern_oeffnen_roundtrip() {
 }
 
 #[test]
+fn beschreibung_wird_gespeichert_und_getrimmt() {
+    let _g = with_temp_dir("description");
+    let mut svc = ProjectService::new();
+    svc.new_project(
+        &state_with_rect(),
+        "Beschrieben",
+        "  Untersetzer aus Eiche  ",
+    )
+    .unwrap();
+    let detail = svc.detail("Beschrieben").unwrap();
+    assert_eq!(detail.description, "Untersetzer aus Eiche");
+}
+
+#[test]
 fn leerer_name_wird_abgewiesen() {
     let _g = with_temp_dir("empty_name");
     let mut svc = ProjectService::new();
-    let err = svc.new_project(&state_with_rect(), "   ").unwrap_err();
+    let err = svc.new_project(&state_with_rect(), "   ", "").unwrap_err();
     assert_eq!(err.code(), "project_name_empty");
     assert!(!svc.has_open());
 }
@@ -62,7 +76,7 @@ fn speichern_ohne_offenes_projekt_liefert_fehler() {
 fn oeffnen_unbekannt_laesst_bisheriges_projekt_erhalten() {
     let _g = with_temp_dir("open_unknown");
     let mut svc = ProjectService::new();
-    svc.new_project(&state_with_rect(), "A").unwrap();
+    svc.new_project(&state_with_rect(), "A", "").unwrap();
 
     let err = svc.open("gibt-es-nicht").unwrap_err();
     assert_eq!(err.code(), "project_read");
@@ -76,7 +90,7 @@ fn version_anlegen_und_auflisten() {
     let _g = with_temp_dir("versions");
     let mut svc = ProjectService::new();
     let state = state_with_rect();
-    svc.new_project(&state, "V").unwrap();
+    svc.new_project(&state, "V", "").unwrap();
     let before = svc.versions().len();
     svc.save_version(&state).unwrap();
     assert_eq!(svc.versions().len(), before + 1);
@@ -87,8 +101,8 @@ fn detail_und_peek_wechseln_nichts() {
     let _g = with_temp_dir("detail_peek");
     let mut svc = ProjectService::new();
     let state = state_with_rect();
-    svc.new_project(&state, "A").unwrap();
-    svc.new_project(&state, "B").unwrap();
+    svc.new_project(&state, "A", "").unwrap();
+    svc.new_project(&state, "B", "").unwrap();
     assert_eq!(svc.open_name(), Some("B"));
 
     // Detail eines NICHT offenen Projekts: nur lesen, offenes bleibt.
@@ -117,7 +131,7 @@ fn version_loeschen_befoerdert_bei_aktueller() {
     let _g = with_temp_dir("version_delete");
     let mut svc = ProjectService::new();
     let v1_state = state_with_rect();
-    svc.new_project(&v1_state, "V").unwrap();
+    svc.new_project(&v1_state, "V", "").unwrap();
 
     // Zweite Version mit zusätzlicher Form anlegen; sie wird die aktuelle.
     let mut v2_state = state_with_rect();
@@ -158,7 +172,7 @@ fn version_loeschen_befoerdert_bei_aktueller() {
 fn umbenennen_und_loeschen() {
     let _g = with_temp_dir("rename_delete");
     let mut svc = ProjectService::new();
-    svc.new_project(&state_with_rect(), "Alt").unwrap();
+    svc.new_project(&state_with_rect(), "Alt", "").unwrap();
 
     svc.rename("Alt", "Neu").unwrap();
     assert_eq!(svc.open_name(), Some("Neu"));
@@ -179,7 +193,7 @@ fn umbenennen_und_loeschen() {
 fn export_kopiert_projektdatei() {
     let _g = with_temp_dir("export");
     let mut svc = ProjectService::new();
-    svc.new_project(&state_with_rect(), "Exp").unwrap();
+    svc.new_project(&state_with_rect(), "Exp", "").unwrap();
 
     let ziel = std::env::temp_dir().join(format!("luxifer_export_{}.luxi", std::process::id()));
     let _ = std::fs::remove_file(&ziel);

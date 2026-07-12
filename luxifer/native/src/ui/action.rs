@@ -52,10 +52,8 @@ pub enum UiAction {
     OpenLayerDialog(usize),
     /// Einen Layer in der Brenn-Reihenfolge verschieben.
     MoveLayer { from: usize, to: usize },
-    /// Neues Projekt aus dem aktuellen Namensentwurf anlegen.
-    NewProject,
-    /// Aktuelles Projekt in-place speichern.
-    SaveProject,
+    /// „Neues Projekt"-Maske (Name + Beschreibung) öffnen.
+    OpenProjectSaveDialog,
     /// Aktuelles Projekt als neue Version speichern.
     SaveProjectVersion,
     /// Projekt mit diesem Namen öffnen.
