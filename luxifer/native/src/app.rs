@@ -614,65 +614,52 @@ impl App {
     // ---- Sofort-Aktionen auf der Auswahl (Werkzeugleiste + Arrange) ----------
 
     pub fn mirror_h(&mut self) {
-        self.session.push_undo();
-        self.session.mirror_selection(luxifer_core::Axis::Vertical);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.mirror(luxifer_core::Axis::Vertical);
+        self.report(result);
     }
     pub fn mirror_v(&mut self) {
-        self.session.push_undo();
-        self.session
-            .mirror_selection(luxifer_core::Axis::Horizontal);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.mirror(luxifer_core::Axis::Horizontal);
+        self.report(result);
     }
     pub fn insert_coasters(&mut self, round: bool) {
-        self.session.push_undo();
         self.session.insert_coasters(round);
         self.fit_all();
     }
     pub fn align(&mut self, kind: luxifer_core::Align) {
-        self.session.push_undo();
-        self.session.align_selection(kind);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.align(kind);
+        self.report(result);
     }
     pub fn distribute(&mut self, kind: luxifer_core::Distribute) {
-        self.session.push_undo();
-        self.session.distribute_selection(kind);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.distribute(kind);
+        self.report(result);
     }
     pub fn group(&mut self) {
-        self.session.push_undo();
-        self.session.group_selected();
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.group();
+        self.report(result);
     }
     pub fn ungroup(&mut self) {
-        self.session.push_undo();
-        self.session.ungroup_selected();
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.ungroup();
+        self.report(result);
     }
     pub fn nest(&mut self, gap: f64) {
-        self.session.push_undo();
-        self.session.nest_selected(gap);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.nest(gap);
+        self.report(result);
     }
     pub fn nest_fill(&mut self, gap: f64) {
-        self.session.push_undo();
-        self.session.nest_fill_selected(gap);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.nest_fill(gap);
+        self.report(result);
     }
     pub fn boolean(&mut self, op: luxifer_core::BoolOp) {
-        self.session.push_undo();
-        self.session.boolean_selected(op);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.boolean(op);
+        self.report(result);
     }
     pub fn offset(&mut self, dist: f64) {
-        self.session.push_undo();
-        self.session.offset_selected(dist);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.offset(dist);
+        self.report(result);
     }
     pub fn fillet(&mut self, radius: f64) {
-        self.session.push_undo();
-        self.session.fillet_selected(radius);
-        self.session.discard_last_undo_if_no_change();
+        let result = self.session.fillet(radius);
+        self.report(result);
     }
     pub fn selection_count(&self) -> usize {
         self.session.selected.len()
@@ -684,33 +671,27 @@ impl App {
     pub fn begin_action(&mut self, a: crate::tools::ToolAction) {
         use crate::tools::ToolAction as A;
         match a {
-            A::Boolean => {
-                if self.selection_count() >= 2 {
-                    self.boolean(luxifer_core::BoolOp::Union);
-                } else {
-                    self.laser_msg = "Boolean braucht ≥2 Objekte".into();
-                }
-            }
-            A::Fillet => {
-                if self.selection_count() >= 1 {
-                    self.fillet(2.0);
-                } else {
-                    self.laser_msg = "Fillet braucht eine Auswahl".into();
-                }
-            }
-            A::Offset => {
-                if self.selection_count() >= 1 {
-                    self.offset(2.0);
-                } else {
-                    self.laser_msg = "Offset braucht eine Auswahl".into();
-                }
-            }
+            A::Boolean => self.boolean(luxifer_core::BoolOp::Union),
+            A::Fillet => self.fillet(2.0),
+            A::Offset => self.offset(2.0),
             A::PatternFill => {
-                self.laser_msg = "Muster-Füllung folgt (Dialog)".into();
+                self.app_error = Some(AppError::new(
+                    "not_migrated",
+                    "Muster-Füllung ist noch nicht migriert.",
+                ))
             }
             A::Bridge => {
-                self.laser_msg = "Haltesteg folgt (Interaktion)".into();
+                self.app_error = Some(AppError::new(
+                    "not_migrated",
+                    "Haltestege sind noch nicht migriert.",
+                ))
             }
+        }
+    }
+
+    fn report(&mut self, result: Result<(), AppError>) {
+        if let Err(error) = result {
+            self.app_error = Some(error);
         }
     }
 

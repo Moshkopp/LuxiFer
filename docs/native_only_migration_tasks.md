@@ -141,12 +141,13 @@ Ziel: Ein kleiner, ehrlicher Editor, der zuverlässig benutzt werden kann.
 - [x] Auswahl: Klick, additiv, Rechteckauswahl, Auswahl löschen.
 - [x] Zeichnen: Rechteck, Ellipse, Linie, Polygon, Polylinie, Spline und Bézier
       einschließlich Abbruch und Abschluss.
-- [ ] Transformieren: Verschieben, Skalieren, proportional Skalieren, Rotieren,
-      Spiegeln (Move/Resize/Rotate besitzen jetzt einen gemeinsamen
-      Application-Gestenlebenszyklus; Spiegeln folgt als eigener Schnitt).
+- [x] Transformieren: Verschieben, Skalieren, proportional Skalieren, Rotieren
+      und Spiegeln laufen über `EditorSession`.
 - [ ] Transform-Handles und BBox ausschließlich aus kanonischer Core-Geometrie.
-- [ ] Layer/Farbe: aktivieren, Parameter, Sichtbarkeit, Sperre, Reihenfolge.
-- [ ] Löschen, Gruppieren, Aufheben, Undo und Redo.
+- [ ] Layer/Farbe: Aktivieren läuft über `EditorSession`; Parameter,
+      Sichtbarkeit, Sperre und Reihenfolge folgen im Layer-Schnitt.
+- [x] Löschen, Gruppieren, Aufheben, Undo und Redo laufen über
+      `EditorSession`.
 - [ ] Tastaturkürzel einschließlich Fokusregeln für Textfelder/Dialoge.
 - [x] Jede direkte Move-/Resize-/Rotate-Geste erzeugt genau einen sinnvollen
       Undo-Schritt.
@@ -175,6 +176,15 @@ sammelt nur Werkzeugtyp und Weltpunkte. Mindestgrößen, Auswahl des Ergebnisses
 und Undo liegen unterhalb der UI-Grenze; ungültige Mini-Gesten bleiben ohne
 Mutation und ohne Undo-Eintrag. Validierung: 245 Workspace-Tests und Clippy mit
 `-D warnings` grün.
+
+Auswahloperationen-Schnitt 2026-07-12: Farbe, Spiegeln, Ausrichten, Verteilen,
+Gruppieren, Nesting sowie die bereits sichtbaren Boolean-/Offset-/Fillet-
+Aktionen laufen über benannte Session-Methoden. Auswahlvoraussetzungen liefern
+`AppError`; nicht migrierte Aktionen nutzen `not_migrated` statt eines fremden
+Laser-Statuskanals. Dabei wurde doppeltes Undo entfernt: Native setzte zuvor
+zusätzliche Undo-Punkte vor Core-Operationen, die selbst bereits atomare Undo-
+Punkte erzeugen. Validierung: 247 Workspace-Tests und Clippy mit `-D warnings`
+grün.
 
 ## Phase 3 — Projekt, Versionen und Assets
 
@@ -226,8 +236,8 @@ Abnahme Phase 4:
 
 Ziel: Alle produktiv benötigten Operationen mit expliziten Voraussetzungen.
 
-- [ ] Ausrichten und Verteilen inklusive Gruppen.
-- [ ] Gruppieren/Aufheben und Spiegeln.
+- [x] Ausrichten und Verteilen inklusive Gruppen über Application/Core.
+- [x] Gruppieren/Aufheben und Spiegeln über Application/Core.
 - [ ] Boolean: Vereinigung, Schnitt und Differenz.
 - [ ] Offset und Fillet.
 - [ ] Bridge und Ecken-Fillet.

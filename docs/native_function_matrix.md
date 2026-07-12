@@ -38,17 +38,17 @@ Quelle: `frontend/src-tauri/src/commands/edit.rs`.
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `activate_color` | Core/Application | prüfen | Auswahl umlayern oder Pending-Farbe; leere Layer vermeiden |
+| `activate_color` | Core/Application | über `EditorSession` | Core verwaltet Umlayern/Pending-Farbe und leere Layer |
 | `select_at` | Core/Application | über `EditorSession` | additiv, leerer Klick, Gruppen und Kameratoleranz angebunden |
 | `select_rect` | Core/Application | über `EditorSession` | beide Ziehrichtungen, Gruppen und rotierte BBox über Core |
-| `group_op` | Core/Application | vorhanden, prüfen | Auswahlvoraussetzung und Undo |
-| `ungroup_op` | Core/Application | vorhanden, prüfen | gemischte Auswahl und Undo |
+| `group_op` | Core/Application | über `EditorSession` | Voraussetzung in Application; genau ein Core-Undo |
+| `ungroup_op` | Core/Application | über `EditorSession` | Application/Core; kein zusätzlicher Native-Undo |
 | `move_selected` | Core/Application | Session-Geste | genau ein Undo, Cancel stellt Ausgangszustand her |
 | `scale_selected` | Core/Application | Session-Geste | Lebenszyklus/Undo migriert; Anker/Flip weiter prüfen |
 | `rotate_selected` | Core/Application | Session-Geste | Lebenszyklus/Undo migriert; Pivot/Metadaten weiter prüfen |
-| `align` | Core/Application | vorhanden, prüfen | Gruppen als Einheit; alle Varianten |
-| `distribute` | Core/Application | vorhanden, prüfen | Gruppen und Mindestanzahl |
-| `mirror` | Core/Application | vorhanden, prüfen | horizontal/vertikal und Metadaten |
+| `align` | Core/Application | über `EditorSession` | Gruppen als Einheit; kein doppelter Undo-Punkt |
+| `distribute` | Core/Application | über `EditorSession` | drei Einheiten werden in Application vorausgesetzt |
+| `mirror` | Core/Application | über `EditorSession` | horizontal/vertikal; Core hält Metadaten synchron |
 | `clear_selection` | Core/Application | über `EditorSession` | keine Dirty-/Undo-Änderung; Escape ohne aktive Geste |
 | `delete_selected` | Core/Application | über `EditorSession` | Fehler ohne Auswahl sowie Löschen/Undo/Redo getestet |
 | `set_layer_params` | Core/Application | teilweise | alle Laser-/Rasterparameter validieren |
@@ -77,14 +77,14 @@ Quelle: `frontend/src-tauri/src/commands/shapes.rs`.
 | `toggle_node_smooth` | Core | fehlt | tangentiale Kopplung und Undo |
 | `delete_node` | Core | fehlt | Mindestknoten und Formlöschung klären |
 | `trace_image` | Core/Application | fehlt | Asset, Parameter, Ergebnis-/Fehlerzustand |
-| `boolean_op` | Core/Application | UI-Aktion, prüfen | union/intersection/difference und Fehler |
-| `offset_op` | Core/Application | UI-Aktion, prüfen | Distanzdialog, offene/geschlossene Konturen |
+| `boolean_op` | Core/Application | Basis über `EditorSession` | Union-UI aktiv; Varianten-/Parameterdialog folgt |
+| `offset_op` | Core/Application | Basis über `EditorSession` | Defaultwert aktiv; Distanzdialog folgt |
 | `bridge_op` | Core/Application | UI-Aktion, prüfen | Geste, Breite, ungültige Treffer |
 | `fillet_corners_op` | Core/Application | fehlt | Eckenauswahl, Radiusgrenzen, Undo |
-| `fillet_op` | Core/Application | UI-Aktion, prüfen | Auswahlvoraussetzung und Fehler |
-| `nest_op` | Core/Application | vorhanden, prüfen | Gap, Bettgrenzen, Gruppen |
-| `nest_fill_op` | Core/Application | vorhanden, prüfen | Füllalgorithmus und Abbruch/Fehler |
-| `insert_coasters` | Core/Application | vorhanden, prüfen | rund/eckig und Layer/Farbe |
+| `fillet_op` | Core/Application | Basis über `EditorSession` | Defaultwert aktiv; Radiusdialog folgt |
+| `nest_op` | Core/Application | über `EditorSession` | Auswahlvoraussetzung und Core-Undo |
+| `nest_fill_op` | Core/Application | über `EditorSession` | Auswahlvoraussetzung und Core-Undo |
+| `insert_coasters` | Core/Application | über `EditorSession` | rund/eckig; genau ein Core-Undo |
 | `add_rect` | Core/Application | über `EditorSession` | beide Ziehrichtungen, Mindestgröße und Undo getestet |
 | `add_ellipse` | Core/Application | über `EditorSession` | normalisierte BBox, Mindestgröße und Undo getestet |
 | `add_line` | Core/Application | über `EditorSession` | Mindestlänge; ungültige Geste ohne Undo |
