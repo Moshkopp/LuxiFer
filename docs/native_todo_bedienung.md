@@ -148,6 +148,10 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   Mausrad. Bild-Layer zeigen jetzt die **verarbeitete Rastertextur** (Pixel
   255 = gebrannt) statt der Design-Textur; der Asset-Resolver
   (`application::assets::resolve_luma`) ist derselbe wie im echten Job.
+  Asset-Dekodierung und Rasterung laufen auf einem Session-Snapshot in einem
+  Worker statt im Renderthread; der Cache-Schlüssel umfasst Renderrevision,
+  Auswahlmodus, Material und Travel-Anzeige. Während der Berechnung bleibt die
+  UI navigierbar und zeigt die Materialbühne bzw. den letzten fertigen Stand.
   Dabei wurde eine gefährliche Lücke geschlossen: `LaserService::plan` plante
   zuvor OHNE Assets — Bild-Layer wären beim echten Brennen/Export
   stillschweigend übersprungen worden, obwohl die Vorschau sie zeigt. Eine

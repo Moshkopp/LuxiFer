@@ -18,6 +18,14 @@ use crate::canvas::scene::{base_vertices, preview_vertices, PreviewLegend, Previ
 use crate::gpu::Gpu;
 use crate::image_gpu::ImageStore;
 
+#[derive(Clone, Copy, PartialEq)]
+struct PreviewKey {
+    revision: u64,
+    selection_only: bool,
+    material: PreviewMaterial,
+    show_travel: bool,
+}
+
 /// Nur-lesender Szenenzustand, den der Root pro Frame an den Renderer übergibt.
 pub struct FrameScene<'a> {
     pub session: &'a EditorSession,
@@ -48,6 +56,11 @@ pub struct Renderer {
     /// Legende des letzten Preview-Aufbaus (None außerhalb der Vorschau bzw.
     /// vor dem ersten Preview-Frame). Die UI liest sie einen Frame versetzt.
     preview_legend: Option<PreviewLegend>,
+    preview_key: Option<PreviewKey>,
+    preview_pending: Option<(
+        PreviewKey,
+        std::sync::mpsc::Receiver<crate::canvas::scene::PreviewGeometry>,
+    )>,
     last_frame: Instant,
     fps: f32,
     /// Ob egui im letzten Frame sofort weiter zeichnen wollte.
@@ -68,6 +81,8 @@ impl Renderer {
             // MAX erzwingt den Aufbau im ersten Frame (Core startet bei 0).
             last_render_rev: u64::MAX,
             preview_legend: None,
+            preview_key: None,
+            preview_pending: None,
             last_frame: Instant::now(),
             fps: 0.0,
             wants_repaint: false,
@@ -89,6 +104,8 @@ impl Renderer {
     pub fn invalidate_scene(&mut self) {
         self.last_render_rev = u64::MAX;
         self.preview_legend = None;
+        self.preview_key = None;
+        self.preview_pending = None;
     }
 
     /// Legende des letzten Preview-Aufbaus (None, solange keiner lief).
@@ -140,33 +157,86 @@ impl Renderer {
 
         // Canvas-Vertices nur neu bauen+hochladen, wenn sich die Szene änderte.
         let rev = scene.session.render_rev();
-        let scene_changed = rev != self.last_render_rev;
-        if scene_changed {
-            self.last_render_rev = rev;
-            if scene.preview {
-                let geometry = preview_vertices(
-                    scene.session,
-                    scene.selection_only,
-                    scene.preview_material,
-                    scene.preview_show_travel,
-                );
+        let mut scene_changed = rev != self.last_render_rev;
+        if scene.preview {
+            let key = PreviewKey {
+                revision: rev,
+                selection_only: scene.selection_only,
+                material: scene.preview_material,
+                show_travel: scene.preview_show_travel,
+            };
+            if self.preview_key != Some(key)
+                && self.preview_pending.as_ref().map(|(k, _)| *k) != Some(key)
+            {
+                let state = scene.session.state().clone();
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let session = EditorSession::new(state);
+                    let geometry = preview_vertices(
+                        &session,
+                        key.selection_only,
+                        key.material,
+                        key.show_travel,
+                    );
+                    let _ = tx.send(geometry);
+                });
+                self.preview_pending = Some((key, rx));
+                self.preview_legend = None;
+                if self.preview_key.is_none() {
+                    // Beim ersten Eintritt keine alte Design-Geometrie als
+                    // vermeintliche Preview zeigen: nur die Materialbühne.
+                    self.verts = crate::scene_geo::bed_material(
+                        scene.session.bed_w_mm as f32,
+                        scene.session.bed_h_mm as f32,
+                        crate::canvas::scene::srgb_to_linear(key.material.bed()),
+                    );
+                    self.background_end = self.verts.len() as u32;
+                    self.images.set_rasters(
+                        &self.gpu.device,
+                        &self.gpu.queue,
+                        self.gpu.config.format,
+                        &[],
+                        crate::canvas::scene::srgb_to_linear(key.material.burn()),
+                    );
+                    self.gpu.upload_verts(&self.verts);
+                }
+            }
+            if self.preview_pending.is_some() {
+                self.wants_repaint = true;
+                window.request_redraw();
+            }
+            let ready = self
+                .preview_pending
+                .as_ref()
+                .and_then(|(_, rx)| rx.try_recv().ok());
+            if let Some(geometry) = ready {
+                let (key, _) = self.preview_pending.take().unwrap();
+                self.preview_key = Some(key);
                 self.background_end = geometry.background_end;
                 self.verts = geometry.vertices;
-                // Verarbeitete Bild-Rasterungen als Texturen bereitstellen.
                 self.images.set_rasters(
                     &self.gpu.device,
                     &self.gpu.queue,
                     self.gpu.config.format,
                     &geometry.rasters,
-                    crate::canvas::scene::srgb_to_linear(scene.preview_material.burn()),
+                    crate::canvas::scene::srgb_to_linear(key.material.burn()),
                 );
                 self.preview_legend = Some(geometry.legend);
-            } else {
-                let geometry = base_vertices(scene.session);
-                self.background_end = geometry.background_end;
-                self.verts = geometry.vertices;
-                self.preview_legend = None;
+                let verts = std::mem::take(&mut self.verts);
+                self.gpu.upload_verts(&verts);
+                self.verts = verts;
             }
+            // Preview-Geometrie wird ausschließlich vom fertigen Workergebnis
+            // aktualisiert; eine Core-Revision startet nur den Worker.
+            scene_changed = false;
+            self.last_render_rev = rev;
+        }
+        if scene_changed {
+            self.last_render_rev = rev;
+            let geometry = base_vertices(scene.session);
+            self.background_end = geometry.background_end;
+            self.verts = geometry.vertices;
+            self.preview_legend = None;
             let verts = std::mem::take(&mut self.verts);
             self.gpu.upload_verts(&verts);
             self.verts = verts;
