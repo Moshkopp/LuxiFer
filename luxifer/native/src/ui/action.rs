@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use luxifer_application::LayerToggle;
-use luxifer_core::{Align, Distribute, PolyShape};
+use luxifer_core::{Align, Distribute, JobAction, PolyShape};
 
 use crate::tools::{Tool, ToolAction, View};
 
@@ -74,4 +74,16 @@ pub enum UiAction {
     ImportPath(PathBuf),
     /// Die aktuelle Fehleranzeige schließen.
     DismissError,
+    /// Laser-Profil aktivieren.
+    LaserSelect(String),
+    /// Laser-Job-Aktion ausführen (Start/Pause/Stop/…).
+    LaserRun(JobAction),
+    /// Aktuellen Job als Datei exportieren.
+    LaserExport,
+    /// Laserkopf um (dx, dy) mm bewegen.
+    LaserJog(f64, f64),
+    /// Laserkopf homen.
+    LaserHome,
+    /// Laser-Einstellungen öffnen (`edit_active` = bestehendes bearbeiten).
+    OpenLaserSettings { edit_active: bool },
 }

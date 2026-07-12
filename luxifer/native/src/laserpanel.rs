@@ -6,18 +6,23 @@
 use egui::{Color32, RichText, Sense, Vec2};
 use luxifer_core::{JobAction, StartMode};
 
-use crate::app::App;
+use crate::tools::LaserUi;
+use crate::ui::UiAction;
 
-/// Was das Panel in diesem Frame auslösen will (nach dem UI-Block ausgeführt,
-/// um Borrow-Konflikte mit `app` zu vermeiden).
-enum PanelAction {
-    Run(JobAction),
-    Export,
-    Jog(f64, f64),
-    Home,
-    Select(String),
-    NewProfile,
-    EditProfile,
+/// Reine Sicht auf den Laser-Zustand für das Panel (vom Root abgeleitet, damit
+/// das Panel weder Backend noch `App` kennt). `slots` ist die feste 2×3-
+/// Ampelbelegung; ein `None`-Slot bleibt leer.
+pub struct LaserView {
+    /// (id, Anzeige-Label) aller Profile.
+    pub profiles: Vec<(String, String)>,
+    /// Id des aktiven Profils (leer, wenn keins).
+    pub active_id: String,
+    /// Ampel-Slots aus den echten Treiber-Aktionen.
+    pub slots: [Option<JobAction>; 6],
+    /// Ob der aktive Treiber Datei-Export unterstützt.
+    pub can_export: bool,
+    /// Letzte Treiber-Rückmeldung (Statuszeile).
+    pub msg: String,
 }
 
 /// Farb-Ton der Ampel-Kacheln.
@@ -70,33 +75,24 @@ fn action_meta(a: JobAction) -> (&'static str, Tone) {
     }
 }
 
-/// Zeichnet das Panel und führt am Ende die gewählte Aktion über `app` aus.
-pub fn show(ui: &mut egui::Ui, app: &mut App) {
-    let mut pending: Option<PanelAction> = None;
+/// Zeichnet das Panel. `view` ist die vom Root abgeleitete Sicht, `ui_state`
+/// der bearbeitbare Präsentationsentwurf (Slider/Anker/Startmodus). Gibt die
+/// ausgelösten Absichten zurück; das Panel kennt weder Backend noch `App`.
+pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<UiAction> {
+    let mut actions = Vec::new();
 
     // Kopf: „LASER" + aktuelles Profil.
     ui.label(RichText::new("LASER").small().weak());
     ui.add_space(4.0);
-    let profiles: Vec<(String, String)> = app
-        .laser_backend
-        .registry
-        .profiles
-        .iter()
-        .map(|p| (p.id.clone(), format!("{} · {:?}", p.name, p.kind)))
-        .collect();
-    let active_id = app
-        .laser_backend
-        .active_profile()
-        .map(|p| p.id.clone())
-        .unwrap_or_default();
-    if profiles.is_empty() {
+    if view.profiles.is_empty() {
         if ui.button("+ Laser anlegen").clicked() {
-            pending = Some(PanelAction::NewProfile);
+            actions.push(UiAction::OpenLaserSettings { edit_active: false });
         }
     } else {
-        let active_label = profiles
+        let active_label = view
+            .profiles
             .iter()
-            .find(|(id, _)| *id == active_id)
+            .find(|(id, _)| *id == view.active_id)
             .map(|(_, l)| l.clone())
             .unwrap_or_else(|| "—".into());
         ui.horizontal(|ui| {
@@ -104,9 +100,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
                 .selected_text(active_label)
                 .width(ui.available_width() - 34.0)
                 .show_ui(ui, |ui| {
-                    for (id, label) in &profiles {
-                        if ui.selectable_label(*id == active_id, label).clicked() {
-                            pending = Some(PanelAction::Select(id.clone()));
+                    for (id, label) in &view.profiles {
+                        if ui.selectable_label(*id == view.active_id, label).clicked() {
+                            actions.push(UiAction::LaserSelect(id.clone()));
                         }
                     }
                 });
@@ -115,32 +111,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
                 .on_hover_text("Laser verwalten")
                 .clicked()
             {
-                pending = Some(PanelAction::EditProfile);
+                actions.push(UiAction::OpenLaserSettings { edit_active: true });
             }
         });
     }
     ui.add_space(10.0);
 
-    // Ampel-Grid aus den ECHTEN Aktionen des aktiven Treibers, feste Slots.
+    // Ampel-Grid aus den ECHTEN Aktionen des aktiven Treibers (feste Slots).
     ui.label(RichText::new("JOB").small().weak());
     ui.add_space(4.0);
-    let actions = app.laser_backend.actions();
-    let has = |a: JobAction| {
-        actions
-            .iter()
-            .any(|x| std::mem::discriminant(x) == std::mem::discriminant(&a))
-    };
-    // Slot-Reihenfolge; erster passender Treiber-Key füllt den Slot.
-    let slots: [Option<JobAction>; 6] = [
-        [JobAction::SendJob, JobAction::StreamGcode]
-            .into_iter()
-            .find(|a| has(*a)),
-        Some(JobAction::Pause).filter(|a| has(*a)),
-        Some(JobAction::Stop).filter(|a| has(*a)),
-        Some(JobAction::GoOrigin).filter(|a| has(*a)),
-        Some(JobAction::Frame).filter(|a| has(*a)),
-        Some(JobAction::RubberFrame).filter(|a| has(*a)),
-    ];
     let avail = ui.available_width();
     let gap = 6.0;
     let cell_w = (avail - 2.0 * gap) / 3.0;
@@ -148,12 +127,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
     egui::Grid::new("ampel")
         .spacing(Vec2::splat(gap))
         .show(ui, |ui| {
-            for (i, slot) in slots.iter().enumerate() {
+            for (i, slot) in view.slots.iter().enumerate() {
                 match slot {
                     Some(a) => {
                         let (label, tone) = action_meta(*a);
                         if ampel_cell(ui, label, &tone, cell_w, cell_h) {
-                            pending = Some(PanelAction::Run(*a));
+                            actions.push(UiAction::LaserRun(*a));
                         }
                     }
                     None => {
@@ -167,9 +146,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
         });
 
     ui.add_space(8.0);
-    ui.checkbox(&mut app.laser.selection_only, "Nur Auswahl lasern");
-    if has(JobAction::ExportFile) && ui.button("Als Datei exportieren").clicked() {
-        pending = Some(PanelAction::Export);
+    ui.checkbox(&mut ui_state.selection_only, "Nur Auswahl lasern");
+    if view.can_export && ui.button("Als Datei exportieren").clicked() {
+        actions.push(UiAction::LaserExport);
     }
 
     ui.add_space(8.0);
@@ -180,7 +159,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
     ui.label(RichText::new("PARAMETER").small().weak());
     ui.add_space(4.0);
     egui::ComboBox::from_id_salt("startmode")
-        .selected_text(match app.laser.start_mode {
+        .selected_text(match ui_state.start_mode {
             StartMode::Absolut => "Absolute Koordinaten",
             StartMode::AktuellePosition => "Aktuelle Position",
             StartMode::Benutzerursprung => "Benutzerursprung",
@@ -188,17 +167,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
         .width(ui.available_width() - 8.0)
         .show_ui(ui, |ui| {
             ui.selectable_value(
-                &mut app.laser.start_mode,
+                &mut ui_state.start_mode,
                 StartMode::Absolut,
                 "Absolute Koordinaten",
             );
             ui.selectable_value(
-                &mut app.laser.start_mode,
+                &mut ui_state.start_mode,
                 StartMode::AktuellePosition,
                 "Aktuelle Position",
             );
             ui.selectable_value(
-                &mut app.laser.start_mode,
+                &mut ui_state.start_mode,
                 StartMode::Benutzerursprung,
                 "Benutzerursprung",
             );
@@ -206,7 +185,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
     ui.add_space(8.0);
     ui.label(RichText::new("JOB-NULLPUNKT").small().weak());
     ui.add_space(4.0);
-    anchor_grid(ui, &mut app.laser.anchor);
+    anchor_grid(ui, &mut ui_state.anchor);
 
     ui.add_space(10.0);
     ui.separator();
@@ -215,33 +194,22 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
     // Jog-Kreuz.
     ui.label(RichText::new("KOPF").small().weak());
     ui.add_space(4.0);
-    let step = app.laser.jog_step;
-    if let Some(jog) = jog_cross(ui, step) {
-        pending = Some(jog);
+    if let Some(jog) = jog_cross(ui, ui_state.jog_step) {
+        actions.push(jog);
     }
     ui.add_space(8.0);
-    slider_row(ui, "Schritt", "mm", &mut app.laser.jog_step, 0.1, 100.0);
-    slider_row(ui, "Speed", "mm/s", &mut app.laser.jog_speed, 1.0, 1000.0);
+    slider_row(ui, "Schritt", "mm", &mut ui_state.jog_step, 0.1, 100.0);
+    slider_row(ui, "Speed", "mm/s", &mut ui_state.jog_speed, 1.0, 1000.0);
 
     // Statuszeile: letzte Treiber-Rückmeldung.
-    if !app.laser_msg.is_empty() {
+    if !view.msg.is_empty() {
         ui.add_space(8.0);
         ui.separator();
         ui.add_space(4.0);
-        ui.label(RichText::new(&app.laser_msg).small().weak());
+        ui.label(RichText::new(&view.msg).small().weak());
     }
 
-    // Gewählte Aktion nach dem UI-Block ausführen.
-    match pending {
-        Some(PanelAction::Run(a)) => app.laser_run(a),
-        Some(PanelAction::Export) => app.laser_export(),
-        Some(PanelAction::Jog(dx, dy)) => app.laser_jog(dx, dy),
-        Some(PanelAction::Home) => app.laser_home(),
-        Some(PanelAction::Select(id)) => app.laser_select(&id),
-        Some(PanelAction::NewProfile) => app.open_laser_settings(false),
-        Some(PanelAction::EditProfile) => app.open_laser_settings(true),
-        None => {}
-    }
+    actions
 }
 
 /// Zeichnet eine Ampel-Kachel; gibt `true` bei Klick zurück.
@@ -296,13 +264,13 @@ fn anchor_grid(ui: &mut egui::Ui, anchor: &mut usize) {
         });
 }
 
-/// Zeichnet das Jog-Kreuz. Gibt die ausgelöste Bewegung als PanelAction zurück
+/// Zeichnet das Jog-Kreuz. Gibt die ausgelöste Bewegung als `UiAction` zurück
 /// (Jog um `step` mm bzw. Home).
-fn jog_cross(ui: &mut egui::Ui, step: f64) -> Option<PanelAction> {
+fn jog_cross(ui: &mut egui::Ui, step: f64) -> Option<UiAction> {
     let b = 46.0;
     let gap = 5.0;
     let total = 3.0 * b + 2.0 * gap;
-    let mut result: Option<PanelAction> = None;
+    let mut result: Option<UiAction> = None;
     ui.horizontal(|ui| {
         // Zentrieren.
         let pad = (ui.available_width() - total) * 0.5;
@@ -372,11 +340,11 @@ fn jog_cross(ui: &mut egui::Ui, step: f64) -> Option<PanelAction> {
             }
             if resp.clicked() {
                 result = Some(match dir {
-                    JogDir::Up => PanelAction::Jog(0.0, -step),
-                    JogDir::Down => PanelAction::Jog(0.0, step),
-                    JogDir::Left => PanelAction::Jog(-step, 0.0),
-                    JogDir::Right => PanelAction::Jog(step, 0.0),
-                    JogDir::Home => PanelAction::Home,
+                    JogDir::Up => UiAction::LaserJog(0.0, -step),
+                    JogDir::Down => UiAction::LaserJog(0.0, step),
+                    JogDir::Left => UiAction::LaserJog(-step, 0.0),
+                    JogDir::Right => UiAction::LaserJog(step, 0.0),
+                    JogDir::Home => UiAction::LaserHome,
                 });
             }
         };

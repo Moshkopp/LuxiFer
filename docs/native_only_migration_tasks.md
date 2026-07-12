@@ -404,14 +404,24 @@ wurden panelweise umgestellt: `palette`/`shape_picker`, `tools`, `layers` (mit
 alle drei Dialoge (Layer/Text/Laser). Dialoge melden über `DialogOutcome` bzw.
 `LaserDialogOutcome`, ihr Entwurf wird als `&mut`-Draft gereicht, der
 Draft-Lebenszyklus liegt am Root. Ergebnis: Nur noch `ui/mod.rs` (Composition
-Root) kennt `App`; kein Panel-/Dialog-Modul importiert `App` mehr. Offen bleibt
-allein `laserpanel` (eigenes ~420-Zeilen-Modul, bewusst separat) sowie die
-reine Panelbreiten-Rückschreibung (`left_w`/`right_w`, Layout, kein Fachzustand).
+Root) kennt `App`; kein Panel-/Dialog-Modul importiert `App` mehr.
 
-Nächste geplante Schnitte: `laserpanel` auf dieselbe Grenze bringen; parallel
-Overlay-/Cache-Erzeugung aus `app.rs` nach `canvas/`, dann der Render-Frame nach
-`render/`, dann Maus-/Gestensteuerung. Zuletzt die Reduktion von `App` auf einen
-Composition Root.
+laserpanel-Schnitt 2026-07-12 (UiAction-Grenze abgeschlossen): Auch das
+Laser-Bedienpanel (~420 Zeilen) ist migriert. Es bekommt eine reine `LaserView`
+(Profile, aktive Id, Ampel-Slots, Export-Fähigkeit, Statusmeldung — vom Root
+abgeleitet, der dafür `laser_backend.actions()` aufruft) und den bearbeitbaren
+`&mut LaserUi` (Slider/Anker/Startmodus), und liefert `Vec<UiAction>`
+(LaserSelect/LaserRun/LaserExport/LaserJog/LaserHome/OpenLaserSettings). Das
+frühere modulinterne `PanelAction`-Enum entfällt. Damit importiert **kein**
+UI-Modul mehr `App`.
+
+Bewusst NICHT über UiAction geführt: die reine Panelbreiten-Rückschreibung
+(`left_w`/`right_w`) ist Layout-Rückmeldung von egui an den Root, kein
+Fachzustand — dokumentierte Ausnahme, kein offener Schuldposten.
+
+Nächste geplante Schnitte: Overlay-/Cache-Erzeugung aus `app.rs` nach `canvas/`,
+dann der Render-Frame nach `render/`, dann Maus-/Gestensteuerung. Zuletzt die
+Reduktion von `App` auf einen Composition Root.
 - [ ] UI-Größen, DPI-Skalierung und Ultrawide-/kleine Fenster testen.
 - [ ] Tooltips, deaktivierte Zustände, Fokus und Tastaturnavigation.
 - [ ] Rechte Panels sinnvoll skalierbar/resizable machen.

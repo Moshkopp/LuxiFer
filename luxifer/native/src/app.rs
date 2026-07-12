@@ -648,6 +648,12 @@ impl App {
             A::ImportImage => self.import_image_dialog(),
             A::ImportPath(path) => self.import_path(&path),
             A::DismissError => self.app_error = None,
+            A::LaserSelect(id) => self.laser_select(&id),
+            A::LaserRun(action) => self.laser_run(action),
+            A::LaserExport => self.laser_export(),
+            A::LaserJog(dx, dy) => self.laser_jog(dx, dy),
+            A::LaserHome => self.laser_home(),
+            A::OpenLaserSettings { edit_active } => self.open_laser_settings(edit_active),
         }
     }
 

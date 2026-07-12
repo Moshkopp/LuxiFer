@@ -6,9 +6,8 @@
 //! Die einzelnen Panels und Dialoge liegen in den Untermodulen. Nur dieser
 //! Root kennt `App`: Er liest Werte, führt Draft-Lebenszyklen und dispatcht die
 //! von den Panels gelieferten `UiAction`s (ADR 0011). Die Panels/Dialoge selbst
-//! erhalten `&`-Sichten bzw. `&mut`-Entwürfe und geben Absichten zurück — sie
-//! greifen nicht mehr auf `App` zu. Ausnahme bleibt vorerst `laserpanel`, das
-//! als eigenes größeres Modul noch nicht migriert ist.
+//! (inklusive `laserpanel`) erhalten `&`-Sichten bzw. `&mut`-Entwürfe und geben
+//! Absichten zurück — sie greifen nicht mehr auf `App` zu.
 
 mod action;
 mod arrange;
@@ -119,8 +118,14 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             }
 
             let is_laser = app.view == View::Laser;
-            // Ebenen-Sicht vorab aus der Session ableiten (nur Lesezugriff),
-            // damit das Panel keinen App-Zugriff braucht.
+            // Sichten vorab ableiten, damit die Panels keinen App-/Backend-
+            // Zugriff brauchen. `laser_view` ruft `actions()` (baut den Treiber
+            // lazy), daher &mut vor der Closure.
+            let laser_view = if is_laser {
+                Some(laser_view(app))
+            } else {
+                None
+            };
             let layer_rows: Vec<layers::LayerRow> = if is_laser {
                 Vec::new()
             } else {
@@ -131,9 +136,8 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.add_space(6.0);
-                    if is_laser {
-                        laserpanel::show(ui, app);
-                        Vec::new()
+                    if let Some(view) = &laser_view {
+                        laserpanel::show(ui, view, &mut app.laser)
                     } else {
                         layers::layers_panel(ui, &layer_rows)
                     }
@@ -236,6 +240,50 @@ fn layer_rows(app: &App) -> Vec<layers::LayerRow> {
             count: s.shapes.iter().filter(|sh| sh.layer_id == i).count(),
         })
         .collect()
+}
+
+/// Leitet die reine Laser-Sicht für `laserpanel::show` ab. Braucht `&mut`, weil
+/// `laser_backend.actions()` den Treiber zum aktiven Profil lazy aufbaut.
+fn laser_view(app: &mut App) -> laserpanel::LaserView {
+    use luxifer_core::JobAction;
+    let profiles = app
+        .laser_backend
+        .registry
+        .profiles
+        .iter()
+        .map(|p| (p.id.clone(), format!("{} · {:?}", p.name, p.kind)))
+        .collect();
+    let active_id = app
+        .laser_backend
+        .active_profile()
+        .map(|p| p.id.clone())
+        .unwrap_or_default();
+    let msg = app.laser_msg.clone();
+    let actions = app.laser_backend.actions();
+    let has = |a: JobAction| {
+        actions
+            .iter()
+            .any(|x| std::mem::discriminant(x) == std::mem::discriminant(&a))
+    };
+    // Feste Slot-Reihenfolge; erster passender Treiber-Key füllt den Slot.
+    let slots = [
+        [JobAction::SendJob, JobAction::StreamGcode]
+            .into_iter()
+            .find(|a| has(*a)),
+        Some(JobAction::Pause).filter(|a| has(*a)),
+        Some(JobAction::Stop).filter(|a| has(*a)),
+        Some(JobAction::GoOrigin).filter(|a| has(*a)),
+        Some(JobAction::Frame).filter(|a| has(*a)),
+        Some(JobAction::RubberFrame).filter(|a| has(*a)),
+    ];
+    let can_export = has(JobAction::ExportFile);
+    laserpanel::LaserView {
+        profiles,
+        active_id,
+        slots,
+        can_export,
+        msg,
+    }
 }
 
 /// Dunkles Theme, an den Svelte-Look angelehnt (kühles Blau-Grau).
