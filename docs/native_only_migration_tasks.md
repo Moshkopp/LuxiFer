@@ -207,13 +207,15 @@ Layer-Parameterschnitt 2026-07-12: Der vollständige Parameterdialog
 (Doppelklick auf eine Ebene) läuft über `EditorSession::set_layer_params`. Der
 UI-unabhängige `LayerParams`-Typ nutzt den typisierten `LayerMode` statt eines
 String-DTOs. Validiert werden Leistung im Prozentbereich, `min ≤ max`, positive
-Geschwindigkeit/Zeilenabstand/DPI (NaN gilt als ungültig), mindestens ein
-Durchlauf sowie die Bild-Invariante (kein Wechsel Image↔Vektor). Ungültige
-Werte liefern einen stabilen `AppError` ohne jede Mutation (kein Dirty, kein
-zusätzlicher Undo-Punkt); ein gültiger Wechsel ist genau ein Undo-Schritt.
-Native hält nur den Dialogentwurf; Speichern läuft über die Session, Abbrechen
-verändert nichts. Validierung: 258 Workspace-Tests (200 Core, 23 Application)
-und Clippy mit `-D warnings` grün.
+Geschwindigkeit (NaN gilt als ungültig), mindestens ein Durchlauf sowie die
+Bild-Invariante (kein Wechsel Image↔Vektor). Zeilenabstand (Fill) und DPI
+(Raster/Image) werden nur im jeweils relevanten Modus geprüft — genau die
+Felder, die der Dialog zeigt; ein Cut-Layer mit altem `dpi = 0` bleibt so
+speicherbar. Ungültige Werte liefern einen stabilen `AppError` ohne jede
+Mutation (kein Dirty, kein zusätzlicher Undo-Punkt); ein gültiger Wechsel ist
+genau ein Undo-Schritt. Native hält nur den Dialogentwurf; Speichern läuft über
+die Session, Abbrechen verändert nichts. Validierung: 262 Workspace-Tests
+(200 Core, 27 Application) und Clippy mit `-D warnings` grün.
 
 ## Phase 3 — Projekt, Versionen und Assets
 

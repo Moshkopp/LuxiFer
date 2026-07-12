@@ -27,10 +27,13 @@ fn loeschen_undo_und_redo_bleiben_ein_zusammenhaengender_ablauf() {
     let mut session = session_with_rect();
     session.delete_selected().unwrap();
     assert!(session.shapes.is_empty());
+    assert!(session.dirty);
     assert!(session.undo());
     assert_eq!(session.shapes.len(), 1);
+    assert_eq!(session.selected, vec![0]);
     assert!(session.redo());
     assert!(session.shapes.is_empty());
+    assert!(session.selected.is_empty());
 }
 
 #[test]
@@ -63,7 +66,10 @@ fn additive_auswahl_toggelt_und_erweitert_gruppen() {
     assert_eq!(session.select_at(5.0, 5.0, 0.0, false), Some(0));
     assert_eq!(session.selected, vec![0, 1]);
     session.select_at(5.0, 5.0, 0.0, true);
+    // Gruppen bleiben eine unteilbare Auswahl.
     assert_eq!(session.selected.len(), 2);
+    assert!(session.selected.contains(&0));
+    assert!(session.selected.contains(&1));
 }
 
 #[test]
@@ -74,6 +80,8 @@ fn mehrere_drag_updates_erzeugen_genau_einen_undo_schritt() {
     session.translate_edit(2.0, 0.0);
     session.translate_edit(3.0, 4.0);
     session.commit_edit();
+    assert_eq!(session.shapes[0].bbox().x, original.x + 5.0);
+    assert_eq!(session.shapes[0].bbox().y, original.y + 4.0);
     assert!(session.undo());
     assert_eq!(session.shapes[0].bbox(), original);
     assert!(session.redo());
@@ -112,6 +120,7 @@ fn gezeichnete_form_ist_selektiert_und_einzeln_undo_faehig() {
         .add_box_shape(BoxShape::Ellipse, [20.0, 30.0], [0.0, 10.0])
         .unwrap();
     assert_eq!(session.selected, vec![index]);
+    assert_eq!(session.shapes.len(), 1);
     assert!(session.undo());
     assert!(session.shapes.is_empty());
     assert!(session.redo());
@@ -125,6 +134,7 @@ fn punktpfade_werden_nach_typ_im_core_erzeugt() {
         let mut session = EditorSession::default();
         let index = session.add_point_path(path, points.clone()).unwrap();
         assert_eq!(session.selected, vec![index]);
+        assert_eq!(session.shapes.len(), 1);
         assert_eq!(
             session.shapes[index].bezier.is_some(),
             path == PointPath::Bezier
@@ -150,6 +160,7 @@ fn ausrichten_erzeugt_nur_den_core_undo_schritt() {
     assert!(session.undo());
     assert_eq!(session.shapes[0].bbox(), original);
     assert!(session.redo());
+    assert_ne!(session.shapes[0].bbox(), original);
 }
 
 #[test]
@@ -158,6 +169,7 @@ fn layer_schalter_ist_dirty_und_undo_faehig() {
     let original = session.layers[0].visible;
     session.toggle_layer(0, LayerToggle::Visible).unwrap();
     assert_eq!(session.layers[0].visible, !original);
+    assert!(session.dirty);
     assert!(session.undo());
     assert_eq!(session.layers[0].visible, original);
 }
@@ -298,6 +310,80 @@ fn image_layer_darf_seine_bildparameter_aendern() {
 }
 
 #[test]
+fn cut_layer_mit_altem_null_wert_bleibt_speicherbar() {
+    // Regression: DPI/Zeilenabstand werden nur im relevanten Modus geprüft.
+    // Ein Cut-Layer mit einem unsichtbaren `dpi = 0` aus einem Altprojekt darf
+    // sich weiter speichern lassen.
+    let mut session = session_with_rect();
+    let mut params = valid_params();
+    params.mode = luxifer_core::LayerMode::Cut;
+    params.dpi = 0.0;
+    params.line_step_mm = 0.0;
+    session.set_layer_params(0, params).unwrap();
+    assert_eq!(session.layers[0].mode, luxifer_core::LayerMode::Cut);
+}
+
+#[test]
+fn fill_layer_verlangt_positiven_zeilenabstand() {
+    let mut session = session_with_rect();
+    session.state_mut_for_migration().dirty = false;
+    let mut params = valid_params();
+    params.mode = luxifer_core::LayerMode::Fill;
+    params.line_step_mm = 0.0;
+    let error = session.set_layer_params(0, params).unwrap_err();
+    assert_eq!(error.code(), "line_step_invalid");
+    assert!(!session.dirty);
+}
+
+#[test]
+fn raster_layer_verlangt_positive_dpi() {
+    let mut session = session_with_rect();
+    session.state_mut_for_migration().dirty = false;
+    let mut params = valid_params();
+    params.mode = luxifer_core::LayerMode::Raster;
+    params.dpi = 0.0;
+    let error = session.set_layer_params(0, params).unwrap_err();
+    assert_eq!(error.code(), "dpi_invalid");
+    assert!(!session.dirty);
+}
+
+#[test]
+fn nan_werte_gelten_als_ungueltig_und_mutieren_nicht() {
+    // Zugesicherte NaN-Behandlung: eine reine `<= 0.0`-Prüfung ließe NaN durch.
+    for (mut params, code) in [
+        {
+            let mut p = valid_params();
+            p.speed_mm_s = f64::NAN;
+            (p, "speed_invalid")
+        },
+        {
+            let mut p = valid_params();
+            p.power_pct = f64::NAN;
+            (p, "power_range")
+        },
+        {
+            let mut p = valid_params();
+            p.mode = luxifer_core::LayerMode::Fill;
+            p.line_step_mm = f64::NAN;
+            (p, "line_step_invalid")
+        },
+        {
+            let mut p = valid_params();
+            p.mode = luxifer_core::LayerMode::Raster;
+            p.dpi = f64::NAN;
+            (p, "dpi_invalid")
+        },
+    ] {
+        params.name = "NaN".into();
+        let mut session = session_with_rect();
+        session.state_mut_for_migration().dirty = false;
+        let error = session.set_layer_params(0, params).unwrap_err();
+        assert_eq!(error.code(), code);
+        assert!(!session.dirty);
+    }
+}
+
+#[test]
 fn layer_verschieben_behaelt_shape_zuordnung_und_ist_undo_faehig() {
     let mut session = session_with_rect();
     session.clear_selection();
@@ -308,5 +394,6 @@ fn layer_verschieben_behaelt_shape_zuordnung_und_ist_undo_faehig() {
     assert_eq!(session.layers[0].color, second_color);
     assert_eq!(session.shapes[1].layer_id, 0);
     assert!(session.undo());
+    assert_eq!(session.layers[1].color, second_color);
     assert_eq!(session.shapes[1].layer_id, 1);
 }

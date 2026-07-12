@@ -143,17 +143,28 @@ impl EditorSession {
                 "Es muss mindestens ein Durchlauf ausgeführt werden.",
             ));
         }
-        if !is_positive(params.line_step_mm) {
-            return Err(AppError::new(
-                "line_step_invalid",
-                "Der Zeilenabstand muss größer als 0 mm sein.",
-            ));
-        }
-        if !is_positive(params.dpi) {
-            return Err(AppError::new(
-                "dpi_invalid",
-                "Die DPI müssen größer als 0 sein.",
-            ));
+        // Zeilenabstand und DPI nur im jeweils relevanten Modus prüfen — genau
+        // die Felder, die der Dialog zeigt. Sonst könnte ein Altprojekt mit
+        // z. B. `dpi = 0` auf einem Cut-Layer nicht mehr gespeichert werden,
+        // obwohl der Wert dort weder sichtbar noch benutzt ist.
+        match params.mode {
+            LayerMode::Fill => {
+                if !is_positive(params.line_step_mm) {
+                    return Err(AppError::new(
+                        "line_step_invalid",
+                        "Der Zeilenabstand muss größer als 0 mm sein.",
+                    ));
+                }
+            }
+            LayerMode::Raster | LayerMode::Image => {
+                if !is_positive(params.dpi) {
+                    return Err(AppError::new(
+                        "dpi_invalid",
+                        "Die DPI müssen größer als 0 sein.",
+                    ));
+                }
+            }
+            LayerMode::Cut => {}
         }
         Ok(())
     }
