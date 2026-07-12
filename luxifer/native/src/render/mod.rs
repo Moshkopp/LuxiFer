@@ -14,7 +14,7 @@ use winit::window::Window;
 
 use crate::camera::Camera;
 use crate::canvas::overlay::{overlay_vertices, OverlayInput};
-use crate::canvas::scene::{base_vertices, preview_vertices, PreviewLegend};
+use crate::canvas::scene::{base_vertices, preview_vertices, PreviewLegend, PreviewMaterial};
 use crate::gpu::Gpu;
 use crate::image_gpu::ImageStore;
 
@@ -27,6 +27,10 @@ pub struct FrameScene<'a> {
     pub image_dirty: bool,
     pub preview: bool,
     pub selection_only: bool,
+    /// Material-Vorlage der Vorschau (bestimmt Untergrund-/Brennfarbe).
+    pub preview_material: PreviewMaterial,
+    /// Leerfahrten in der Vorschau zeichnen (Kennzahlen zählen immer).
+    pub preview_show_travel: bool,
 }
 
 pub struct Renderer {
@@ -140,7 +144,12 @@ impl Renderer {
         if scene_changed {
             self.last_render_rev = rev;
             if scene.preview {
-                let geometry = preview_vertices(scene.session, scene.selection_only);
+                let geometry = preview_vertices(
+                    scene.session,
+                    scene.selection_only,
+                    scene.preview_material,
+                    scene.preview_show_travel,
+                );
                 self.background_end = geometry.background_end;
                 self.verts = geometry.vertices;
                 // Verarbeitete Bild-Rasterungen als Texturen bereitstellen.
@@ -149,6 +158,7 @@ impl Renderer {
                     &self.gpu.queue,
                     self.gpu.config.format,
                     &geometry.rasters,
+                    crate::canvas::scene::srgb_to_linear(scene.preview_material.burn()),
                 );
                 self.preview_legend = Some(geometry.legend);
             } else {

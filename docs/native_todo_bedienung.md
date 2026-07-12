@@ -45,6 +45,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 |----|--------|------|--------------|
 | D1 | ENTSCHIEDEN | — | Scanlines bleiben bewusst im Design-Tab: direkte Kontrolle des Fill-Ergebnisses; der native Vertex-Cache zeigt aktuell keinen spürbaren Performance-Einbruch. |
 | D2 | ERLEDIGT | P1 | Vorschau zeigt Cut/Fill/Travel, **verarbeitete** Bild-Rasterungen (dieselbe Rasterung wie der echte Job) und eine Legende mit Kennzahlen (Arbeitsweg, Leerfahrt, Job-Fläche). Simulation/Scrubber bleibt offen. |
+| D3 | ERLEDIGT | P1 | Vorschau ist eine Material-Bühne: rechts Vorlage wählen (Holz hell, Holz dunkel, Schiefer). Untergrund = Materialfarbe; Brennwege und Rasterbilder in Brennfarbe (weiß auf Schiefer, dunkel auf Holz). Leerfahrten per Schalter (Standard aus), zählen aber immer in die Kennzahlen. |
 
 ## E. Panels / Layout / Views
 
@@ -122,6 +123,14 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   tatsächliche Fill-Ergebnis; dank gecachtem Vertexpuffer ist derzeit kein
   wahrnehmbarer Performanceverlust vorhanden. Nur bei belegbarer Regression
   erneut aufgreifen.
+- D3 (erledigt): `PreviewMaterial` (canvas/scene.rs) definiert Untergrund-,
+  Brenn- und Leerfahrt-Farbe je Vorlage; die Layerfarben-Ansicht entfällt in
+  der Vorschau bewusst — sie zeigt das Werkstück, die Farben hat der
+  Design-Tab. Wichtig fürs Rendering: Der Framebuffer ist sRGB, die
+  Vertex-Farben laufen daher durch `srgb_to_linear`, sonst erschiene
+  Schiefer mittelgrau statt fast schwarz (das egui-Panel nutzt dieselben
+  sRGB-Werte direkt — Karte und Canvas zeigen exakt denselben Ton).
+  Materialwechsel/Travel-Schalter invalidieren den Preview-Cache.
 - D2 (erledigt): Der read-only Preview-Reiter zeichnet Cut-, Fill- und
   Travel-Bewegungen aus `EditorSession::job_preview`/`JobPlan`; Editor-
   Shortcuts, Gesten und Overlay sind gesperrt, Navigation per Mittelmaus/

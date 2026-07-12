@@ -125,12 +125,24 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
         View::Preview => {
             app.left_w = 0.0;
-            app.right_w = 0.0;
-            match app.preview_legend() {
-                Some(legend) => preview::preview_legend_window(ctx, legend),
-                // Die Legende entsteht beim Preview-Vertex-Aufbau im selben
-                // Frame NACH der UI — einmal nachzeichnen lassen.
-                None => ctx.request_repaint(),
+            // Rechts: Material-Vorlage + Legende. Die Legende entsteht beim
+            // Preview-Vertex-Aufbau im selben Frame NACH der UI — solange sie
+            // fehlt, einmal nachzeichnen lassen.
+            if app.preview_legend().is_none() {
+                ctx.request_repaint();
+            }
+            let material = app.preview_material;
+            let show_travel = app.preview_show_travel;
+            let right = egui::SidePanel::right("preview_panel")
+                .default_width(240.0)
+                .width_range(200.0..=320.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    preview::preview_panel(ui, material, show_travel, app.preview_legend())
+                });
+            app.right_w = right.response.rect.width();
+            for action in right.inner {
+                app.dispatch(action);
             }
         }
         View::Design | View::Laser => {

@@ -72,6 +72,10 @@ pub enum UiAction {
     DeleteProjectVersion(String),
     /// Haupt-Ansicht (Reiter) wechseln.
     SelectView(View),
+    /// Material-Vorlage der Laser-Vorschau wählen.
+    SelectPreviewMaterial(crate::canvas::scene::PreviewMaterial),
+    /// Leerfahrten in der Vorschau ein-/ausblenden.
+    SetPreviewTravel(bool),
     /// Einen Layer im Laser-Tab vorübergehend für Transformationen freigeben.
     ToggleLaserEditLayer(usize),
     /// Rückgängig.

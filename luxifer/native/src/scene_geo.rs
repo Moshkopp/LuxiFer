@@ -265,6 +265,17 @@ pub fn bed_grid(w: f32, h: f32) -> Vec<Vertex> {
     v
 }
 
+/// Materialfläche für die Laser-Vorschau: Untergrund in Materialfarbe mit
+/// dezentem Rahmen — ohne Gitter und Nullpunkt-Kreuz, das Material ist die
+/// Bühne, nicht der Messtisch.
+pub fn bed_material(w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
+    let mut v = fill_rect(0.0, 0.0, w, h, color);
+    for seg in rect_outline(0.0, 0.0, w, h, BED_COLOR) {
+        v.push(seg);
+    }
+    v
+}
+
 /// Farbwert für den Tisch-Rahmen (dezentes Grau).
 pub const BED_COLOR: [f32; 4] = [0.42, 0.46, 0.52, 0.9];
 /// Auswahl-BBox-Rahmen (heller Akzentton).

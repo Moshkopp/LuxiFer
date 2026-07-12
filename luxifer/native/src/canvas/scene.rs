@@ -27,22 +27,84 @@ pub fn base_vertices(session: &EditorSession) -> BaseGeometry {
     }
 }
 
-/// Preview-Farben — geteilt zwischen Szene und Legende, damit beide dieselbe
-/// Sprache sprechen.
-pub const PREVIEW_TRAVEL: [f32; 4] = [0.55, 0.6, 0.68, 0.45];
-pub const PREVIEW_FILL: [f32; 4] = [1.0, 0.58, 0.2, 0.9];
-pub const PREVIEW_RASTER: [f32; 4] = [0.75, 0.75, 0.75, 0.9];
+/// Material-Vorlage der Laser-Vorschau: Untergrund- und Brennfarbe. Die
+/// Vorschau zeigt das Werkstück, nicht den Messtisch — auf Schiefer graviert
+/// der Laser hell, auf Holz dunkel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum PreviewMaterial {
+    HolzHell,
+    HolzDunkel,
+    #[default]
+    Schiefer,
+}
 
-/// Kennzahlen und vorkommende Segmentarten der Jobvorschau für die Legende.
-/// Wird beim Vertex-Aufbau nebenbei gefüllt (kein zweiter Preview-Lauf).
+impl PreviewMaterial {
+    pub const ALL: [PreviewMaterial; 3] = [
+        PreviewMaterial::HolzHell,
+        PreviewMaterial::HolzDunkel,
+        PreviewMaterial::Schiefer,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PreviewMaterial::HolzHell => "Holz hell",
+            PreviewMaterial::HolzDunkel => "Holz dunkel",
+            PreviewMaterial::Schiefer => "Schiefer",
+        }
+    }
+
+    /// Untergrund (Werkstück-Fläche).
+    pub fn bed(self) -> [f32; 4] {
+        match self {
+            PreviewMaterial::HolzHell => [0.82, 0.68, 0.47, 1.0],
+            PreviewMaterial::HolzDunkel => [0.38, 0.26, 0.16, 1.0],
+            PreviewMaterial::Schiefer => [0.10, 0.11, 0.12, 1.0],
+        }
+    }
+
+    /// Brennfarbe der Arbeitswege (Gravur/Schnitt auf dem Material).
+    pub fn burn(self) -> [f32; 4] {
+        match self {
+            PreviewMaterial::HolzHell => [0.24, 0.13, 0.05, 1.0],
+            PreviewMaterial::HolzDunkel => [0.08, 0.04, 0.02, 1.0],
+            PreviewMaterial::Schiefer => [0.94, 0.94, 0.94, 1.0],
+        }
+    }
+
+    /// Leerfahrten: dezent und kontrastarm zum jeweiligen Untergrund.
+    pub fn travel(self) -> [f32; 4] {
+        match self {
+            PreviewMaterial::HolzHell => [0.35, 0.30, 0.40, 0.45],
+            PreviewMaterial::HolzDunkel => [0.75, 0.70, 0.65, 0.35],
+            PreviewMaterial::Schiefer => [0.55, 0.60, 0.68, 0.45],
+        }
+    }
+}
+
+/// sRGB → linear. Die Materialfarben sind als sRGB-Wunschoptik definiert
+/// (so nutzt sie auch das egui-Panel direkt); der Canvas schreibt aber in
+/// einen sRGB-Framebuffer, der lineare Werte beim Speichern enkodiert —
+/// ohne diese Umkehrung erschiene Schiefer mittelgrau statt fast schwarz.
+pub fn srgb_to_linear(c: [f32; 4]) -> [f32; 4] {
+    let f = |x: f32| {
+        if x <= 0.04045 {
+            x / 12.92
+        } else {
+            ((x + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    [f(c[0]), f(c[1]), f(c[2]), c[3]]
+}
+
+/// Kennzahlen der Jobvorschau für die Legende. Wird beim Vertex-Aufbau
+/// nebenbei gefüllt (kein zweiter Preview-Lauf).
 #[derive(Default)]
 pub struct PreviewLegend {
-    /// Cut-Layer, die im Job tatsächlich vorkommen (Name, Farbe), in
-    /// Brenn-Reihenfolge und ohne Doppelte.
-    pub cut_layers: Vec<(String, [u8; 3])>,
-    pub has_fill: bool,
-    pub has_raster: bool,
+    /// Material, mit dem gebaut wurde (für die Farbfelder der Legende).
+    pub material: PreviewMaterial,
     pub has_travel: bool,
+    /// Ob es überhaupt Arbeitsinhalte gibt (Wege oder Rasterbilder).
+    pub has_content: bool,
     /// Arbeitsweg (Laser an) in mm.
     pub work_len_mm: f64,
     /// Leerfahrten in mm.
@@ -61,57 +123,49 @@ pub struct PreviewGeometry {
     pub legend: PreviewLegend,
 }
 
-/// Read-only Jobpfad: Arbeitsbewegungen nach Layerfarbe, Leerfahrten dezent,
-/// Bild-Layer als verarbeitete Rastertextur. Grundlage ist ausschließlich die
-/// Application-Preview (derselbe JobPlan wie Export/Treiber).
-pub fn preview_vertices(session: &EditorSession, selection_only: bool) -> PreviewGeometry {
-    let mut v = scene_geo::bed_grid(session.bed_w_mm as f32, session.bed_h_mm as f32);
+/// Read-only Jobpfad auf der Material-Bühne: Arbeitsbewegungen in Brennfarbe,
+/// Leerfahrten dezent, Bild-Layer als verarbeitete Rastertextur. Grundlage ist
+/// ausschließlich die Application-Preview (derselbe JobPlan wie Export/Treiber).
+pub fn preview_vertices(
+    session: &EditorSession,
+    selection_only: bool,
+    material: PreviewMaterial,
+    show_travel: bool,
+) -> PreviewGeometry {
+    let mut v = scene_geo::bed_material(
+        session.bed_w_mm as f32,
+        session.bed_h_mm as f32,
+        srgb_to_linear(material.bed()),
+    );
     let background_end = v.len() as u32;
     let preview = session.job_preview(selection_only);
     let mut legend = PreviewLegend {
+        material,
         bbox: preview.bbox,
-        has_raster: !preview.rasters.is_empty(),
+        has_content: !preview.rasters.is_empty(),
         ..Default::default()
     };
+    let burn = srgb_to_linear(material.burn());
+    let travel = srgb_to_linear(material.travel());
     for movement in &preview.moves {
         let color = match movement.kind {
-            luxifer_core::preview::MoveKind::Travel => PREVIEW_TRAVEL,
-            luxifer_core::preview::MoveKind::Fill => PREVIEW_FILL,
-            luxifer_core::preview::MoveKind::Raster => PREVIEW_RASTER,
-            luxifer_core::preview::MoveKind::Cut => session
-                .layers
-                .get(movement.layer_id)
-                .map(|l| {
-                    [
-                        l.color[0] as f32 / 255.0,
-                        l.color[1] as f32 / 255.0,
-                        l.color[2] as f32 / 255.0,
-                        1.0,
-                    ]
-                })
-                .unwrap_or([0.9, 0.2, 0.2, 1.0]),
-        };
-        match movement.kind {
             luxifer_core::preview::MoveKind::Travel => {
                 legend.has_travel = true;
                 legend.travel_len_mm += movement.len_mm();
-            }
-            luxifer_core::preview::MoveKind::Fill => {
-                legend.has_fill = true;
-                legend.work_len_mm += movement.len_mm();
-            }
-            luxifer_core::preview::MoveKind::Raster => {
-                legend.work_len_mm += movement.len_mm();
-            }
-            luxifer_core::preview::MoveKind::Cut => {
-                legend.work_len_mm += movement.len_mm();
-                if let Some(layer) = session.layers.get(movement.layer_id) {
-                    if !legend.cut_layers.iter().any(|(n, _)| n == &layer.name) {
-                        legend.cut_layers.push((layer.name.clone(), layer.color));
-                    }
+                // Bei vielen Objekten übertünchen die Leerfahrten das Motiv —
+                // sie zählen für die Kennzahlen, werden aber nur auf Wunsch
+                // gezeichnet.
+                if !show_travel {
+                    continue;
                 }
+                travel
             }
-        }
+            _ => {
+                legend.has_content = true;
+                legend.work_len_mm += movement.len_mm();
+                burn
+            }
+        };
         scene_geo::push_seg(
             &mut v,
             [movement.from.0 as f32, movement.from.1 as f32],

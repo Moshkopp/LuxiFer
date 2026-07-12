@@ -37,6 +37,10 @@ pub struct App {
     pub new_project_name: String,
     /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
     pub project_browser: crate::ui::ProjectBrowserState,
+    /// Material-Vorlage der Laser-Vorschau (Präsentationszustand).
+    pub preview_material: crate::canvas::scene::PreviewMaterial,
+    /// Leerfahrten in der Vorschau zeichnen (Präsentationszustand).
+    pub preview_show_travel: bool,
     pub laser: LaserUi,
     pub laser_backend: luxifer_application::LaserService,
     /// Letzte Laser-Rückmeldung (Statuszeile im Panel).
@@ -127,6 +131,8 @@ impl App {
             project_msg: String::new(),
             new_project_name: String::new(),
             project_browser: Default::default(),
+            preview_material: Default::default(),
+            preview_show_travel: false,
             laser: LaserUi::default(),
             laser_backend: luxifer_application::LaserService::load(),
             laser_msg: String::new(),
@@ -437,6 +443,16 @@ impl App {
                         editable.remove(&index);
                     }
                 }
+            }
+            A::SelectPreviewMaterial(material) => {
+                self.preview_material = material;
+                // Der Preview-Cache hängt an der Render-Revision — Materialwechsel
+                // muss den Vertex-/Textur-Aufbau erzwingen.
+                self.renderer.invalidate_scene();
+            }
+            A::SetPreviewTravel(show) => {
+                self.preview_show_travel = show;
+                self.renderer.invalidate_scene();
             }
             A::Undo => self.undo(),
             A::Redo => self.redo(),
@@ -1177,6 +1193,8 @@ impl App {
             image_dirty,
             preview: self.view == crate::tools::View::Preview,
             selection_only: self.laser.selection_only,
+            preview_material: self.preview_material,
+            preview_show_travel: self.preview_show_travel,
         };
         self.renderer.draw_frame(&self.window, scene, full, tris);
     }

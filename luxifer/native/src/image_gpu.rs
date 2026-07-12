@@ -188,14 +188,16 @@ impl ImageStore {
     }
 
     /// Übersetzt die Job-Rastertexturen (Pixel 255 = gebrannt) in GPU-Texturen
-    /// für den Preview-Reiter. Gebrannte Pixel erscheinen in der Rasterfarbe
-    /// der Vorschau, nicht gebrannte bleiben transparent (Bett scheint durch).
+    /// für den Preview-Reiter. Gebrannte Pixel erscheinen in der Brennfarbe
+    /// des gewählten Materials, nicht gebrannte bleiben transparent (das
+    /// Werkstück scheint durch).
     pub fn set_rasters(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         rasters: &[luxifer_core::RasterTexture],
+        burn_color: [f32; 4],
     ) {
         self.rasters.clear();
         for r in rasters {
@@ -203,11 +205,10 @@ impl ImageStore {
                 continue;
             }
             self.ensure_pipeline(device, format);
-            let c = crate::canvas::scene::PREVIEW_RASTER;
             let burn = [
-                (c[0] * 255.0) as u8,
-                (c[1] * 255.0) as u8,
-                (c[2] * 255.0) as u8,
+                (burn_color[0] * 255.0) as u8,
+                (burn_color[1] * 255.0) as u8,
+                (burn_color[2] * 255.0) as u8,
                 235,
             ];
             let mut rgba = Vec::with_capacity(r.pixels.len() * 4);
