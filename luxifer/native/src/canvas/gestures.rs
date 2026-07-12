@@ -11,16 +11,26 @@ use crate::tools::{Drag, Tool};
 
 use super::state::CanvasState;
 
+/// Ergebnis eines Maus-Events, das der Root weiterverarbeitet.
+#[derive(Default)]
+pub struct PointerOutcome {
+    /// Ein Shape entstand (Aufzieh-Werkzeug losgelassen) → Accent auffrischen.
+    pub shape_added: bool,
+    /// Doppelklick traf diesen Shape-Index (Auswahlwerkzeug) → Editor öffnen.
+    pub double_clicked: Option<usize>,
+}
+
 impl CanvasState {
-    /// Maustaste gedrückt/losgelassen. Gibt true zurück, wenn dabei ein Shape
-    /// entstand (Loslassen eines Aufzieh-Werkzeugs).
+    /// Maustaste gedrückt/losgelassen. Liefert, ob ein Shape entstand und ob ein
+    /// Doppelklick einen Shape traf.
     pub fn on_mouse(
         &mut self,
         session: &mut EditorSession,
         button: winit::event::MouseButton,
         pressed: bool,
-    ) -> bool {
+    ) -> PointerOutcome {
         use winit::event::MouseButton;
+        let mut out = PointerOutcome::default();
         let w = self.world();
         match button {
             MouseButton::Middle => {
@@ -29,7 +39,15 @@ impl CanvasState {
             MouseButton::Left if pressed => {
                 if self.space_down {
                     self.drag = Drag::Pan;
-                    return false;
+                    return out;
+                }
+                // Doppelklick im Auswahl-Werkzeug auf einen Shape → Editor öffnen.
+                if matches!(self.tool, Tool::Select) && self.is_double_click(w) {
+                    let tol = 4.0 / self.cam.scale as f64;
+                    out.double_clicked = session.hit_test(w[0], w[1], tol);
+                    if out.double_clicked.is_some() {
+                        return out;
+                    }
                 }
                 match self.tool {
                     Tool::Select | Tool::Node => self.begin_select(session, w),
@@ -45,11 +63,11 @@ impl CanvasState {
             }
             MouseButton::Left => {
                 // Loslassen: Zug abschließen.
-                return self.finish_drag(session, w);
+                out.shape_added = self.finish_drag(session, w);
             }
             _ => {}
         }
-        false
+        out
     }
 
     /// Kopie der aktuell selektierten Shapes (Index + Shape) — als Ausgangspunkt

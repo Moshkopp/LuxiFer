@@ -20,6 +20,8 @@ pub struct CanvasState {
     pub shift_down: bool,
     /// Punkt-Zug (Welt-Punkte), bis Doppelklick/Enter schließt.
     pub poly_pts: Vec<(f64, f64)>,
+    /// Letzter Links-Klick (Zeit + Weltposition) für die Doppelklick-Erkennung.
+    last_click: Option<(std::time::Instant, [f64; 2])>,
 }
 
 impl CanvasState {
@@ -34,7 +36,21 @@ impl CanvasState {
             ctrl_down: false,
             shift_down: false,
             poly_pts: Vec::new(),
+            last_click: None,
         }
+    }
+
+    /// Prüft, ob der Klick an `w` (Welt) ein Doppelklick zum vorherigen ist, und
+    /// merkt ihn als neuen „letzten Klick". Doppelklick = innerhalb 400 ms und
+    /// nah an der vorigen Position.
+    pub(super) fn is_double_click(&mut self, w: [f64; 2]) -> bool {
+        let now = std::time::Instant::now();
+        let double = self.last_click.is_some_and(|(t, p)| {
+            now.duration_since(t).as_millis() < 400
+                && (p[0] - w[0]).hypot(p[1] - w[1]) < 5.0 / self.cam.scale as f64
+        });
+        self.last_click = if double { None } else { Some((now, w)) };
+        double
     }
 
     /// Cursor-Weltkoordinaten (mm).

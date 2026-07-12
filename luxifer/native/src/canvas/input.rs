@@ -32,19 +32,20 @@ pub fn map_keycode(code: KeyCode) -> Option<Key> {
 }
 
 impl CanvasState {
-    /// Behandelt ein reines Canvas-Zeiger-Event (Bewegen/Klicken/Scrollen).
-    /// Gibt true zurück, wenn dabei ein Shape entstand (→ Root frischt Accent).
-    /// Für andere Event-Arten (Tastatur, Resize) false; die behandelt der Root.
+    /// Behandelt ein reines Canvas-Zeiger-Event (Bewegen/Klicken/Scrollen) und
+    /// meldet dessen Ergebnis (Shape entstanden, Doppelklick auf Shape). Für
+    /// andere Event-Arten (Tastatur, Resize) ein leeres Ergebnis; die behandelt
+    /// der Root.
     pub fn handle_pointer_event(
         &mut self,
         session: &mut EditorSession,
         event: &WindowEvent,
-    ) -> bool {
+    ) -> super::gestures::PointerOutcome {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
                 let new = [position.x as f32, position.y as f32];
                 self.on_cursor_move(session, new);
-                false
+                Default::default()
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 self.on_mouse(session, *button, *state == ElementState::Pressed)
@@ -55,9 +56,9 @@ impl CanvasState {
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
                 };
                 self.cam.zoom_at(1.12_f32.powf(s), self.cursor);
-                false
+                Default::default()
             }
-            _ => false,
+            _ => Default::default(),
         }
     }
 }

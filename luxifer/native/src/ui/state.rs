@@ -11,6 +11,13 @@ pub struct LayerDialogState {
     pub params: LayerParams,
 }
 
+/// Entwurf des Bildparameter-Dialogs (Doppelklick auf ein Bild-Objekt).
+pub struct ImageDialogState {
+    /// Shape-Index des bearbeiteten Bildes.
+    pub index: usize,
+    pub params: luxifer_core::ImageParams,
+}
+
 /// Entwurf des Text-Dialogs (Eingabe, Größe, gewählter Font-Index).
 pub struct TextDialogState {
     pub text: String,

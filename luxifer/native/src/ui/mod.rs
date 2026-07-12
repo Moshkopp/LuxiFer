@@ -21,7 +21,7 @@ mod tools;
 mod topbar;
 
 pub use action::UiAction;
-pub use state::{LayerDialogState, PendingProjectAction, TextDialogState};
+pub use state::{ImageDialogState, LayerDialogState, PendingProjectAction, TextDialogState};
 
 use egui::Color32;
 
@@ -222,6 +222,20 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 }
             }
             dialogs::DialogOutcome::Cancel => app.layer_dialog = None,
+        }
+    }
+
+    // Bildparameter-Dialog: Entwurf als &mut; Speichern über die validierende
+    // Session, Abbrechen verwirft.
+    if let Some(state) = app.image_dialog.as_mut() {
+        match dialogs::image_dialog_window(ctx, &mut state.params) {
+            dialogs::DialogOutcome::None => {}
+            dialogs::DialogOutcome::Commit => {
+                if app.commit_image_dialog() {
+                    app.image_dialog = None;
+                }
+            }
+            dialogs::DialogOutcome::Cancel => app.image_dialog = None,
         }
     }
 

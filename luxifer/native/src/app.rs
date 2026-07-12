@@ -16,7 +16,7 @@ use crate::canvas::CanvasState;
 use crate::gpu::Gpu;
 use crate::render::Renderer;
 use crate::tools::{Drag, LaserUi};
-use crate::ui::{self, LayerDialogState, PendingProjectAction, TextDialogState};
+use crate::ui::{self, ImageDialogState, LayerDialogState, PendingProjectAction, TextDialogState};
 
 pub struct App {
     pub window: Arc<Window>,
@@ -53,6 +53,8 @@ pub struct App {
     pub text_dialog: Option<TextDialogState>,
     /// Offener Layer-Parameter-Dialog (Doppelklick auf Ebene) oder None.
     pub layer_dialog: Option<LayerDialogState>,
+    /// Offener Bildparameter-Dialog (Doppelklick auf Bild) oder None.
+    pub image_dialog: Option<ImageDialogState>,
     /// Projektaktion, die auf Bestätigung wartet (Dirty-Guard) oder None.
     pub pending_project: Option<PendingProjectAction>,
     /// Ob der Nutzer das Fenster schließen will und der Dirty-Guard dafür einen
@@ -129,6 +131,7 @@ impl App {
             image_dirty: false,
             text_dialog: None,
             layer_dialog: None,
+            image_dialog: None,
             pending_project: None,
             close_pending: false,
             should_exit: false,
@@ -185,15 +188,33 @@ impl App {
                     }
                 }
             }
-            // Reine Canvas-Zeiger-Events übersetzt canvas::input; erzeugt die
-            // Geste ein Shape, frischt der Root die Zeichenfarbe auf.
+            // Reine Canvas-Zeiger-Events übersetzt canvas::input. Erzeugt die
+            // Geste ein Shape, frischt der Root die Zeichenfarbe auf; ein
+            // Doppelklick auf ein Objekt öffnet den passenden Editor.
             _ => {
-                if self.canvas.handle_pointer_event(&mut self.session, event) {
+                let out = self.canvas.handle_pointer_event(&mut self.session, event);
+                if out.shape_added {
                     self.refresh_accent();
+                }
+                if let Some(index) = out.double_clicked {
+                    self.edit_shape(index);
                 }
             }
         }
         true
+    }
+
+    /// Öffnet den passenden Editor für einen doppelt angeklickten Shape:
+    /// Bildparameter bei einem Bild-Objekt (weitere Editoren folgen).
+    fn edit_shape(&mut self, index: usize) {
+        use luxifer_core::Geo;
+        let is_image = matches!(
+            self.session.state().shapes.get(index).map(|s| &s.geo),
+            Some(Geo::Image { .. })
+        );
+        if is_image {
+            self.open_image_dialog(index);
+        }
     }
 
     pub fn delete_selected(&mut self) {
@@ -218,6 +239,7 @@ impl App {
     fn input_blocked(&self) -> bool {
         self.egui_ctx.wants_keyboard_input()
             || self.layer_dialog.is_some()
+            || self.image_dialog.is_some()
             || self.text_dialog.is_some()
             || self.laser_settings.is_some()
     }
@@ -396,6 +418,38 @@ impl App {
         let params = st.params.clone();
         match self.session.set_layer_params(index, params) {
             Ok(()) => true,
+            Err(error) => {
+                self.app_error = Some(error);
+                false
+            }
+        }
+    }
+
+    /// Öffnet den Bildparameter-Dialog mit den aktuellen Werten des Bild-Shapes.
+    pub fn open_image_dialog(&mut self, index: usize) {
+        use luxifer_core::Geo;
+        if let Some(Geo::Image { params, .. }) =
+            self.session.state().shapes.get(index).map(|s| &s.geo)
+        {
+            self.image_dialog = Some(ImageDialogState {
+                index,
+                params: *params,
+            });
+        }
+    }
+
+    /// Übernimmt den Bildparameter-Entwurf über die Session (validiert, ein
+    /// Undo-Schritt). Erfolg → Dialog schließen; Fehler → offen + Fehlerkanal.
+    pub fn commit_image_dialog(&mut self) -> bool {
+        let Some(st) = self.image_dialog.as_ref() else {
+            return false;
+        };
+        let (index, params) = (st.index, st.params);
+        match self.session.set_image_params(index, params) {
+            Ok(()) => {
+                self.image_dirty = true;
+                true
+            }
             Err(error) => {
                 self.app_error = Some(error);
                 false
