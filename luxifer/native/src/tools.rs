@@ -174,6 +174,7 @@ pub fn resolve_shortcut(
         Key::S if mods.ctrl && mods.shift => Some(Shortcut::SaveVersion),
         Key::S if mods.ctrl => Some(Shortcut::Save),
         Key::S => None,
+        Key::Z if mods.ctrl && mods.shift => Some(Shortcut::Redo),
         Key::Z if mods.ctrl => Some(Shortcut::Undo),
         Key::Y if mods.ctrl => Some(Shortcut::Redo),
         // Undo/Redo verlangen Strg — ein nacktes „z" ist kein Undo.
@@ -264,6 +265,10 @@ mod shortcut_tests {
         );
         assert_eq!(
             resolve_shortcut(Key::Y, CTRL, true, false),
+            Some(Shortcut::Redo)
+        );
+        assert_eq!(
+            resolve_shortcut(Key::Z, CTRL_SHIFT, true, false),
             Some(Shortcut::Redo)
         );
     }

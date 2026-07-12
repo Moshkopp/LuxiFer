@@ -17,10 +17,10 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
-| A1 | BUG | P1 | Auswahl-Werkzeug zeichnet keinen Marquee-Rahmen — man zieht blind. |
+| A1 | ERLEDIGT | P1 | Auswahl-Werkzeug zeichnet einen bildschirmkonstant gestrichelten Marquee-Rahmen. |
 | A2 | REG | P1 | Bézier-Tool arbeitet nicht wie in Tauri (Inkscape-like): Klick + gehaltene Maustaste erzeugt Anker und zieht die Tangente/Kurve mit der Maus. |
 | A3 | UX | P2 | Spline/Polyline/Bézier: Klick auf ersten Node ODER Enter schließt die Form; Startnode leuchtet farbig, wenn die Maus in die Nähe kommt (kein Zielen nötig). |
-| A4 | REG | P1 | Strg+Z / Strg+Shift+Z gehen nicht (Undo/Redo per Tastatur). |
+| A4 | ERLEDIGT | P1 | Strg+Z = Undo, Strg+Shift+Z und Strg+Y = Redo. |
 | A5 | UX | P3 | Undo/Redo sollen als Icons in den Header. |
 
 ## B. Geometrie-Operationen
@@ -80,7 +80,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 
 ## Analyse-Notizen (wird ergänzt)
 
-- A1: `Drag::Marquee` wird in `gestures.rs` gesetzt, aber `canvas/overlay.rs`
-  zeichnet dafür kein Rechteck. Reiner Overlay-Fix.
-- A4: Shortcut ist verdrahtet (`Key::Z + ctrl → Undo`), Redo nur auf `Key::Y`,
-  NICHT auf `Strg+Shift+Z`. Zu prüfen: greift das Fokus-/Modal-Gate zu früh?
+- A1 (erledigt): `Drag::Marquee` wird als gestricheltes, jeden Frame neu
+  aufgebautes Overlay gezeichnet; der Geometrie-Cache bleibt auswahlfrei.
+- A4 (erledigt): `Strg+Shift+Z` wird vor `Strg+Z` ausgewertet und löst Redo
+  aus. `Strg+Y` bleibt als Alias erhalten; Fokus-/Modal-Gate bleibt wirksam.

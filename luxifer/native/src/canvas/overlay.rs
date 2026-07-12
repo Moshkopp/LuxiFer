@@ -68,6 +68,23 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
     v.extend(scene_geo::selected_outlines(input.session, input.accent));
 
     let preview = [0.6, 0.8, 1.0, 0.9];
+    // Das Auswahlrechteck ist reines, kameraabhängiges Feedback. Es gehört
+    // deshalb ins Frame-Overlay und nicht in den gecachten Szenenpuffer.
+    if let Drag::Marquee { start } = input.drag {
+        let start = [start[0] as f32, start[1] as f32];
+        let cur = [cur[0] as f32, cur[1] as f32];
+        let corners = [start, [cur[0], start[1]], cur, [start[0], cur[1]], start];
+        for edge in corners.windows(2) {
+            dashed_seg(
+                &mut v,
+                edge[0],
+                edge[1],
+                scene_geo::SEL_BOX_COLOR,
+                input.cam_scale,
+            );
+        }
+    }
+
     // Live-Vorschau beim Aufziehen eines Rechtecks/einer Ellipse/Linie.
     if let Drag::DrawBox { start } = input.drag {
         let start = *start;
