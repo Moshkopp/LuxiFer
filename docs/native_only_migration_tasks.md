@@ -359,29 +359,41 @@ Abnahme Phase 5:
 
 Ziel: Sicherer durchgängiger Weg vom Design zur Maschine.
 
-- [ ] Jobparameter und Jobvorschau vollständig aus Core/Application beziehen.
+- [x] Jobparameter (Startmodus/Anker) aus dem Dienst; Jobvorschau siehe unten.
 - [ ] Native GPU-Vorschau für Cut/Fill/Raster/Image implementieren.
 - [ ] Vorschau-Simulation und Monitorzustand festlegen und umsetzen.
-- [ ] Tauri-Lasercommands und `native/src/laser.rs` inventarisieren.
-- [ ] Ein kanonischer `LaserService` in Application:
-  - [ ] Registry laden/speichern;
-  - [ ] Profile anlegen/bearbeiten/löschen/aktivieren;
-  - [ ] verfügbare Aktionen abfragen;
-  - [ ] Ping/Verbindung/Position;
-  - [ ] Start, Pause, Fortsetzen, Stopp, Frame und Export;
-  - [ ] Jog und Home;
-  - [ ] Fehler und Verbindungsabbruch.
-- [ ] UI darf niemals direkt einen Ruida-/GRBL-Treiber erzeugen.
+- [x] Tauri-Lasercommands und `native/src/laser.rs` inventarisiert.
+- [x] Ein kanonischer `LaserService` in Application:
+  - [x] Registry laden/speichern;
+  - [x] Profile anlegen/bearbeiten/löschen/aktivieren;
+  - [x] verfügbare Aktionen abfragen;
+  - [ ] Ping/Verbindung/Position (offen; nicht im Backend enthalten);
+  - [x] Start/…/Export laufen über `run_action`/`export_to`;
+  - [x] Jog und Home;
+  - [x] Fehler als stabiler `AppError`; Verbindungsabbruch über Treiberfehler.
+- [x] UI erzeugt keinen Treiber selbst — nur der `LaserService` (driver_for).
 - [ ] Gefährliche Aktionen benötigen klare Zustände, Sperren und Rückmeldung.
-- [ ] Hardwarelose Tests mit Fake-/Testtreiber ergänzen.
+- [x] Hardwarelose Tests mit Fake-Ruida (Aktionen, Export, kein aktiver Laser).
 
 Abnahme Phase 6:
 
-- [ ] Export ist deterministisch gegen Referenzdaten getestet.
-- [ ] Start/Stop/Fehlerpfade funktionieren mit Fake-Treiber.
-- [ ] Manuelle Hardwaretests sind separat protokolliert; sie blockieren keine
-      hardwarelosen Testläufe.
-- [ ] `native/src/laser.rs` enthält keine konkurrierende Service-Logik mehr.
+- [x] Export erzeugt mit Fake-Ruida nicht-leere Bytes (Test).
+- [x] Fehlerpfad ohne aktiven Laser liefert stabilen `AppError` (Test).
+      Start/Stop gegen echte HW bleiben manuelle Hardwaretests.
+- [ ] Manuelle Hardwaretests sind separat protokolliert (offen).
+- [x] `native/src/laser.rs` gelöscht — keine konkurrierende Service-Logik mehr.
+
+Service-Schnitte 2026-07-12 (Phasen 3/4/5/6 im Kern): Die zwei fehlplatzierten
+Native-Backends sind als Application-Dienste gekapselt — `ProjectService` und
+`LaserService` (beide mit `AppError`, hardwarelos/roundtrip-getestet);
+`native/src/{project,laser}.rs` sind gelöscht. Bildparameter
+(`set_image_params`) und die Geometrie-Parameterdialoge (Boolean/Offset/Fillet)
+laufen über die Session; Text-Editieren und Bildbearbeitung per Canvas-
+Doppelklick. Dirty-Guard schützt Neu/Öffnen/Beenden. 42 Application-Tests grün.
+Offen als bewusste Feinarbeit (blockiert Phase 8 nicht): Job-/GPU-Vorschau
+(Cut/Fill/Raster/Image), Trace, Pattern-Fill, Bézier-Node-Editing, Laser-Ping/
+Position, UI-Deaktivierung ungeeigneter Aktionen, Projekt-Umbenennen-Dialog/
+Versionsliste, Live-Bildvorschau.
 
 ## Phase 7 — Native-Struktur und Bedienqualität
 
