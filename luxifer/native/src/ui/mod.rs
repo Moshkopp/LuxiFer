@@ -14,12 +14,13 @@ mod dialogs;
 mod layers;
 mod palette;
 mod project;
+mod status;
 mod tools;
 mod topbar;
 
 pub use action::UiAction;
 
-use egui::{Color32, RichText};
+use egui::Color32;
 
 use crate::app::App;
 use crate::laserpanel;
@@ -49,19 +50,14 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     }
 
     if let Some(error) = app.app_error.as_ref() {
-        let code = error.code();
+        let code = error.code().to_string();
         let message = error.message().to_string();
-        egui::TopBottomPanel::top("application_error").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.colored_label(
-                    Color32::from_rgb(0xf8, 0x71, 0x71),
-                    format!("{message}  [{code}]"),
-                );
-                if ui.small_button("Schließen").clicked() {
-                    app.app_error = None;
-                }
-            });
-        });
+        let actions = egui::TopBottomPanel::top("application_error")
+            .show(ctx, |ui| status::error_banner(ui, &message, &code))
+            .inner;
+        for action in actions {
+            app.dispatch(action);
+        }
     }
 
     // Zweite Kopfzeile: Anordnen (Ausrichten/Verteilen/Gruppieren/Nesting) — nur
@@ -82,19 +78,15 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
-    // Statuszeile unten.
+    // Statuszeile unten (rein lesend).
+    let (fps, tool_label, shapes, msg) = (
+        app.fps,
+        app.tool.label(),
+        app.session.shapes.len(),
+        app.project.msg.clone(),
+    );
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{:.0} fps", app.fps)).monospace());
-            ui.separator();
-            ui.label(format!("Werkzeug: {}", app.tool.label()));
-            ui.separator();
-            ui.label(format!("{} Objekte", app.session.shapes.len()));
-            if !app.project.msg.is_empty() {
-                ui.separator();
-                ui.label(RichText::new(&app.project.msg).weak());
-            }
-        });
+        status::status_bar(ui, fps, tool_label, shapes, &msg);
     });
 
     match app.view {

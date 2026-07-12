@@ -647,6 +647,7 @@ impl App {
             A::ImportVector => self.import_dialog(),
             A::ImportImage => self.import_image_dialog(),
             A::ImportPath(path) => self.import_path(&path),
+            A::DismissError => self.app_error = None,
         }
     }
 

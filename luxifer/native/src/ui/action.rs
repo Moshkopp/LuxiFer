@@ -72,4 +72,6 @@ pub enum UiAction {
     ImportImage,
     /// Datei von einem bekannten Pfad importieren (Entwickler-Shortcut).
     ImportPath(PathBuf),
+    /// Die aktuelle Fehleranzeige schließen.
+    DismissError,
 }
