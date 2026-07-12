@@ -100,29 +100,38 @@ Abnahme Phase 0:
 
 Ziel: Testbare Sitzung und konsistenter Aufrufpfad vor weiterer Migration.
 
-- [ ] Workspace-Crate `luxifer/application` anlegen und in `Cargo.toml`
+- [x] Workspace-Crate `luxifer/application` anlegen und in `Cargo.toml`
       aufnehmen.
-- [ ] Abhängigkeiten nur in zulässiger Richtung aufbauen:
+- [x] Abhängigkeiten nur in zulässiger Richtung aufbauen:
       `native -> application -> core/drivers`; niemals zurück.
-- [ ] `Application` beziehungsweise fachlich geschnittene Services definieren.
-- [ ] `EditorSession` mit eindeutigem Besitz des laufenden `AppState` einführen.
-- [ ] Einheitliches `AppError` definieren:
-  - [ ] stabiler Fehlercode;
-  - [ ] nutzerlesbare Meldung;
-  - [ ] optionale technische Ursache/Quelle;
+- [ ] `Application` beziehungsweise fachlich geschnittene Services definieren
+      (begonnen mit `EditorSession`; Projekt/Assets/Laser folgen schnittweise).
+- [x] `EditorSession` mit eindeutigem Besitz des laufenden `AppState` einführen.
+- [x] Einheitliches `AppError` definieren:
+  - [x] stabiler Fehlercode;
+  - [x] nutzerlesbare Meldung;
+  - [x] optionale technische Ursache/Quelle;
   - [ ] Konvertierungen für I/O, Projektformat, Import und Treiberfehler.
-- [ ] Ergebnis-/Statusmodelle UI-unabhängig halten; keine `egui`, `winit`,
+- [x] Ergebnis-/Statusmodelle UI-unabhängig halten; keine `egui`, `winit`,
       `wgpu` oder Tauri-Typen.
 - [ ] Native besitzt genau eine zentrale Fehleranzeige und loggt technische
-      Details.
-- [ ] Erste Application-Tests für Sitzung, Fehler und Dirty-Status ergänzen.
+      Details (Banner für `AppError` vorhanden; technisches Logging folgt mit
+      den ersten I/O-Fehlerkonvertierungen).
+- [x] Erste Application-Tests für Sitzung, Fehler und Dirty-Status ergänzen.
 
 Abnahme Phase 1:
 
-- [ ] Eine triviale Operation (empfohlen: Undo/Redo oder Löschen) läuft aus
+- [x] Eine triviale Operation (Löschen sowie Undo/Redo) läuft aus
       Native ausschließlich über Application.
-- [ ] Application-Tests laufen ohne Fenster/GPU.
-- [ ] `cargo test --workspace` ist grün.
+- [x] Application-Tests laufen ohne Fenster/GPU.
+- [x] `cargo test --workspace` ist grün.
+
+Validierung des ersten Schnitts (2026-07-12): `cargo fmt --all -- --check`,
+`cargo test --workspace` (239 Tests) und
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` grün.
+`EditorSession` bietet vorübergehend `Deref`/`DerefMut` als explizit
+dokumentierte Migrationsbrücke; neue Schnitte müssen benannte Session-/Service-
+Methoden ergänzen und den Direktzugriff schrittweise verkleinern.
 
 ## Phase 2 — Editor-Grundworkflow vollständig migrieren
 

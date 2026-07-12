@@ -22,14 +22,14 @@ angebunden und die ersetzte Tauri-Implementierung entfernt ist.
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `get_scene` | Core/Application | direktes `AppState`, prüfen | eine kanonische Session; Renderer liest nur ab |
+| `get_scene` | Core/Application | `EditorSession`, Übergangszugriff | Session besitzt `AppState`; read-only Renderer-View später verengen |
 | `swatch_colors` | Core | vorhanden | direkt aus Core, kein UI-Duplikat |
 | `app_version` | Application | fehlt | Cargo-Paketversion ohne Tauri liefern |
 | `job_preview` | Core/Application | fehlt | Preview aus aktuellem Sessionzustand, Fehlerpfad |
 | `get_ui_settings` | Application | fehlt | plattformneutral laden, Defaults bei fehlender Datei |
 | `save_ui_settings` | Application | fehlt | validieren und fehlersicher speichern |
-| `undo` | Core/Application | prüfen | ein Undo pro Aktion; Dirty/Cache korrekt |
-| `redo` | Core/Application | prüfen | symmetrisch zu Undo |
+| `undo` | Core/Application | über `EditorSession` | Basisschnitt getestet; Gesten-Undo folgt in Phase 2 |
+| `redo` | Core/Application | über `EditorSession` | Basisschnitt getestet; Gesten-Redo folgt in Phase 2 |
 | `frontend_ready` | entfällt | entfällt | reiner Tauri/WebView-Lebenszyklus |
 
 ## Editor, Auswahl und Layer
@@ -50,7 +50,7 @@ Quelle: `frontend/src-tauri/src/commands/edit.rs`.
 | `distribute` | Core/Application | vorhanden, prüfen | Gruppen und Mindestanzahl |
 | `mirror` | Core/Application | vorhanden, prüfen | horizontal/vertikal und Metadaten |
 | `clear_selection` | Core | prüfen | keine unnötige Dirty-/Undo-Änderung |
-| `delete_selected` | Core/Application | prüfen | Layerbereinigung und Undo |
+| `delete_selected` | Core/Application | über `EditorSession` | Fehler ohne Auswahl sowie Löschen/Undo/Redo getestet |
 | `set_layer_params` | Core/Application | teilweise | alle Laser-/Rasterparameter validieren |
 | `toggle_layer` | Core/Application | teilweise | sichtbar, enabled, locked, active eindeutig |
 | `move_layer` | Core/Application | fehlt | Shape-Layer-IDs korrekt neu zuordnen |
