@@ -798,10 +798,37 @@ impl App {
         [b.x + b.w / 2.0, b.y - off]
     }
 
-    /// Baut die Overlay-Vertices (Transform-Handles auf der Auswahl). Jeden Frame
-    /// neu (kamera-abhängig), aber winzig.
+    /// Baut die Overlay-Vertices (Live-Zeichenvorschau, Transform-Handles).
+    /// Jeden Frame neu (kamera-abhängig), aber winzig.
     fn build_overlay(&self) -> Vec<Vertex> {
         let mut v = Vec::new();
+
+        // Live-Vorschau beim Aufziehen eines Rechtecks/einer Ellipse.
+        if let Drag::DrawBox { start } = self.drag {
+            let cur = self.world();
+            let x = start[0].min(cur[0]) as f32;
+            let y = start[1].min(cur[1]) as f32;
+            let w = (start[0] - cur[0]).abs() as f32;
+            let h = (start[1] - cur[1]).abs() as f32;
+            let col = [0.6, 0.8, 1.0, 0.9];
+            match self.tool {
+                Tool::Ellipse => {
+                    // Ellipse als Polygon-Näherung (nur Vorschau).
+                    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+                    let (rx, ry) = (w / 2.0, h / 2.0);
+                    let n = 48;
+                    let mut prev = [cx + rx, cy];
+                    for i in 1..=n {
+                        let a = i as f32 / n as f32 * std::f32::consts::TAU;
+                        let p = [cx + rx * a.cos(), cy + ry * a.sin()];
+                        scene_geo::push_seg(&mut v, prev, p, col);
+                        prev = p;
+                    }
+                }
+                _ => v.extend(scene_geo::rect_outline(x, y, w, h, col)),
+            }
+        }
+
         // Handles nur im Auswahl-Werkzeug und bei vorhandener Auswahl.
         if self.tool != Tool::Select {
             return v;
