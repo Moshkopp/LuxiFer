@@ -32,7 +32,17 @@ struct Tex {
     bind: wgpu::BindGroup,
 }
 
-/// Hält Pipeline, Sampler, Uniform-Buffer und die geladenen Texturen je Asset-ID.
+/// Eine verarbeitete Job-Rastertextur (Preview) samt mm-Platzierung.
+struct RasterQuad {
+    tex: Tex,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+/// Hält Pipeline, Sampler, Uniform-Buffer und die geladenen Texturen je Asset-ID
+/// sowie die Rastertexturen der Laser-Vorschau.
 #[derive(Default)]
 pub struct ImageStore {
     pipeline: Option<wgpu::RenderPipeline>,
@@ -41,6 +51,9 @@ pub struct ImageStore {
     uniform_buf: Option<wgpu::Buffer>,
     uni_bind: Option<wgpu::BindGroup>,
     textures: HashMap<String, Tex>,
+    /// Verarbeitete Rasterungen für den Preview-Reiter (ersetzen dort die
+    /// Design-Texturen). Werden beim Preview-Aufbau gesetzt.
+    rasters: Vec<RasterQuad>,
 }
 
 impl ImageStore {
@@ -174,6 +187,48 @@ impl ImageStore {
         }
     }
 
+    /// Übersetzt die Job-Rastertexturen (Pixel 255 = gebrannt) in GPU-Texturen
+    /// für den Preview-Reiter. Gebrannte Pixel erscheinen in der Rasterfarbe
+    /// der Vorschau, nicht gebrannte bleiben transparent (Bett scheint durch).
+    pub fn set_rasters(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        rasters: &[luxifer_core::RasterTexture],
+    ) {
+        self.rasters.clear();
+        for r in rasters {
+            if r.width == 0 || r.height == 0 {
+                continue;
+            }
+            self.ensure_pipeline(device, format);
+            let c = crate::canvas::scene::PREVIEW_RASTER;
+            let burn = [
+                (c[0] * 255.0) as u8,
+                (c[1] * 255.0) as u8,
+                (c[2] * 255.0) as u8,
+                235,
+            ];
+            let mut rgba = Vec::with_capacity(r.pixels.len() * 4);
+            for &v in &r.pixels {
+                if v >= 128 {
+                    rgba.extend_from_slice(&burn);
+                } else {
+                    rgba.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+            let tex = self.upload_rgba(device, queue, &rgba, r.width, r.height);
+            self.rasters.push(RasterQuad {
+                tex,
+                x: r.x as f32,
+                y: r.y as f32,
+                w: r.w as f32,
+                h: r.h as f32,
+            });
+        }
+    }
+
     fn upload_texture(
         &self,
         device: &wgpu::Device,
@@ -187,6 +242,17 @@ impl ImageStore {
         for &g in luma {
             rgba.extend_from_slice(&[g, g, g, 255]);
         }
+        self.upload_rgba(device, queue, &rgba, w, h)
+    }
+
+    fn upload_rgba(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &[u8],
+        w: u32,
+        h: u32,
+    ) -> Tex {
         let size = wgpu::Extent3d {
             width: w,
             height: h,
@@ -205,7 +271,7 @@ impl ImageStore {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &rgba,
+            rgba,
         );
         let view = texture.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -225,14 +291,41 @@ impl ImageStore {
         Tex { bind }
     }
 
-    /// Zeichnet alle Image-Shapes als texturierte Quads in den Render-Pass.
+    /// Schreibt die Kamera-Uniforms für die Bild-Pipeline.
+    fn write_camera(&self, gpu: &Gpu, cam: &Camera, uni_buf: &wgpu::Buffer) {
+        let uni = Uniforms {
+            center: cam.center,
+            scale: cam.scale,
+            _pad: 0.0,
+            viewport: cam.viewport,
+            _pad2: [0.0, 0.0],
+        };
+        gpu.queue.write_buffer(uni_buf, 0, bytemuck::bytes_of(&uni));
+    }
+
+    /// Zwei Dreiecke einer mm-Box, UV oben-links = (0,0).
+    fn push_quad(verts: &mut Vec<ImgVertex>, x0: f32, y0: f32, x1: f32, y1: f32) {
+        let quad = [
+            ([x0, y0], [0.0, 0.0]),
+            ([x1, y0], [1.0, 0.0]),
+            ([x1, y1], [1.0, 1.0]),
+            ([x0, y0], [0.0, 0.0]),
+            ([x1, y1], [1.0, 1.0]),
+            ([x0, y1], [0.0, 1.0]),
+        ];
+        for (pos, uv) in quad {
+            verts.push(ImgVertex { pos, uv });
+        }
+    }
+
+    /// Zeichnet alle Image-Shapes als texturierte Quads in den Render-Pass
+    /// (Design-Ansicht: die Original-Graustufen an ihrer mm-Box).
     pub fn draw<'a>(
         &'a self,
         rp: &mut wgpu::RenderPass<'a>,
         gpu: &Gpu,
         cam: &Camera,
         state: &AppState,
-        selection_only: bool,
         scratch: &'a mut Option<wgpu::Buffer>,
     ) {
         let (Some(pipeline), Some(uni_buf), Some(uni_bind)) = (
@@ -242,23 +335,12 @@ impl ImageStore {
         ) else {
             return;
         };
-        // Kamera-Uniforms schreiben.
-        let uni = Uniforms {
-            center: cam.center,
-            scale: cam.scale,
-            _pad: 0.0,
-            viewport: cam.viewport,
-            _pad2: [0.0, 0.0],
-        };
-        gpu.queue.write_buffer(uni_buf, 0, bytemuck::bytes_of(&uni));
+        self.write_camera(gpu, cam, uni_buf);
 
         // Alle Image-Quads in einen Vertex-Buffer (6 Vertices je Bild).
         let mut verts: Vec<ImgVertex> = Vec::new();
         let mut ranges: Vec<(String, u32, u32)> = Vec::new();
-        for (index, s) in state.shapes.iter().enumerate() {
-            if selection_only && !state.selected.contains(&index) {
-                continue;
-            }
+        for s in state.shapes.iter() {
             if let luxifer_core::Geo::Image {
                 asset, x, y, w, h, ..
             } = &s.geo
@@ -267,19 +349,13 @@ impl ImageStore {
                     continue;
                 }
                 let start = verts.len() as u32;
-                let (x0, y0, x1, y1) = (*x as f32, *y as f32, (*x + *w) as f32, (*y + *h) as f32);
-                // Zwei Dreiecke, UV oben-links = (0,0).
-                let quad = [
-                    ([x0, y0], [0.0, 0.0]),
-                    ([x1, y0], [1.0, 0.0]),
-                    ([x1, y1], [1.0, 1.0]),
-                    ([x0, y0], [0.0, 0.0]),
-                    ([x1, y1], [1.0, 1.0]),
-                    ([x0, y1], [0.0, 1.0]),
-                ];
-                for (pos, uv) in quad {
-                    verts.push(ImgVertex { pos, uv });
-                }
+                Self::push_quad(
+                    &mut verts,
+                    *x as f32,
+                    *y as f32,
+                    (*x + *w) as f32,
+                    (*y + *h) as f32,
+                );
                 ranges.push((asset.clone(), start, start + 6));
             }
         }
@@ -304,6 +380,51 @@ impl ImageStore {
                 rp.set_bind_group(1, &tex.bind, &[]);
                 rp.draw(*start..*end, 0..1);
             }
+        }
+    }
+
+    /// Zeichnet die verarbeiteten Preview-Rasterungen (Laser-Vorschau) als
+    /// texturierte Quads — statt der Design-Texturen.
+    pub fn draw_rasters<'a>(
+        &'a self,
+        rp: &mut wgpu::RenderPass<'a>,
+        gpu: &Gpu,
+        cam: &Camera,
+        scratch: &'a mut Option<wgpu::Buffer>,
+    ) {
+        if self.rasters.is_empty() {
+            return;
+        }
+        let (Some(pipeline), Some(uni_buf), Some(uni_bind)) = (
+            self.pipeline.as_ref(),
+            self.uniform_buf.as_ref(),
+            self.uni_bind.as_ref(),
+        ) else {
+            return;
+        };
+        self.write_camera(gpu, cam, uni_buf);
+
+        let mut verts: Vec<ImgVertex> = Vec::new();
+        for r in &self.rasters {
+            Self::push_quad(&mut verts, r.x, r.y, r.x + r.w, r.y + r.h);
+        }
+        let buf = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("raster_quads"),
+                contents: bytemuck::cast_slice(&verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        *scratch = Some(buf);
+        let buf = scratch.as_ref().unwrap();
+
+        rp.set_pipeline(pipeline);
+        rp.set_bind_group(0, uni_bind, &[]);
+        rp.set_vertex_buffer(0, buf.slice(..));
+        for (i, r) in self.rasters.iter().enumerate() {
+            let start = (i as u32) * 6;
+            rp.set_bind_group(1, &r.tex.bind, &[]);
+            rp.draw(start..start + 6, 0..1);
         }
     }
 }

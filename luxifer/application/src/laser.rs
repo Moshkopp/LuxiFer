@@ -107,8 +107,12 @@ impl LaserService {
         f(self.driver.as_mut().unwrap())
     }
 
+    /// Baut den JobPlan MIT Asset-Auflösung — Bild-Layer werden gerastert.
+    /// Dieselbe Quelle wie die Vorschau (`EditorSession::job_preview`), damit
+    /// die Vorschau nie etwas zeigt, das der echte Job nicht tut (und der Job
+    /// nichts auslässt, was die Vorschau zeigt).
     fn plan(shapes: &[Shape], layers: &[Layer]) -> JobPlan {
-        JobPlan::from_shapes(shapes, layers)
+        JobPlan::from_shapes_with_assets(shapes, layers, crate::assets::resolve_luma)
     }
 
     fn job_params(start_mode: StartMode, anchor_idx: usize) -> JobParams {

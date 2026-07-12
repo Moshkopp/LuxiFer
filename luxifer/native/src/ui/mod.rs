@@ -14,6 +14,7 @@ mod arrange;
 mod dialogs;
 mod layers;
 mod palette;
+mod preview;
 mod project;
 mod state;
 mod status;
@@ -122,6 +123,12 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         View::Preview => {
             app.left_w = 0.0;
             app.right_w = 0.0;
+            match app.preview_legend() {
+                Some(legend) => preview::preview_legend_window(ctx, legend),
+                // Die Legende entsteht beim Preview-Vertex-Aufbau im selben
+                // Frame NACH der UI — einmal nachzeichnen lassen.
+                None => ctx.request_repaint(),
+            }
         }
         View::Design | View::Laser => {
             let cur_tool = app.canvas.tool;

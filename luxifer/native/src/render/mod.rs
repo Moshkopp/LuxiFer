@@ -14,7 +14,7 @@ use winit::window::Window;
 
 use crate::camera::Camera;
 use crate::canvas::overlay::{overlay_vertices, OverlayInput};
-use crate::canvas::scene::{base_vertices, preview_vertices};
+use crate::canvas::scene::{base_vertices, preview_vertices, PreviewLegend};
 use crate::gpu::Gpu;
 use crate::image_gpu::ImageStore;
 
@@ -41,6 +41,9 @@ pub struct Renderer {
     background_end: u32,
     /// Render-Revision (aus dem Core) beim letzten Vertex-Aufbau.
     last_render_rev: u64,
+    /// Legende des letzten Preview-Aufbaus (None außerhalb der Vorschau bzw.
+    /// vor dem ersten Preview-Frame). Die UI liest sie einen Frame versetzt.
+    preview_legend: Option<PreviewLegend>,
     last_frame: Instant,
     fps: f32,
     /// Ob egui im letzten Frame sofort weiter zeichnen wollte.
@@ -60,6 +63,7 @@ impl Renderer {
             background_end: 0,
             // MAX erzwingt den Aufbau im ersten Frame (Core startet bei 0).
             last_render_rev: u64::MAX,
+            preview_legend: None,
             last_frame: Instant::now(),
             fps: 0.0,
             wants_repaint: false,
@@ -75,9 +79,17 @@ impl Renderer {
     }
 
     /// Erzwingt den Vertex-Neuaufbau im nächsten Frame (z. B. nach Projektwechsel,
-    /// weil der geladene Zustand einen eigenen Revisionszähler mitbringt).
+    /// weil der geladene Zustand einen eigenen Revisionszähler mitbringt). Die
+    /// Preview-Legende verfällt mit, damit die UI keine veralteten Kennzahlen
+    /// zeigt.
     pub fn invalidate_scene(&mut self) {
         self.last_render_rev = u64::MAX;
+        self.preview_legend = None;
+    }
+
+    /// Legende des letzten Preview-Aufbaus (None, solange keiner lief).
+    pub fn preview_legend(&self) -> Option<&PreviewLegend> {
+        self.preview_legend.as_ref()
     }
 
     /// Nimmt egui-Roheingaben entgegen (für den Frame-Aufbau im Root).
@@ -127,13 +139,24 @@ impl Renderer {
         let scene_changed = rev != self.last_render_rev;
         if scene_changed {
             self.last_render_rev = rev;
-            let geometry = if scene.preview {
-                preview_vertices(scene.session, scene.selection_only)
+            if scene.preview {
+                let geometry = preview_vertices(scene.session, scene.selection_only);
+                self.background_end = geometry.background_end;
+                self.verts = geometry.vertices;
+                // Verarbeitete Bild-Rasterungen als Texturen bereitstellen.
+                self.images.set_rasters(
+                    &self.gpu.device,
+                    &self.gpu.queue,
+                    self.gpu.config.format,
+                    &geometry.rasters,
+                );
+                self.preview_legend = Some(geometry.legend);
             } else {
-                base_vertices(scene.session)
-            };
-            self.background_end = geometry.background_end;
-            self.verts = geometry.vertices;
+                let geometry = base_vertices(scene.session);
+                self.background_end = geometry.background_end;
+                self.verts = geometry.vertices;
+                self.preview_legend = None;
+            }
             let verts = std::mem::take(&mut self.verts);
             self.gpu.upload_verts(&verts);
             self.verts = verts;
@@ -206,17 +229,22 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            // Opakes Bett/Gitter zuerst. Danach echte Bildtexturen, anschließend
-            // Vektor-Fills und Konturen; Handles bleiben ganz oben.
+            // Opakes Bett/Gitter zuerst. Danach Bildtexturen — im Preview die
+            // verarbeiteten Job-Rasterungen, sonst die Design-Originale —,
+            // anschließend Vektor-Fills und Konturen; Handles bleiben ganz oben.
             self.gpu.draw_canvas_range(&mut rp, 0..self.background_end);
-            self.images.draw(
-                &mut rp,
-                &self.gpu,
-                scene.cam,
-                scene.session,
-                scene.preview && scene.selection_only,
-                &mut img_scratch,
-            );
+            if scene.preview {
+                self.images
+                    .draw_rasters(&mut rp, &self.gpu, scene.cam, &mut img_scratch);
+            } else {
+                self.images.draw(
+                    &mut rp,
+                    &self.gpu,
+                    scene.cam,
+                    scene.session,
+                    &mut img_scratch,
+                );
+            }
             self.gpu
                 .draw_canvas_range(&mut rp, self.background_end..count);
             self.gpu.draw_overlay(&mut rp);

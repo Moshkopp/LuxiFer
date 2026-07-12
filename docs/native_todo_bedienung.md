@@ -44,7 +44,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
 | D1 | ENTSCHIEDEN | — | Scanlines bleiben bewusst im Design-Tab: direkte Kontrolle des Fill-Ergebnisses; der native Vertex-Cache zeigt aktuell keinen spürbaren Performance-Einbruch. |
-| D2 | IN ARBEIT | P1 | Read-only Vorschau zeigt Cut/Fill/Travel und gecachte Bildtexturen; Mittelmaus-Pan/Mausrad-Zoom aktiv. Verarbeitete Rastertexturen und Legende fehlen noch. |
+| D2 | ERLEDIGT | P1 | Vorschau zeigt Cut/Fill/Travel, **verarbeitete** Bild-Rasterungen (dieselbe Rasterung wie der echte Job) und eine Legende mit Kennzahlen (Arbeitsweg, Leerfahrt, Job-Fläche). Simulation/Scrubber bleibt offen. |
 
 ## E. Panels / Layout / Views
 
@@ -104,13 +104,19 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   tatsächliche Fill-Ergebnis; dank gecachtem Vertexpuffer ist derzeit kein
   wahrnehmbarer Performanceverlust vorhanden. Nur bei belegbarer Regression
   erneut aufgreifen.
-- D2 (in Arbeit): Der erste native Preview-Schnitt besitzt einen eigenen
-  read-only Reiter und zeichnet Cut-, Fill- und Travel-Bewegungen direkt aus
-  `EditorSession::job_preview`/`JobPlan`. Editor-Shortcuts, Gesten und Overlay
-  sind dort gesperrt. Navigation bleibt per Mittelmaus/Mausrad möglich. Bilder
-  nutzen vorläufig die bereits gecachte Design-Textur, damit große Assets den
-  Reiter nicht durch unsichtbare Rasterberechnung blockieren. Die verarbeitete
-  Rastertextur und erklärende Preview-UI folgen separat.
+- D2 (erledigt): Der read-only Preview-Reiter zeichnet Cut-, Fill- und
+  Travel-Bewegungen aus `EditorSession::job_preview`/`JobPlan`; Editor-
+  Shortcuts, Gesten und Overlay sind gesperrt, Navigation per Mittelmaus/
+  Mausrad. Bild-Layer zeigen jetzt die **verarbeitete Rastertextur** (Pixel
+  255 = gebrannt) statt der Design-Textur; der Asset-Resolver
+  (`application::assets::resolve_luma`) ist derselbe wie im echten Job.
+  Dabei wurde eine gefährliche Lücke geschlossen: `LaserService::plan` plante
+  zuvor OHNE Assets — Bild-Layer wären beim echten Brennen/Export
+  stillschweigend übersprungen worden, obwohl die Vorschau sie zeigt. Eine
+  Legende (schwebendes Fenster) erklärt die Farben (Schnitt je Layer,
+  Füllung, Bild-Gravur, Leerfahrt) und zeigt Arbeitsweg/Leerfahrt/Job-Fläche.
+  Nebenbei: `import_path` importiert jetzt auch Bilddateien (CLI-Argument;
+  Vorarbeit für F1). Offen bleibt die Simulation (Scrubber/Abspielen).
 - E4 (erledigt): Der Browser zeigt links die wählbare Projektliste (Doppelklick
   öffnet), rechts den Detailbereich aus `ProjectService::detail`: Metadaten,
   eine live gezeichnete Vektor-Miniatur (`peek_state`, beim offenen Projekt die

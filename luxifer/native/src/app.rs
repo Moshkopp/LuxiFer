@@ -117,11 +117,11 @@ impl App {
             session: EditorSession::new(state),
             canvas: CanvasState::new(cam),
             renderer,
-            // Start-Ansicht per Env (Testhilfe): LUXI_TAB=laser.
-            view: if std::env::var("LUXI_TAB").as_deref() == Ok("laser") {
-                crate::tools::View::Laser
-            } else {
-                crate::tools::View::Design
+            // Start-Ansicht per Env (Testhilfe): LUXI_TAB=laser|preview.
+            view: match std::env::var("LUXI_TAB").as_deref() {
+                Ok("laser") => crate::tools::View::Laser,
+                Ok("preview") => crate::tools::View::Preview,
+                _ => crate::tools::View::Design,
             },
             project: luxifer_application::ProjectService::new(),
             project_msg: String::new(),
@@ -890,7 +890,12 @@ impl App {
         else {
             return;
         };
-        let bytes = match std::fs::read(&path) {
+        self.import_image_path(&path);
+    }
+
+    /// Bilddatei in den Asset-Store importieren und als Image-Shape platzieren.
+    fn import_image_path(&mut self, path: &std::path::Path) {
+        let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => {
                 log::error!("Bild lesen: {e}");
@@ -924,13 +929,21 @@ impl App {
         }
     }
 
-    /// Importiert eine Datei direkt (auch für den „Aztec laden"-Schnellknopf).
+    /// Importiert eine Datei direkt nach Endung — Vektor (SVG/DXF) oder Bild.
+    /// Nutzt der „Aztec laden"-Schnellknopf und das CLI-Argument.
     pub fn import_path(&mut self, path: &std::path::Path) {
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
-            .to_string();
+            .to_ascii_lowercase();
+        if matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "bmp" | "gif" | "webp"
+        ) {
+            self.import_image_path(path);
+            return;
+        }
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => {
@@ -1105,6 +1118,11 @@ impl App {
     /// Laufende Bildrate (für die Statuszeile).
     pub fn fps(&self) -> f32 {
         self.renderer.fps()
+    }
+
+    /// Legende des letzten Preview-Aufbaus (für den Preview-Reiter).
+    pub fn preview_legend(&self) -> Option<&crate::canvas::scene::PreviewLegend> {
+        self.renderer.preview_legend()
     }
 
     pub fn render(&mut self) {

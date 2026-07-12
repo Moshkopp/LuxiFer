@@ -27,17 +27,57 @@ pub fn base_vertices(session: &EditorSession) -> BaseGeometry {
     }
 }
 
-/// Read-only Jobpfad: Arbeitsbewegungen nach Layerfarbe, Leerfahrten dezent
-/// gestrichelt. Grundlage ist ausschließlich die Application-Preview.
-pub fn preview_vertices(session: &EditorSession, selection_only: bool) -> BaseGeometry {
+/// Preview-Farben — geteilt zwischen Szene und Legende, damit beide dieselbe
+/// Sprache sprechen.
+pub const PREVIEW_TRAVEL: [f32; 4] = [0.55, 0.6, 0.68, 0.45];
+pub const PREVIEW_FILL: [f32; 4] = [1.0, 0.58, 0.2, 0.9];
+pub const PREVIEW_RASTER: [f32; 4] = [0.75, 0.75, 0.75, 0.9];
+
+/// Kennzahlen und vorkommende Segmentarten der Jobvorschau für die Legende.
+/// Wird beim Vertex-Aufbau nebenbei gefüllt (kein zweiter Preview-Lauf).
+#[derive(Default)]
+pub struct PreviewLegend {
+    /// Cut-Layer, die im Job tatsächlich vorkommen (Name, Farbe), in
+    /// Brenn-Reihenfolge und ohne Doppelte.
+    pub cut_layers: Vec<(String, [u8; 3])>,
+    pub has_fill: bool,
+    pub has_raster: bool,
+    pub has_travel: bool,
+    /// Arbeitsweg (Laser an) in mm.
+    pub work_len_mm: f64,
+    /// Leerfahrten in mm.
+    pub travel_len_mm: f64,
+    /// Bounding-Box der Job-Geometrie (mm).
+    pub bbox: Option<(f64, f64, f64, f64)>,
+}
+
+/// Vollständiger Preview-Aufbau: Vertices für die Bewegungen plus die
+/// verarbeiteten Rastertexturen der Bild-Layer und die Legende.
+pub struct PreviewGeometry {
+    pub vertices: Vec<Vertex>,
+    pub background_end: u32,
+    /// Verarbeitete Bild-Rasterungen (Pixel 255 = gebrannt) an ihrer mm-Box.
+    pub rasters: Vec<luxifer_core::RasterTexture>,
+    pub legend: PreviewLegend,
+}
+
+/// Read-only Jobpfad: Arbeitsbewegungen nach Layerfarbe, Leerfahrten dezent,
+/// Bild-Layer als verarbeitete Rastertextur. Grundlage ist ausschließlich die
+/// Application-Preview (derselbe JobPlan wie Export/Treiber).
+pub fn preview_vertices(session: &EditorSession, selection_only: bool) -> PreviewGeometry {
     let mut v = scene_geo::bed_grid(session.bed_w_mm as f32, session.bed_h_mm as f32);
     let background_end = v.len() as u32;
     let preview = session.job_preview(selection_only);
-    for movement in preview.moves {
+    let mut legend = PreviewLegend {
+        bbox: preview.bbox,
+        has_raster: !preview.rasters.is_empty(),
+        ..Default::default()
+    };
+    for movement in &preview.moves {
         let color = match movement.kind {
-            luxifer_core::preview::MoveKind::Travel => [0.55, 0.6, 0.68, 0.45],
-            luxifer_core::preview::MoveKind::Fill => [1.0, 0.58, 0.2, 0.9],
-            luxifer_core::preview::MoveKind::Raster => [0.75, 0.75, 0.75, 0.9],
+            luxifer_core::preview::MoveKind::Travel => PREVIEW_TRAVEL,
+            luxifer_core::preview::MoveKind::Fill => PREVIEW_FILL,
+            luxifer_core::preview::MoveKind::Raster => PREVIEW_RASTER,
             luxifer_core::preview::MoveKind::Cut => session
                 .layers
                 .get(movement.layer_id)
@@ -51,6 +91,27 @@ pub fn preview_vertices(session: &EditorSession, selection_only: bool) -> BaseGe
                 })
                 .unwrap_or([0.9, 0.2, 0.2, 1.0]),
         };
+        match movement.kind {
+            luxifer_core::preview::MoveKind::Travel => {
+                legend.has_travel = true;
+                legend.travel_len_mm += movement.len_mm();
+            }
+            luxifer_core::preview::MoveKind::Fill => {
+                legend.has_fill = true;
+                legend.work_len_mm += movement.len_mm();
+            }
+            luxifer_core::preview::MoveKind::Raster => {
+                legend.work_len_mm += movement.len_mm();
+            }
+            luxifer_core::preview::MoveKind::Cut => {
+                legend.work_len_mm += movement.len_mm();
+                if let Some(layer) = session.layers.get(movement.layer_id) {
+                    if !legend.cut_layers.iter().any(|(n, _)| n == &layer.name) {
+                        legend.cut_layers.push((layer.name.clone(), layer.color));
+                    }
+                }
+            }
+        }
         scene_geo::push_seg(
             &mut v,
             [movement.from.0 as f32, movement.from.1 as f32],
@@ -58,9 +119,11 @@ pub fn preview_vertices(session: &EditorSession, selection_only: bool) -> BaseGe
             color,
         );
     }
-    BaseGeometry {
+    PreviewGeometry {
         vertices: v,
         background_end,
+        rasters: preview.rasters,
+        legend,
     }
 }
 

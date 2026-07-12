@@ -72,3 +72,32 @@ fn export_erzeugt_ruida_bytes() {
     assert!(!bytes.is_empty(), "Ruida-Job darf nicht leer sein");
     let _ = std::fs::remove_file(&tmp);
 }
+
+#[test]
+fn plan_rastert_bild_assets_wie_die_vorschau() {
+    // Der echte Job muss dieselben Bilder rastern, die die Vorschau zeigt —
+    // gleicher Resolver (assets::resolve_luma), prozessglobales Datenverzeichnis.
+    let _g = crate::test_env::with_temp_dir("laser_plan_raster");
+    let png = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../native/tests/fixtures/test2x2.png"
+    ));
+    let Ok(bytes) = png else {
+        eprintln!("Fixture fehlt — Test übersprungen");
+        return;
+    };
+    let meta = luxifer_core::import_image(&luxifer_core::assets_dir(), &bytes, "test.png")
+        .expect("import_image");
+
+    let mut s = luxifer_core::AppState::new();
+    s.add_image(meta.id.clone(), 0.0, 0.0, 10.0, 10.0);
+    let plan = LaserService::plan(&s.shapes, &s.layers);
+
+    let has_raster = plan.layers.iter().any(|l| {
+        matches!(
+            &l.work,
+            luxifer_core::LayerWork::Raster { rows, texture } if !rows.is_empty() && texture.is_some()
+        )
+    });
+    assert!(has_raster, "Bild-Layer wird im JobPlan gerastert");
+}

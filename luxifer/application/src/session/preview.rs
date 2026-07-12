@@ -13,10 +13,14 @@ impl EditorSession {
         } else {
             self.state.shapes.clone()
         };
-        // Rasterbilder werden im ersten nativen Preview-Schnitt als bereits
-        // gecachte GPU-Textur dargestellt. Die teure Job-Rasterung folgt erst
-        // mit der dedizierten Raster-Preview-Pipeline.
-        let plan = luxifer_core::JobPlan::from_shapes(&shapes, &self.state.layers);
+        // Bild-Layer werden mit denselben Asset-Pixeln gerastert wie der echte
+        // Job (assets::resolve_luma) — die Vorschau zeigt die verarbeitete
+        // Rastertextur, nicht das Design-Original.
+        let plan = luxifer_core::JobPlan::from_shapes_with_assets(
+            &shapes,
+            &self.state.layers,
+            crate::assets::resolve_luma,
+        );
         luxifer_core::preview::JobPreview::from_plan(&plan)
     }
 }

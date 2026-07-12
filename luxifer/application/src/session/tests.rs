@@ -525,3 +525,43 @@ fn ungueltige_helligkeit_wird_abgewiesen() {
     assert_eq!(error.code(), "image_brightness");
     assert!(!session.dirty);
 }
+
+#[test]
+fn job_preview_rastert_bild_assets() {
+    // Prozessglobales Datenverzeichnis → gemeinsamer Test-Lock.
+    let _g = crate::test_env::with_temp_dir("preview_raster");
+    let png = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../native/tests/fixtures/test2x2.png"
+    ));
+    // Fixture optional: wenn nicht vorhanden, Test überspringen (CI-tolerant).
+    let Ok(bytes) = png else {
+        eprintln!("Fixture fehlt — Test übersprungen");
+        return;
+    };
+    let meta = luxifer_core::import_image(&luxifer_core::assets_dir(), &bytes, "test.png")
+        .expect("import_image");
+
+    let mut state = AppState::new();
+    state.add_image(meta.id.clone(), 0.0, 0.0, 10.0, 10.0);
+    let session = EditorSession::new(state);
+    let preview = session.job_preview(false);
+
+    // Der Bild-Layer liefert die verarbeitete Rastertextur an der mm-Position —
+    // keine Moves (Bilder sind Texturen, ADR 0008 §2).
+    assert_eq!(preview.rasters.len(), 1);
+    let tex = &preview.rasters[0];
+    assert!(tex.width > 0 && tex.height > 0);
+    assert_eq!((tex.x, tex.y, tex.w, tex.h), (0.0, 0.0, 10.0, 10.0));
+}
+
+#[test]
+fn job_preview_ueberspringt_fehlende_assets_ohne_panik() {
+    let _g = crate::test_env::with_temp_dir("preview_raster_missing");
+    let mut state = AppState::new();
+    state.add_image("gibt-es-nicht".into(), 0.0, 0.0, 10.0, 10.0);
+    let session = EditorSession::new(state);
+    let preview = session.job_preview(false);
+    assert!(preview.rasters.is_empty());
+    assert!(preview.moves.is_empty());
+}

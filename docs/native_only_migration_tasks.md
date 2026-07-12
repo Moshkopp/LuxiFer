@@ -330,6 +330,20 @@ Offen (spätere Feinarbeit, blockiert Phase 4 nicht): atomisches Speichern bei
 Teilfehlern; PNG-Thumbnails pro Version (Core-Speicherpfad vorhanden, Dienst
 übergibt leeres PNG).
 
+Preview-Schnitt 2026-07-12 (D2 abgeschlossen): `EditorSession::job_preview`
+und `LaserService::plan` planen jetzt beide MIT Asset-Auflösung über den
+gemeinsamen Resolver `application::assets::resolve_luma` — die Vorschau zeigt
+exakt das, was der Job tut. Dabei wurde eine gefährliche Lücke geschlossen:
+Der echte Job/Export plante zuvor ohne Assets und hätte Bild-Layer
+stillschweigend übersprungen. Nativ zeichnet der Preview-Reiter die
+verarbeiteten Rastertexturen (Pixel 255 = gebrannt → Rasterfarbe, sonst
+transparent) statt der Design-Texturen, plus eine Legende (Farben je
+Segmentart, Arbeitsweg/Leerfahrt/Job-Fläche), die beim Preview-Vertex-Aufbau
+nebenbei entsteht (kein zweiter Preview-Lauf). `import_path` importiert nun
+auch Bilddateien (Vorarbeit F1). Validierung: 296 Workspace-Tests (53
+Application, davon 3 neue Raster-Tests), Clippy `-D warnings`, Release-
+Smoke-Test mit Screenshot (Legende + Rasterbild sichtbar, 430 fps).
+
 ## Phase 4 — Import, Text und Bildbearbeitung
 
 Ziel: Vollständige Erzeugungs- und Bearbeitungsworkflows statt Import-Demos.
@@ -383,7 +397,9 @@ Abnahme Phase 5:
 Ziel: Sicherer durchgängiger Weg vom Design zur Maschine.
 
 - [x] Jobparameter (Startmodus/Anker) aus dem Dienst; Jobvorschau siehe unten.
-- [ ] Native GPU-Vorschau für Cut/Fill/Raster/Image implementieren.
+- [x] Native GPU-Vorschau für Cut/Fill/Raster/Image implementieren
+      (Cut/Fill/Travel als Linien, Bilder als verarbeitete Rastertextur,
+      Legende mit Kennzahlen; D2-Schnitt).
 - [ ] Vorschau-Simulation und Monitorzustand festlegen und umsetzen.
 - [x] Tauri-Lasercommands und `native/src/laser.rs` inventarisiert.
 - [x] Ein kanonischer `LaserService` in Application:
@@ -600,8 +616,8 @@ Duplikate `native/src/{project,laser}.rs` sind gelöscht), Phase 7 ist begonnen
 
 Ausdrücklich **offen** (nicht als fertig behandeln):
 
-- Preview/Simulation: read-only Preview-Reiter existiert (Cut/Fill/Travel);
-  verarbeitete Rastertexturen, Legende und Simulation fehlen (D2).
+- Preview-Simulation (Scrubber/Abspielen): der Reiter selbst ist fertig
+  (Cut/Fill/Travel, verarbeitete Rastertexturen, Legende — D2 abgeschlossen).
 - Trace (Bild → Vektor).
 - Pattern Fill (Core-Op vorhanden; UI/Parameterdialog fehlt — Stub).
 - Bridge/Haltesteg (Stub) und Ecken-Fillet.
@@ -613,9 +629,8 @@ Ausdrücklich **offen** (nicht als fertig behandeln):
 - Live-Bildvorschau im Bildparameter-Dialog.
 - Demo-Startinhalt und „Aztec laden“ hinter einen Dev-Modus stellen.
 
-Nächste sinnvolle Schnitte in dieser Reihenfolge: D2 (Preview
-vervollständigen: verarbeitete Rastertexturen + Legende), dann die Stubs
-(Trace/Pattern Fill/Bridge) und Bézier-Node-Editing. Arbeitsgrundlage ist
+Nächste sinnvolle Schnitte in dieser Reihenfolge: die Stubs
+(Trace/Pattern Fill/Bridge), dann Bézier-Node-Editing. Arbeitsgrundlage ist
 `docs/native_todo_bedienung.md`; nach jedem Schnitt diese Liste, die
 Bedienungsliste und die Funktionsmatrix pflegen.
 

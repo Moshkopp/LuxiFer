@@ -29,7 +29,7 @@ Sammelmodul werden; Projekt-, Asset- und Laserabläufe erhalten eigene Services.
 | `get_scene` | Core/Application | `EditorSession`, Übergangszugriff | Session besitzt `AppState`; read-only Renderer-View später verengen |
 | `swatch_colors` | Core | vorhanden | direkt aus Core, kein UI-Duplikat |
 | `app_version` | Application | fehlt | Cargo-Paketversion ohne Tauri liefern |
-| `job_preview` | Core/Application | teilweise nativ | read-only `EditorSession::job_preview`, Cut/Fill/Travel nativ; Bilder vorläufig aus GPU-Asset-Cache, verarbeitete Rastertextur noch offen |
+| `job_preview` | Core/Application | nativ vollständig | Cut/Fill/Travel + verarbeitete Bild-Rasterungen + Legende; gleicher Asset-Resolver wie der echte Job; **offen:** Simulation/Scrubber |
 | `get_ui_settings` | Application | fehlt | plattformneutral laden, Defaults bei fehlender Datei |
 | `save_ui_settings` | Application | fehlt | validieren und fehlersicher speichern |
 | `undo` | Core/Application | über `EditorSession` | Strg+Z; Gesten erzeugen genau einen Undo-Schritt; Shortcut-Zuordnung getestet |
@@ -102,7 +102,7 @@ Quelle: `frontend/src-tauri/src/commands/image.rs` sowie Projekt-Assets.
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `import_image_file` | Application/Core | über Session/Asset-Store | Asset-Anlage und Textur-Invalidierung (`image_dirty`) |
+| `import_image_file` | Application/Core | über Session/Asset-Store | Asset-Anlage und Textur-Invalidierung (`image_dirty`); auch per `import_path` (CLI/Schnellknopf, Vorarbeit F1) |
 | `image_render` | Core/Application | teilweise Renderer | **offen:** Live-Vorschau im Dialog; Wirkung erst nach Übernahme (C2) |
 | `set_image_params` | Core/Application | über `EditorSession::set_image_params` | Modus/Schwelle/Helligkeit/Kontrast/Gamma/Invert validiert; Dialog per Doppelklick |
 | `project_assets` | Application/Core | über Core-`ProjectFile` | Assets laufen durch die kanonische Projektkette; keine Base64-Dauerablage |
@@ -138,7 +138,7 @@ Quelle: `frontend/src-tauri/src/commands/laser.rs`. Das frühere Native-Duplikat
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `laser_job_start` | Application/Core | `LaserService::run_action` | Jobparameter/Startmodus/Anker aus dem Dienst; echte HW = manueller Test |
+| `laser_job_start` | Application/Core | `LaserService::run_action` | plant MIT Asset-Auflösung (Bild-Layer werden gerastert, Test); Startmodus/Anker aus dem Dienst; echte HW = manueller Test |
 | `laser_list` | Application | `LaserService::load` | Registry laden; beschädigte Datei fällt auf Defaults zurück |
 | `laser_save` | Application | `LaserService::save_profile` | validieren, persistieren, ID-Regel |
 | `laser_delete` | Application | `LaserService::delete_profile` | aktives Profil und Persistenzfehler |

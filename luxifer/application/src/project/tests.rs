@@ -1,31 +1,12 @@
 //! Roundtrip- und Fehlerpfad-Tests des Projektdienstes. Läuft gegen ein
-//! temporäres Datenverzeichnis über `LUXIFER_DATA_DIR`.
-//!
-//! Env-Variablen sind prozessglobal; deshalb sind alle Schritte bewusst in
-//! wenige, sequenzielle Tests gebündelt, die sich ein eindeutiges Temp-Verzeichnis
-//! teilen und über einen Mutex serialisiert laufen.
-
-use std::sync::Mutex;
+//! temporäres Datenverzeichnis über `LUXIFER_DATA_DIR` (gemeinsamer Lock in
+//! `crate::test_env`, weil die Env-Variable prozessglobal ist).
 
 use luxifer_core::state::AppState;
 use luxifer_core::Geo;
 
 use super::ProjectService;
-
-// Serialisiert die Tests, weil `LUXIFER_DATA_DIR` prozessglobal ist.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-/// Setzt ein frisches Temp-Datenverzeichnis und gibt den Lock-Guard zurück.
-fn with_temp_dir(tag: &str) -> std::sync::MutexGuard<'static, ()> {
-    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let dir = std::env::temp_dir().join(format!("luxifer_proj_test_{tag}_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    // SAFETY: Zugriff ist über ENV_LOCK serialisiert.
-    unsafe {
-        std::env::set_var("LUXIFER_DATA_DIR", &dir);
-    }
-    guard
-}
+use crate::test_env::with_temp_dir;
 
 fn state_with_rect() -> AppState {
     let mut s = AppState::new();
