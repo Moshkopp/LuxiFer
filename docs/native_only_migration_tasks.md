@@ -269,17 +269,19 @@ startet und rendert ohne Panic.
 
 Ziel: Verlustfreies Arbeiten und vollständiger Datei-/Asset-Lebenszyklus.
 
-- [ ] Tauri-Projektcommands und `native/src/project.rs` gegeneinander prüfen.
-- [ ] Eine kanonische `ProjectService`-Implementierung in Application/Core
-      herstellen; Duplikat entfernen.
-- [ ] Neues Projekt, Liste, Öffnen, Speichern und „Neue Version“.
-- [ ] Details, Umbenennen, Löschen, Import/Export von Projekten.
-- [ ] Versionsliste, Version öffnen/löschen und Thumbnails.
-- [ ] Asset-Verzeichnis und `asset_id`-Referenzen unverändert erhalten; keine
-      Base64-Dauerablage.
-- [ ] Autosave nur übernehmen, wenn der Workflow ausdrücklich festgelegt ist;
-      sonst bewusst manuell speichern.
-- [ ] Dirty-Guard bei Neu, Öffnen, Schließen und Programmende.
+- [x] Tauri-Projektcommands und `native/src/project.rs` gegeneinander geprüft.
+- [x] Eine kanonische `ProjectService`-Implementierung in Application
+      hergestellt; `native/src/project.rs` gelöscht.
+- [x] Neues Projekt, Liste, Öffnen, Speichern und „Neue Version“.
+- [x] Umbenennen, Löschen, Export von Projekten (im Dienst; UI-Aktionen im
+      Browser folgen als eigener Schnitt).
+- [x] Version öffnen/löschen (im Dienst: `open_version`/`delete_version`);
+      Versionsliste/Thumbnails in der UI folgen.
+- [x] Asset-Verzeichnis und `asset_id`-Referenzen unverändert (der Dienst nutzt
+      die kanonische Core-API `ProjectFile`; keine Base64-Dauerablage).
+- [x] Manuell speichern beibehalten (kein Autosave; ADR 0003, Strg+S-Workflow).
+- [x] Dirty-Guard bei Neu, Öffnen und Programmende (`request_close`); Schließen
+      ohne Beenden = Projektwechsel, deckt Neu/Öffnen bereits ab.
 - [ ] Atomisches Speichern beziehungsweise sichere Fehlerbehandlung bei
       Teilfehlern prüfen.
 

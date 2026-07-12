@@ -347,6 +347,8 @@ impl App {
             A::SaveProject => self.project_save(),
             A::SaveProjectVersion => self.project_save_version(),
             A::OpenProject(name) => self.project_open(&name),
+            A::DeleteProject(name) => self.project_delete(&name),
+            A::ExportProject(name) => self.project_export(&name),
             A::SelectView(view) => self.view = view,
             A::Undo => self.undo(),
             A::Redo => self.redo(),
@@ -512,6 +514,29 @@ impl App {
                 self.project_msg = format!("Neues Projekt: {}", name.trim());
                 self.view = crate::tools::View::Design;
             }
+            Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Projekt löschen (schließt es, wenn es das offene war).
+    pub fn project_delete(&mut self, name: &str) {
+        match self.project.delete(name) {
+            Ok(()) => self.project_msg = format!("Gelöscht: {name}"),
+            Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Projekt über einen nativen Zieldialog exportieren.
+    pub fn project_export(&mut self, name: &str) {
+        let Some(ziel) = rfd::FileDialog::new()
+            .add_filter("LuxiFer-Projekt", &["luxi"])
+            .set_file_name(format!("{name}.luxi"))
+            .save_file()
+        else {
+            return; // Abbruch im Dialog: nichts tun.
+        };
+        match self.project.export(name, &ziel) {
+            Ok(()) => self.project_msg = format!("Exportiert: {}", ziel.display()),
             Err(error) => self.app_error = Some(error),
         }
     }

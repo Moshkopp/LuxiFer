@@ -69,6 +69,12 @@ pub(super) fn project_browser(
                     if ui.button("Öffnen").clicked() {
                         actions.push(UiAction::OpenProject(p.name.clone()));
                     }
+                    if ui.button("Export").clicked() {
+                        actions.push(UiAction::ExportProject(p.name.clone()));
+                    }
+                    if ui.button("Löschen").clicked() {
+                        actions.push(UiAction::DeleteProject(p.name.clone()));
+                    }
                 });
             });
             ui.separator();

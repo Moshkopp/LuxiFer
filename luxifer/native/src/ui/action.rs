@@ -60,6 +60,10 @@ pub enum UiAction {
     SaveProjectVersion,
     /// Projekt mit diesem Namen öffnen.
     OpenProject(String),
+    /// Projekt mit diesem Namen löschen.
+    DeleteProject(String),
+    /// Projekt mit diesem Namen exportieren (Zieldialog im Root).
+    ExportProject(String),
     /// Haupt-Ansicht (Reiter) wechseln.
     SelectView(View),
     /// Rückgängig.
