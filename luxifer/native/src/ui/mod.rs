@@ -59,8 +59,11 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     if let Some(error) = app.app_error.as_ref() {
         let code = error.code().to_string();
         let message = error.message().to_string();
+        let details = error.details().map(|d| d.to_string());
         let actions = egui::TopBottomPanel::top("application_error")
-            .show(ctx, |ui| status::error_banner(ui, &message, &code))
+            .show(ctx, |ui| {
+                status::error_banner(ui, &message, &code, details.as_deref())
+            })
             .inner;
         for action in actions {
             app.dispatch(action);

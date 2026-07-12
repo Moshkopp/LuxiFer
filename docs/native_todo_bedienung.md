@@ -55,6 +55,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | E3 | ERLEDIGT | P2 | Laser-Tab erzwingt Auswahl, sperrt Zeichnen/Löschen und gibt Layer nur temporär für Verschieben/Skalieren/Drehen frei. |
 | E4 | ERLEDIGT | P1 | Projektbrowser ist Master-Detail: Liste links, rechts Metadaten, Vektor-Miniatur, Umbenennen, Export, zweistufiges Löschen und Versionsliste (Laden/Löschen). PNG-Thumbnails pro Version bleiben offen. |
 | E5 | ERLEDIGT | P1 | Laser-Tab: Panel lief über den rechten Rand hinaus (Profilzeile zu breit), die Ebenenliste fehlte, und die Treiber-Rückmeldung stand unsichtbar ganz unten. Jetzt: Ebenenliste + Positionsfreigabe in eigenem linken Panel (resizierbar, scrollt), Laser-Bedienpanel rechts, Rückmeldung bei den Job-Kacheln. |
+| E6 | ERLEDIGT | P1 | Job-Buttons schlugen IMMER fehl („Laser-Aktion fehlgeschlagen [laser_action]"): Der LaserService rief nie `connect()` auf — jede Geräteaktion lief in `NotConnected`. Jetzt verbindet er vor verbindungsbedürftigen Aktionen (Export weiterhin ohne Gerät); das Fehlerbanner zeigt zusätzlich die technische Ursache. Echte HW-Abnahme steht aus. |
 
 ## F. Header / Werkzeug-Zugänge
 
@@ -156,6 +157,19 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   vollständig (`UiAction::LaserRun` → `LaserService::run_action`, hardwarelos
   getestet); nur der Modulkommentar behauptete noch „loggen vorerst". Die
   Treiber-Rückmeldung erscheint jetzt direkt unter den Job-Kacheln.
+- E6 (erledigt): Die Migration hatte Tauris `needs_connection`/`connect_active`
+  verloren — `driver_for` baute nur das Treiberobjekt, verband aber nie; der
+  Ruida-Treiber liefert dann bei jeder Geräteaktion `NotConnected`, und das
+  Banner verschluckte die Ursache (AppError-`details` wurden nie angezeigt).
+  Jetzt: `with_driver(connect, …)` verbindet vor SendJob/Frame/Gummiband/
+  Pause/Stopp/Home/Ursprung/Jog (idempotent im Treiber, Ziel aus dem Profil:
+  IP bzw. serieller Port); Export kompiliert weiterhin ohne Gerät. Ohne
+  erreichbares Gerät kommt „Keine Verbindung zum Laser (IP)" mit technischer
+  Ursache im Banner (Ruida-Ping: 300 ms Timeout). Getestet: Klassifikation
+  der Verbindungspflicht + Fehlerpfad gegen 127.0.0.1. Der synchrone
+  Verbindungsaufbau blockiert die UI kurz (~300 ms) — der asynchrone
+  Geräteablauf bleibt die bekannte offene Architekturfrage. **Abnahme an
+  echter Hardware steht aus.**
 - E1/E2 (erledigt): Der Inspector ist breiter und resizbar. Layer-Karten trennen
   Identität (Farbe/Name/Modus/Objektzahl), Zustände (Sichtbar/Job/Gesperrt/Luft)
   und Reihenfolge klar; der Name öffnet den Parameterdialog direkt.

@@ -7,7 +7,12 @@ use super::action::UiAction;
 
 /// Rotes Banner mit `message` und stabilem Fehlercode. Gibt `DismissError`
 /// zurück, wenn der Nutzer schließt.
-pub(super) fn error_banner(ui: &mut egui::Ui, message: &str, code: &str) -> Vec<UiAction> {
+pub(super) fn error_banner(
+    ui: &mut egui::Ui,
+    message: &str,
+    code: &str,
+    details: Option<&str>,
+) -> Vec<UiAction> {
     let mut actions = Vec::new();
     ui.horizontal(|ui| {
         ui.colored_label(
@@ -18,6 +23,12 @@ pub(super) fn error_banner(ui: &mut egui::Ui, message: &str, code: &str) -> Vec<
             actions.push(UiAction::DismissError);
         }
     });
+    // Technische Ursache mit anzeigen — ohne sie ist z. B. ein
+    // Verbindungsfehler („Timeout") nicht von einem Protokollfehler
+    // unterscheidbar und der Nutzer rät im Dunkeln.
+    if let Some(details) = details {
+        ui.label(RichText::new(details).small().weak());
+    }
     actions
 }
 

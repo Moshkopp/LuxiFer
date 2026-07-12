@@ -7,12 +7,16 @@ use luxifer_core::{Connection, DriverKind, JobAction, LaserProfile, LaserRegistr
 use super::LaserService;
 
 fn service_with_ruida() -> LaserService {
+    service_with_ruida_at("192.168.1.100")
+}
+
+fn service_with_ruida_at(ip: &str) -> LaserService {
     let profile = LaserProfile {
         id: "test-ruida".into(),
         name: "Test-Ruida".into(),
         kind: DriverKind::Ruida,
         connection: Connection::Netz {
-            ip: "192.168.1.100".into(),
+            ip: ip.into(),
             port: None,
         },
         bed_mm: (600.0, 400.0),
@@ -100,4 +104,38 @@ fn plan_rastert_bild_assets_wie_die_vorschau() {
         )
     });
     assert!(has_raster, "Bild-Layer wird im JobPlan gerastert");
+}
+
+#[test]
+fn verbindungspflicht_ist_korrekt_klassifiziert() {
+    // Export kompiliert nur (kein Gerät nötig); alles andere fährt die Maschine.
+    assert!(!super::needs_connection(JobAction::ExportFile));
+    for a in [
+        JobAction::SendJob,
+        JobAction::StreamGcode,
+        JobAction::Frame,
+        JobAction::RubberFrame,
+        JobAction::Pause,
+        JobAction::Stop,
+        JobAction::Home,
+        JobAction::GoOrigin,
+    ] {
+        assert!(super::needs_connection(a), "{a:?} braucht Verbindung");
+    }
+}
+
+#[test]
+fn run_action_ohne_erreichbares_geraet_meldet_verbindungsfehler() {
+    // Regression: Der Dienst rief nie connect() auf — jede Aktion scheiterte
+    // mit einem nackten „NotConnected". Jetzt wird vor der Aktion verbunden;
+    // ohne erreichbares Gerät (127.0.0.1 antwortet nicht auf den Ruida-Ping)
+    // kommt ein verständlicher Fehler mit Ziel und technischer Ursache.
+    let mut svc = service_with_ruida_at("127.0.0.1");
+    let (shapes, layers) = one_rect();
+    let err = svc
+        .run_action(JobAction::Frame, &shapes, &layers, StartMode::Absolut, 4)
+        .unwrap_err();
+    assert_eq!(err.code(), "laser_connect");
+    assert!(err.message().contains("127.0.0.1"), "Ziel in der Meldung");
+    assert!(err.details().is_some(), "technische Ursache vorhanden");
 }

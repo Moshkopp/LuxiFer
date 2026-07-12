@@ -144,9 +144,9 @@ Quelle: `frontend/src-tauri/src/commands/laser.rs`. Das frühere Native-Duplikat
 | `laser_delete` | Application | `LaserService::delete_profile` | aktives Profil und Persistenzfehler |
 | `laser_set_active` | Application | `LaserService::set_active` | Existenz und Persistenz |
 | `laser_actions` | Application/Driver | `LaserService::actions` | Capabilities des aktiven Treibers; Panel baut daraus die Slots |
-| `laser_run_action` | Application/Driver | `LaserService::run_action` | Fehler als stabiler `AppError`; kein Treiberbau in der UI |
+| `laser_run_action` | Application/Driver | `LaserService::run_action` | verbindet vorher (`laser_connect`-Fehler mit Ziel/Ursache); kein Treiberbau in der UI |
 | `laser_export` | Application/Driver | `LaserService::export_to` | nativer Zieldialog; nicht-leere Bytes mit Fake-Ruida getestet |
-| `laser_jog` | Application/Driver | `LaserService::jog` | Verbindung/Fehlerstatus über Treiberfehler |
+| `laser_jog` | Application/Driver | `LaserService::jog` | verbindet vorher; Fehlerstatus über Treiberfehler |
 | `laser_home` | Application/Driver | `LaserService::home` | Verbindung und Fehlerstatus |
 | `laser_position` | Application/Driver | **offen** | nicht unterstützte Geräte und Fehler |
 | `laser_ping` | Application/Driver | **offen** | Timeout, offline ist kein Panic |
@@ -157,8 +157,10 @@ Zusätzlich, obwohl es keine separaten Commands sind:
   sein, nicht pro UI neu entstehen.
 - `action_from_key`: erledigt — nativ läuft alles über die typisierte
   `JobAction`, keine Stringschlüssel.
-- `needs_connection` und `connect_active`: erledigt — liegen im `LaserService`
-  (`driver_for`), nicht in egui-Callbacks.
+- `needs_connection` und `connect_active`: erledigt — `LaserService::with_driver`
+  verbindet vor verbindungsbedürftigen Aktionen (Ziel aus dem Profil); Export
+  kompiliert ohne Gerät. (War zuvor fälschlich als erledigt markiert: `driver_for`
+  baute nur das Objekt, verband aber nie — Bedienungsliste E6.)
 
 ## Native-spezifische sichtbare Aktionen ohne direkten Tauri-Command
 

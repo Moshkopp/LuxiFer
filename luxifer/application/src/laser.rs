@@ -6,11 +6,25 @@
 //! Treibers (z. B. „Job gesendet") bleiben nutzerlesbare Strings.
 
 use luxifer_core::{
-    Anchor, DriverKind, JobAction, JobParams, JobPlan, LaserProfile, LaserRegistry, Layer,
-    MachineDriver, Shape, StartMode,
+    Anchor, Connection, DriverKind, JobAction, JobParams, JobPlan, LaserProfile, LaserRegistry,
+    Layer, MachineDriver, Shape, StartMode,
 };
 
 use crate::AppError;
+
+/// Ob eine Job-Aktion eine offene Geräteverbindung braucht. Kompilieren/
+/// Export laufen ohne Gerät.
+fn needs_connection(a: JobAction) -> bool {
+    !matches!(a, JobAction::ExportFile)
+}
+
+/// Verbindungsziel aus dem Profil: IP (Netz) bzw. Gerätepfad (Seriell).
+fn connection_target(profile: &LaserProfile) -> String {
+    match &profile.connection {
+        Connection::Netz { ip, .. } => ip.clone(),
+        Connection::Seriell { port, .. } => port.clone(),
+    }
+}
 
 /// Baut den passenden Treiber aus einem Profil.
 fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
@@ -82,12 +96,17 @@ impl LaserService {
     /// Verfügbare Job-Aktionen des aktiven Treibers (fürs Panel-Grid). Ohne
     /// aktiven Treiber leer.
     pub fn actions(&mut self) -> Vec<JobAction> {
-        self.with_driver(|d| Ok(d.actions())).unwrap_or_default()
+        self.with_driver(false, |d| Ok(d.actions()))
+            .unwrap_or_default()
     }
 
     /// Stellt sicher, dass der Treiber zum aktiven Profil gebaut ist, und ruft f.
+    /// `connect` = vorher die Geräteverbindung herstellen (idempotent im
+    /// Treiber); ohne erreichbares Gerät kommt ein verständlicher Fehler mit
+    /// Ziel und technischer Ursache statt eines nackten „NotConnected".
     fn with_driver<T>(
         &mut self,
+        connect: bool,
         f: impl FnOnce(&mut Box<dyn MachineDriver + Send>) -> Result<T, AppError>,
     ) -> Result<T, AppError> {
         let profile = self
@@ -104,7 +123,18 @@ impl LaserService {
             self.driver = Some(driver_for(&profile));
             self.driver_id = Some(profile.id.clone());
         }
-        f(self.driver.as_mut().unwrap())
+        let driver = self.driver.as_mut().unwrap();
+        if connect {
+            let target = connection_target(&profile);
+            driver.connect(&target).map_err(|e| {
+                AppError::wrap(
+                    "laser_connect",
+                    format!("Keine Verbindung zum Laser ({target})."),
+                    e.to_string(),
+                )
+            })?;
+        }
+        f(driver)
     }
 
     /// Baut den JobPlan MIT Asset-Auflösung — Bild-Layer werden gerastert.
@@ -133,7 +163,7 @@ impl LaserService {
     ) -> Result<String, AppError> {
         let plan = Self::plan(shapes, layers);
         let jp = Self::job_params(start_mode, anchor_idx);
-        self.with_driver(|d| {
+        self.with_driver(needs_connection(action), |d| {
             d.run_action(action, &plan, layers, &jp).map_err(|e| {
                 AppError::wrap(
                     "laser_action",
@@ -155,7 +185,8 @@ impl LaserService {
     ) -> Result<(), AppError> {
         let plan = Self::plan(shapes, layers);
         let jp = Self::job_params(start_mode, anchor_idx);
-        let bytes = self.with_driver(|d| {
+        // Export kompiliert nur — dafür braucht es kein erreichbares Gerät.
+        let bytes = self.with_driver(false, |d| {
             d.compile_with(&plan, layers, &jp)
                 .map_err(|e| AppError::wrap("laser_export", "Job-Kompilierung fehlgeschlagen.", e))
         })?;
@@ -168,16 +199,16 @@ impl LaserService {
         })
     }
 
-    /// Jog: Kopf relativ bewegen (der Treiber verbindet bei Bedarf selbst).
+    /// Jog: Kopf relativ bewegen (verbindet vorher zum Gerät).
     pub fn jog(&mut self, dx: f64, dy: f64, speed: f64) -> Result<(), AppError> {
-        self.with_driver(|d| {
+        self.with_driver(true, |d| {
             d.jog(dx, dy, speed)
                 .map_err(|e| AppError::wrap("laser_jog", "Jog fehlgeschlagen.", e.to_string()))
         })
     }
 
     pub fn home(&mut self, speed: f64) -> Result<(), AppError> {
-        self.with_driver(|d| {
+        self.with_driver(true, |d| {
             d.home(speed)
                 .map_err(|e| AppError::wrap("laser_home", "Home fehlgeschlagen.", e.to_string()))
         })
