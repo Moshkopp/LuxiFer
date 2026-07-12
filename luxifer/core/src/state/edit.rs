@@ -40,6 +40,9 @@ impl super::AppState {
                 s.translate(dx, dy);
             }
         }
+        // Verschobene Shapes → gecachte Bounds sind ungültig. Ohne das driftet
+        // die Auswahl-BBox (aus dem Cache) vom Shape weg.
+        self.invalidate_shape_bounds();
         self.dirty = true;
     }
 

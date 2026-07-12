@@ -218,6 +218,30 @@ mod tests {
     }
 
     #[test]
+    fn selection_bbox_folgt_verschiebung() {
+        // Regression: translate_selected muss den Bounds-Cache invalidieren,
+        // sonst driftet die Auswahl-BBox vom Shape weg.
+        let mut s = AppState::new();
+        s.add_shape(Geo::Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 20.0,
+            h: 20.0,
+        });
+        s.selected = vec![0];
+        // BBox einmal lesen → füllt den Cache am alten Ort.
+        let before = s.selection_bbox().unwrap();
+        assert_eq!((before.x, before.y), (10.0, 10.0));
+        // Verschieben und erneut lesen — muss mitgewandert sein.
+        s.translate_selected(100.0, 50.0);
+        let after = s.selection_bbox().unwrap();
+        assert_eq!(
+            (after.x, after.y, after.w, after.h),
+            (110.0, 60.0, 20.0, 20.0)
+        );
+    }
+
+    #[test]
     fn scale_selection_verdoppelt_breite() {
         let mut s = AppState::new();
         s.add_shape(Geo::Rect {
