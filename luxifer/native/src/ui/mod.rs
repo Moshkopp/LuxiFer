@@ -141,8 +141,9 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 layer_rows(app)
             };
             let right = egui::SidePanel::right("inspector")
-                .exact_width(260.0)
-                .resizable(false)
+                .default_width(340.0)
+                .width_range(300.0..=460.0)
+                .resizable(true)
                 .show(ctx, |ui| {
                     ui.add_space(6.0);
                     if let Some(view) = &laser_view {
@@ -298,6 +299,7 @@ fn layer_rows(app: &App) -> Vec<layers::LayerRow> {
             enabled: l.enabled,
             locked: l.locked,
             air_assist: l.air_assist,
+            mode: l.mode,
             count: s.shapes.iter().filter(|sh| sh.layer_id == i).count(),
         })
         .collect()

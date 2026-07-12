@@ -50,8 +50,8 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
-| E1 | UX | P1 | Rechtes Panel (Laser/Design) zu schmal — Inhalt wird abgeschnitten. |
-| E2 | UX | P2 | Layerliste schwer deutbar — muss vernünftig gestaltet werden. |
+| E1 | ERLEDIGT | P1 | Rechtes Panel ist mit 340 px sinnvoll vorbelegt und zwischen 300–460 px responsiv verstellbar. |
+| E2 | ERLEDIGT | P2 | Layer erscheinen als lesbare Inspector-Karten mit Name, Modus, Objektzahl und ausgeschriebenen Zuständen. |
 | E3 | BUG | P2 | Im Laser-Tab kann man weiterhin zeichnen, hat aber keine Layerliste mehr. |
 | E4 | UX | P1 | Projektmanager unbrauchbar: nur eine überbreite Liste, keine Details, keine Thumbnails. |
 
@@ -111,3 +111,6 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   nutzen vorläufig die bereits gecachte Design-Textur, damit große Assets den
   Reiter nicht durch unsichtbare Rasterberechnung blockieren. Die verarbeitete
   Rastertextur und erklärende Preview-UI folgen separat.
+- E1/E2 (erledigt): Der Inspector ist breiter und resizbar. Layer-Karten trennen
+  Identität (Farbe/Name/Modus/Objektzahl), Zustände (Sichtbar/Job/Gesperrt/Luft)
+  und Reihenfolge klar; der Name öffnet den Parameterdialog direkt.

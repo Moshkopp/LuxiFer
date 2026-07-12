@@ -19,6 +19,7 @@ pub(super) struct LayerRow {
     pub enabled: bool,
     pub locked: bool,
     pub air_assist: bool,
+    pub mode: luxifer_core::LayerMode,
     /// Anzahl Shapes auf dieser Ebene.
     pub count: usize,
 }
@@ -37,67 +38,58 @@ pub(super) fn layers_panel(ui: &mut egui::Ui, rows: &[LayerRow]) -> Vec<UiAction
     // Von oben (letzter Layer) nach unten anzeigen.
     for i in (0..n).rev() {
         let row = &rows[i];
-        ui.horizontal(|ui| {
-            let (rect, resp) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
-            ui.painter().rect_filled(rect, 4.0, c32(row.color));
-            if resp.clicked() {
-                actions.push(UiAction::PickColor(row.color));
-            }
-            if ui
-                .selectable_label(row.visible, "S")
-                .on_hover_text("Im Canvas sichtbar")
-                .clicked()
-            {
-                actions.push(UiAction::ToggleLayer(i, LayerToggle::Visible));
-            }
-            if ui
-                .selectable_label(row.enabled, "J")
-                .on_hover_text("Im Laserjob aktiviert")
-                .clicked()
-            {
-                actions.push(UiAction::ToggleLayer(i, LayerToggle::Enabled));
-            }
-            if ui
-                .selectable_label(row.locked, "L")
-                .on_hover_text("Bearbeitung sperren")
-                .clicked()
-            {
-                actions.push(UiAction::ToggleLayer(i, LayerToggle::Locked));
-            }
-            if ui
-                .selectable_label(row.air_assist, "A")
-                .on_hover_text("Luftunterstützung")
-                .clicked()
-            {
-                actions.push(UiAction::ToggleLayer(i, LayerToggle::AirAssist));
-            }
-            if ui
-                .add(
-                    egui::Label::new(format!("{}  ·  {}", row.name, row.count))
-                        .sense(egui::Sense::click()),
-                )
-                .on_hover_text("Doppelklick: Parameter bearbeiten")
-                .double_clicked()
-            {
-                actions.push(UiAction::OpenLayerDialog(i));
-            }
-            if ui
-                .small_button("↑")
-                .on_hover_text("Ebene nach oben")
-                .clicked()
-                && i + 1 < n
-            {
-                actions.push(UiAction::MoveLayer { from: i, to: i + 1 });
-            }
-            if ui
-                .small_button("↓")
-                .on_hover_text("Ebene nach unten")
-                .clicked()
-                && i > 0
-            {
-                actions.push(UiAction::MoveLayer { from: i, to: i - 1 });
-            }
-        });
+        egui::Frame::group(ui.style())
+            .inner_margin(egui::Margin::same(10.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                    ui.painter().rect_filled(rect, 6.0, c32(row.color));
+                    if resp.on_hover_text("Layerfarbe aktivieren").clicked() {
+                        actions.push(UiAction::PickColor(row.color));
+                    }
+                    ui.vertical(|ui| {
+                        if ui
+                            .add(
+                                egui::Label::new(RichText::new(&row.name).strong())
+                                    .sense(egui::Sense::click()),
+                            )
+                            .on_hover_text("Parameter bearbeiten")
+                            .clicked()
+                        {
+                            actions.push(UiAction::OpenLayerDialog(i));
+                        }
+                        ui.label(
+                            RichText::new(format!("{:?}  ·  {} Objekte", row.mode, row.count))
+                                .small()
+                                .weak(),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("↓").clicked() && i > 0 {
+                            actions.push(UiAction::MoveLayer { from: i, to: i - 1 });
+                        }
+                        if ui.small_button("↑").clicked() && i + 1 < n {
+                            actions.push(UiAction::MoveLayer { from: i, to: i + 1 });
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    let toggles = [
+                        ("Sichtbar", row.visible, LayerToggle::Visible),
+                        ("Job", row.enabled, LayerToggle::Enabled),
+                        ("Gesperrt", row.locked, LayerToggle::Locked),
+                        ("Luft", row.air_assist, LayerToggle::AirAssist),
+                    ];
+                    for (label, active, toggle) in toggles {
+                        if ui.selectable_label(active, label).clicked() {
+                            actions.push(UiAction::ToggleLayer(i, toggle));
+                        }
+                    }
+                });
+            });
+        ui.add_space(6.0);
     }
     actions
 }
