@@ -58,7 +58,10 @@ impl ApplicationHandler for Runner {
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let Some(app) = self.app.as_mut() else { return };
         if matches!(event, WindowEvent::CloseRequested) {
-            el.exit();
+            // Dirty-Guard: bei ungespeicherten Änderungen erst bestätigen lassen.
+            if app.request_close() {
+                el.exit();
+            }
             return;
         }
         if matches!(event, WindowEvent::RedrawRequested) {
@@ -69,12 +72,18 @@ impl ApplicationHandler for Runner {
             if app.egui_wants_repaint() {
                 app.window.request_redraw();
             }
+            if app.should_exit() {
+                el.exit();
+            }
             return;
         }
         // Jedes eingehende Fenster-Event kann etwas ändern → einmal neu zeichnen.
         let changed = app.window_event(&event);
         if changed {
             app.window.request_redraw();
+        }
+        if app.should_exit() {
+            el.exit();
         }
     }
 }

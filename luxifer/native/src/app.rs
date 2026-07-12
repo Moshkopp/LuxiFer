@@ -55,6 +55,11 @@ pub struct App {
     pub layer_dialog: Option<LayerDialogState>,
     /// Projektaktion, die auf Bestätigung wartet (Dirty-Guard) oder None.
     pub pending_project: Option<PendingProjectAction>,
+    /// Ob der Nutzer das Fenster schließen will und der Dirty-Guard dafür einen
+    /// Bestätigungsdialog zeigt.
+    pub close_pending: bool,
+    /// Vom Close-Guard gesetzt: die Eventschleife darf das Programm beenden.
+    should_exit: bool,
     /// Verfügbare System-Fonts (einmalig gescannt, lazy).
     pub fonts: Vec<crate::fonts::FontEntry>,
 }
@@ -125,6 +130,8 @@ impl App {
             text_dialog: None,
             layer_dialog: None,
             pending_project: None,
+            close_pending: false,
+            should_exit: false,
             fonts: Vec::new(),
         };
         if let Some(path) = auto_import {
@@ -453,6 +460,29 @@ impl App {
             Some(PendingProjectAction::Open(name)) => self.do_project_open(&name),
             None => {}
         }
+    }
+
+    /// Reaktion auf einen Schließen-Wunsch. Gibt true zurück, wenn sofort beendet
+    /// werden darf; sonst öffnet der Dirty-Guard den Bestätigungsdialog.
+    pub fn request_close(&mut self) -> bool {
+        if self.session.is_dirty() {
+            self.close_pending = true;
+            self.window.request_redraw();
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Der Nutzer hat im Close-Guard „Verwerfen" bestätigt.
+    pub fn confirm_close(&mut self) {
+        self.close_pending = false;
+        self.should_exit = true;
+    }
+
+    /// Ob die Eventschleife das Programm beenden soll.
+    pub fn should_exit(&self) -> bool {
+        self.should_exit
     }
 
     /// Projekt öffnen: ersetzt den Editorzustand durch den geladenen.

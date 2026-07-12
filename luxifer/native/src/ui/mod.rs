@@ -238,6 +238,16 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             dialogs::DialogOutcome::Cancel => app.pending_project = None,
         }
     }
+
+    // Dirty-Guard beim Schließen: Bestätigung, bevor das Programm mit
+    // ungespeicherten Änderungen beendet wird.
+    if app.close_pending {
+        match dialogs::guard_dialog(ctx, "Beenden") {
+            dialogs::DialogOutcome::None => {}
+            dialogs::DialogOutcome::Commit => app.confirm_close(),
+            dialogs::DialogOutcome::Cancel => app.close_pending = false,
+        }
+    }
 }
 
 /// Leitet die reine Ebenen-Sicht für `layers_panel` aus der Session ab.
