@@ -95,7 +95,11 @@ pub fn selected_outlines(state: &AppState, accent: [u8; 3]) -> Vec<Vertex> {
 pub fn fill_lines(state: &AppState) -> Vec<Vertex> {
     let mut v = Vec::new();
     for (li, layer) in state.layers.iter().enumerate() {
-        if !layer.visible || !layer.mode.is_filled() {
+        // Image-Shapes werden von `image_gpu` als echte Texturen gezeichnet.
+        // Ihre rechteckige Outline darf hier nicht mit Scanlines in der
+        // Bild-Layer-Kennfarbe über die Textur gemalt werden.
+        if !layer.visible || !layer.mode.is_filled() || layer.mode == luxifer_core::LayerMode::Image
+        {
             continue;
         }
         // Alle (rotierten) Welt-Konturen dieses Layers gemeinsam füllen, damit
@@ -268,3 +272,16 @@ pub const SEL_BOX_COLOR: [f32; 4] = [0.4, 0.7, 1.0, 0.9];
 pub const HANDLE_COLOR: [f32; 4] = [0.95, 0.97, 1.0, 1.0];
 /// Nullpunkt-Kreuz (Akzentgrün).
 pub const ORIGIN_COLOR: [f32; 4] = [0.25, 0.72, 0.5, 1.0];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bild_layer_wird_nicht_mit_seiner_kennfarbe_uebermalt() {
+        let mut state = AppState::new();
+        state.add_image("asset".into(), 0.0, 0.0, 20.0, 10.0);
+
+        assert!(fill_lines(&state).is_empty());
+    }
+}

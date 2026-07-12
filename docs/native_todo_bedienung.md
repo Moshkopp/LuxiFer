@@ -35,7 +35,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
-| C1 | BUG | P1 | Bilder werden rosa/pink dargestellt (falsches Textur-Format/Sampling). |
+| C1 | ERLEDIGT | P1 | Bildtexturen werden nicht mehr von Scanlines der pinken Bild-Layer-Kennfarbe überzeichnet. |
 | C2 | UX | P2 | Bild-Doppelklick-Dialog hat keine Live-Vorschau der Einstellungen. |
 | C3 | FEHLT | P2 | Bildfunktionen fehlen: Vektorisieren (Trace), Zuschneiden. |
 
@@ -94,3 +94,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   Geschlossene konvexe Linienkonturen nutzen nun im Core Schnittpunkte
   benachbarter Parallelkanten (Miter); kollabierte Innenoffsets bleiben leer.
   Konkave und offene Konturen behalten die robuste Selbstschnittbehandlung.
+- C1 (erledigt): RGBA-Textur und Shader waren korrekt. Der nachfolgende native
+  Vektor-Fill-Pass behandelte jedoch `LayerMode::Image` als Füllkontur und malte
+  die rechteckige Bildfläche in der Layer-Kennfarbe über. Image-Layer werden nun
+  ausschließlich von `image_gpu` texturiert; ihr Konturrahmen bleibt sichtbar.
