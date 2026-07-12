@@ -370,8 +370,18 @@ Ziel: Spike-Struktur in wartbare Produktstruktur überführen.
   - [ ] Event-/Inputübersetzung;
   - [ ] Tool-/Gestenzustand;
   - [ ] Renderer und Cache-Invalidierung;
-  - [ ] UI-Komposition;
+  - [x] UI-Komposition (`ui.rs` → `ui/` nach Panels/Dialogen zerlegt);
   - [ ] Dialog-Präsentationszustand.
+
+Native-Strukturschnitt 2026-07-12 (begonnen): Der UI-Monolith `ui.rs`
+(1025 Zeilen) wurde rein mechanisch nach Verantwortung in `ui/{mod,project,
+tools,layers,palette,arrange}.rs` und `ui/dialogs/{layer,text,laser_settings}.rs`
+zerlegt — ohne Verhaltens-/API-Änderung. Die Panels bekommen vorerst weiter
+`&mut App`; die geplante `UiAction`-Grenze (Panels liefern Absichten statt den
+`App`-Zustand zu mutieren) folgt als eigener Schritt. Nächste geplante
+Schnitte: Overlay-/Cache-Erzeugung aus `app.rs` nach `canvas/`, dann der
+Render-Frame nach `render/`, dann Maus-/Gestensteuerung. Erst danach `UiAction`/
+`NativeAction` und die Reduktion von `App` auf einen Composition Root.
 - [ ] UI-Größen, DPI-Skalierung und Ultrawide-/kleine Fenster testen.
 - [ ] Tooltips, deaktivierte Zustände, Fokus und Tastaturnavigation.
 - [ ] Rechte Panels sinnvoll skalierbar/resizable machen.
