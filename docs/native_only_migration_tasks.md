@@ -365,13 +365,13 @@ Abnahme Phase 6:
 
 Ziel: Spike-Struktur in wartbare Produktstruktur überführen.
 
-- [ ] `native/src/app.rs` nach Verantwortung zerlegen, erst nachdem die
-      Application-Grenze stabil ist:
-  - [ ] Event-/Inputübersetzung;
-  - [ ] Tool-/Gestenzustand;
-  - [ ] Renderer und Cache-Invalidierung;
+- [x] `native/src/app.rs` nach Verantwortung zerlegt (app.rs ~1481 → ~907;
+      Details siehe canvas-/render-Zerlegungsnotiz unten):
+  - [x] Event-/Inputübersetzung (`canvas/input.rs`);
+  - [x] Tool-/Gestenzustand (`canvas/state.rs` + `canvas/gestures.rs`);
+  - [x] Renderer und Cache-Invalidierung (`render/mod.rs`, `Renderer`);
   - [x] UI-Komposition (`ui.rs` → `ui/` nach Panels/Dialogen zerlegt);
-  - [ ] Dialog-Präsentationszustand.
+  - [x] Dialog-Präsentationszustand (`ui/state.rs`).
 
 Native-Strukturschnitt 2026-07-12 (begonnen): Der UI-Monolith `ui.rs`
 (1025 Zeilen) wurde rein mechanisch nach Verantwortung in `ui/{mod,project,
@@ -419,23 +419,33 @@ Bewusst NICHT über UiAction geführt: die reine Panelbreiten-Rückschreibung
 (`left_w`/`right_w`) ist Layout-Rückmeldung von egui an den Root, kein
 Fachzustand — dokumentierte Ausnahme, kein offener Schuldposten.
 
-canvas-Schnitte 2026-07-12 (begonnen): Die app.rs-Zerlegung läuft. Bisher:
+canvas-/render-Zerlegung 2026-07-12 (abgeschlossen): Der native App-Monolith
+wurde nach Verantwortung zerlegt (app.rs von ~1481 auf ~907 Zeilen):
 - `canvas/scene.rs` + `canvas/overlay.rs`: der reine „Zustand → Vertices"-Aufbau
   (Basis-Puffer bzw. Frame-Overlay) als App-freie Funktionen; `OverlayInput`
   bündelt den nur gelesenen Zustand.
 - `canvas/state.rs` (`CanvasState`): der Interaktions-/Kamerazustand (cam, tool,
-  active_shape, drag, cursor, Modifier, poly_pts) aus App herausgelöst; App hält
-  ein `canvas`-Feld.
+  active_shape, drag, cursor, Modifier, poly_pts); App hält ein `canvas`-Feld.
 - `canvas/gestures.rs`: die Maus-Gesten als `impl CanvasState` (+ `&mut
   EditorSession`); shape-erzeugende Gesten geben `bool` zurück, den Accent
   frischt der Root auf.
-app.rs von ~1481 auf ~1070 Zeilen. Kein Verhaltenswechsel.
+- `canvas/input.rs`: `map_keycode` und die reinen Zeiger-Events
+  (`handle_pointer_event`).
+- `render/mod.rs` (`Renderer`): besitzt Gpu, egui-Wgpu-Renderer/-State,
+  Bild-Store, Vertex-Cache/Revision und FPS. `App::render` baut den egui-Frame
+  (die `ui::build`-Closure braucht `&mut App`) und übergibt `FullOutput` + eine
+  nur-lesende `FrameScene` an `Renderer::draw_frame`.
 
-Nächste geplante Schnitte: Event-/Input-Übersetzung (`window_event`/`map_keycode`
-/`apply_shortcut`) nach `canvas/input.rs`; danach der Render-Frame nach
-`render/` (verlangt einen `Renderer`, der Gpu/egui/ImageStore/Cache besitzt —
-echter Ownership-Umbau). Zuletzt die Reduktion von `App` auf einen Composition
-Root.
+Bewusst NICHT weiter zerschnitten: Was in `app.rs` bleibt, ist echter
+Composition-Root — dünne Delegatoren zur Session, `dispatch`, Dialog-
+Lebenszyklen, Import-/Datei-Dialog-Verdrahtung sowie `render`/`window_event` als
+Frame-/Event-Einstieg. Diese in weitere `impl App`-Blöcke über mehrere Dateien
+zu schneiden würde Zeilen verschieben, aber keine Verantwortung entkoppeln
+(kosmetisch). Der Laser-Aktionsblock (`laser_backend`-Koordination) ist die
+einzige verbliebene eigene Verantwortung mit Fremd-Ressource; er gehört jedoch
+in den Application-`LaserService` (Phase 6), nicht in einen kosmetischen
+Native-Split — daher hier belassen. `left_w`/`right_w` bleiben Layout-Rück-
+schreibung wie dokumentiert.
 - [ ] UI-Größen, DPI-Skalierung und Ultrawide-/kleine Fenster testen.
 - [ ] Tooltips, deaktivierte Zustände, Fokus und Tastaturnavigation.
 - [ ] Rechte Panels sinnvoll skalierbar/resizable machen.
