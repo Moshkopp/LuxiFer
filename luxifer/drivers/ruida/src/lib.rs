@@ -111,10 +111,22 @@ impl RuidaDriver {
             maxy_um,
         ));
         // 2. Layer-Config
-        j.extend(compile_layer_config(&plan.layers, max_idx, (ox, oy)));
-        // 3. Geometrie (pro Layer Settings-Block + Bahnen), um den Anker verschoben
+        j.extend(compile_layer_config(&plan.layers, max_idx));
+        // 3. F-Block + zweiter BBox-Satz. Ohne diese Register wendet der
+        //    Controller den Startmodus aus der Preamble NICHT an — Jobs mit
+        //    „Aktuelle Position"/„Benutzerursprung" fuhren dann absolut
+        //    (an HW beobachtet; Struktur wie die verifizierte Referenz).
+        j.extend(compile_f_block_and_bbox(
+            minx_um,
+            miny_um,
+            maxx_um,
+            maxy_um,
+            maxx_um - minx_um,
+            maxy_um - miny_um,
+        ));
+        // 4. Geometrie (pro Layer Settings-Block + Bahnen), um den Anker verschoben
         j.extend(self.compile_geometry(&plan.layers, (ox, oy)));
-        // 4. Trailer + Dateisumme
+        // 5. Trailer + Dateisumme
         j.extend_from_slice(&[0xEB, 0xE7, 0x00]);
         j.extend_from_slice(&[0xDA, 0x01, 0x06, 0x20]);
         j.extend(encode_coord(minx_um));
@@ -503,16 +515,67 @@ fn compile_preamble(start_mode: StartMode, minx: i32, miny: i32, maxx: i32, maxy
     j
 }
 
+/// F-Block und zweiter BBox-Satz zwischen Layer-Config und Geometrie. Die
+/// F1/F2-Register und der E7-13/17/23/37-Satz tragen die (bei relativem
+/// Startmodus verschobene) Job-BBox samt Breite/Höhe — aus ihnen leitet der
+/// Controller die Job-Platzierung ab. Fehlen sie, ignoriert er das
+/// Startmodus-Byte der Preamble und fährt absolut.
+fn compile_f_block_and_bbox(minx: i32, miny: i32, maxx: i32, maxy: i32, w: i32, h: i32) -> Vec<u8> {
+    let mut j = Vec::new();
+    // F-Block.
+    j.extend_from_slice(&[0xF1, 0x03]);
+    j.extend_from_slice(&[0x00; 10]);
+    j.extend_from_slice(&[0xF1, 0x00, 0x00]);
+    j.extend_from_slice(&[0xF1, 0x01, 0x00]);
+    j.extend_from_slice(&[0xF2, 0x00, 0x00]);
+    j.extend_from_slice(&[0xF2, 0x01, 0x00]);
+    j.extend_from_slice(&[0xF2, 0x02]);
+    j.extend_from_slice(&[0x00; 10]);
+    j.extend_from_slice(&[0xF2, 0x03]);
+    j.extend(encode_coord(minx));
+    j.extend(encode_coord(miny));
+    j.extend_from_slice(&[0xF2, 0x04]);
+    j.extend(encode_coord(maxx));
+    j.extend(encode_coord(maxy));
+    j.extend_from_slice(&[0xF2, 0x05, 0x00, 0x01, 0x00, 0x01]);
+    j.extend(encode_coord(w));
+    j.extend(encode_coord(h));
+    j.extend_from_slice(&[0xF2, 0x06]);
+    j.extend_from_slice(&[0x00; 10]);
+    j.extend_from_slice(&[0xF2, 0x07, 0x00]);
+    j.extend_from_slice(&[0xEA, 0x00]);
+    // Zweiter BBox-Satz.
+    j.extend_from_slice(&[0xE7, 0x60, 0x00]);
+    j.extend_from_slice(&[0xE7, 0x13]);
+    j.extend(encode_coord(minx));
+    j.extend(encode_coord(miny));
+    j.extend_from_slice(&[0xE7, 0x17]);
+    j.extend(encode_coord(maxx));
+    j.extend(encode_coord(maxy));
+    j.extend_from_slice(&[0xE7, 0x23]);
+    j.extend(encode_coord(minx));
+    j.extend(encode_coord(miny));
+    j.extend_from_slice(&[0xE7, 0x24, 0x00]);
+    j.extend_from_slice(&[0xE7, 0x37]);
+    j.extend(encode_coord(maxx));
+    j.extend(encode_coord(maxy));
+    j.extend_from_slice(&[0xE7, 0x08, 0x00, 0x01, 0x00, 0x01]);
+    j.extend(encode_coord(w));
+    j.extend(encode_coord(h));
+    j
+}
+
 /// Layer-Config: pro Layer Speed/Power/Farbe/BBox, dann Abschluss-Blöcke. Die
-/// Layer-BBox wird um den Anker-Offset (µm) verschoben wie die Geometrie.
-fn compile_layer_config(layers: &[JobLayer], max_idx: u8, offset: (i32, i32)) -> Vec<u8> {
-    let (ox, oy) = offset;
+/// Layer-BBox bleibt in Tischkoordinaten (unverschoben) — so schreibt es die
+/// HW-verifizierte Referenz auch bei relativem Startmodus; verschoben wird nur
+/// die Geometrie und die Job-BBox in Preamble/F-Block.
+fn compile_layer_config(layers: &[JobLayer], max_idx: u8) -> Vec<u8> {
     let mut j = Vec::new();
     for (k, jl) in layers.iter().enumerate() {
         let l = k as u8;
         let (lx0, ly0, lx1, ly1) = jl.bbox().unwrap_or((0.0, 0.0, 0.0, 0.0));
-        let (x0, y0) = (mm_to_um(lx0) + ox, mm_to_um(ly0) + oy);
-        let (x1, y1) = (mm_to_um(lx1) + ox, mm_to_um(ly1) + oy);
+        let (x0, y0) = (mm_to_um(lx0), mm_to_um(ly0));
+        let (x1, y1) = (mm_to_um(lx1), mm_to_um(ly1));
         j.extend_from_slice(&[0xC9, 0x04, l]);
         j.extend(encode_speed(jl.speed_mm_s));
         j.extend_from_slice(&[0xC6, 0x31, l]);
@@ -598,7 +661,7 @@ fn write_settings_block(j: &mut Vec<u8>, jl: &JobLayer, l: u8, first: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use luxifer_core::{AppState, Geo};
+    use luxifer_core::{Anchor, AppState, Geo};
 
     fn plan_one_rect() -> JobPlan {
         let mut st = AppState::new();
@@ -680,6 +743,62 @@ mod tests {
             },
         );
         assert_eq!(&usr[..2], &[0xD8, 0x11]);
+    }
+
+    /// Sucht eine Bytefolge im Job.
+    fn contains_seq(job: &[u8], seq: &[u8]) -> bool {
+        job.windows(seq.len()).any(|w| w == seq)
+    }
+
+    #[test]
+    fn job_enthaelt_f_block_und_zweiten_bbox_satz() {
+        // Regression: Ohne F-Block/zweiten BBox-Satz ignorierte der Controller
+        // das Startmodus-Byte — „Aktuelle Position"/„Benutzerursprung" fuhren
+        // absolut. Struktur wie die HW-verifizierte Referenz.
+        let plan = plan_one_rect();
+        let job = RuidaDriver::default().build_job(&plan);
+        for marker in [
+            &[0xF1u8, 0x03][..],
+            &[0xF2, 0x03],
+            &[0xF2, 0x04],
+            &[0xE7, 0x60, 0x00],
+            &[0xE7, 0x13],
+            &[0xE7, 0x37],
+            &[0xE7, 0x08, 0x00, 0x01, 0x00, 0x01],
+        ] {
+            assert!(contains_seq(&job, marker), "Marker {marker:02X?} fehlt");
+        }
+    }
+
+    #[test]
+    fn relativer_startmodus_verschiebt_job_bbox_nicht_layer_bbox() {
+        // Rechteck bei (1,2)–(11,7) mm, Anker = Mitte (Index 4): der Job-Nullpunkt
+        // liegt auf der BBox-Mitte (6, 4.5) mm → verschobene Job-BBox beginnt bei
+        // (-5000, -2500) µm. Die Layer-BBox (E7 52) bleibt in Tischkoordinaten.
+        let plan = plan_one_rect();
+        let job = RuidaDriver::default().build_job_with(
+            &plan,
+            &JobParams {
+                start_mode: StartMode::AktuellePosition,
+                anchor: Anchor::Center,
+            },
+        );
+        // F2 03 trägt die verschobene Job-BBox-Ecke (-5 mm, -2.5 mm).
+        let mut expected = vec![0xF2, 0x03];
+        expected.extend(encode_coord(-5_000));
+        expected.extend(encode_coord(-2_500));
+        assert!(
+            contains_seq(&job, &expected),
+            "verschobene Job-BBox im F-Block"
+        );
+        // E7 52 (Layer 0) trägt die UNVERSCHOBENE Layer-BBox-Ecke (1 mm, 2 mm).
+        let mut layer_bbox = vec![0xE7, 0x52, 0x00];
+        layer_bbox.extend(encode_coord(1_000));
+        layer_bbox.extend(encode_coord(2_000));
+        assert!(
+            contains_seq(&job, &layer_bbox),
+            "Layer-BBox in Tischkoordinaten"
+        );
     }
 
     #[test]

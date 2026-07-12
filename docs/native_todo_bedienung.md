@@ -55,7 +55,8 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | E3 | ERLEDIGT | P2 | Laser-Tab erzwingt Auswahl, sperrt Zeichnen/Löschen und gibt Layer nur temporär für Verschieben/Skalieren/Drehen frei. |
 | E4 | ERLEDIGT | P1 | Projektbrowser ist Master-Detail: Liste links, rechts Metadaten, Vektor-Miniatur, Umbenennen, Export, zweistufiges Löschen und Versionsliste (Laden/Löschen). PNG-Thumbnails pro Version bleiben offen. |
 | E5 | ERLEDIGT | P1 | Laser-Tab: Panel lief über den rechten Rand hinaus (Profilzeile zu breit), die Ebenenliste fehlte, und die Treiber-Rückmeldung stand unsichtbar ganz unten. Jetzt: Ebenenliste + Positionsfreigabe in eigenem linken Panel (resizierbar, scrollt), Laser-Bedienpanel rechts, Rückmeldung bei den Job-Kacheln. |
-| E6 | ERLEDIGT | P1 | Job-Buttons schlugen IMMER fehl („Laser-Aktion fehlgeschlagen [laser_action]"): Der LaserService rief nie `connect()` auf — jede Geräteaktion lief in `NotConnected`. Jetzt verbindet er vor verbindungsbedürftigen Aktionen (Export weiterhin ohne Gerät); das Fehlerbanner zeigt zusätzlich die technische Ursache. Echte HW-Abnahme steht aus. |
+| E6 | ERLEDIGT | P1 | Job-Buttons schlugen IMMER fehl („Laser-Aktion fehlgeschlagen [laser_action]"): Der LaserService rief nie `connect()` auf — jede Geräteaktion lief in `NotConnected`. Jetzt verbindet er vor verbindungsbedürftigen Aktionen (Export weiterhin ohne Gerät); das Fehlerbanner zeigt zusätzlich die technische Ursache. HW-verifiziert: Absolut fährt korrekt. |
+| E7 | ERLEDIGT | P1 | Startmodus „Aktuelle Position"/„Benutzerursprung" fuhr trotzdem absolut (an HW beobachtet): Dem Ruida-Job fehlten F-Block + zweiter BBox-Satz — ohne diese Register ignoriert der Controller das Startmodus-Byte der Preamble. Struktur jetzt wie die HW-verifizierte Referenz. **HW-Abnahme der relativen Modi steht aus.** |
 
 ## F. Header / Werkzeug-Zugänge
 
@@ -170,6 +171,18 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   Verbindungsaufbau blockiert die UI kurz (~300 ms) — der asynchrone
   Geräteablauf bleibt die bekannte offene Architekturfrage. **Abnahme an
   echter Hardware steht aus.**
+- E7 (erledigt): Der native Ruida-Job bestand aus Preamble → Layer-Config →
+  Geometrie → Trailer; die funktionierende Referenz baut Preamble →
+  Layer-Config → **F-Block + zweiter BBox-Satz** → Geometrie → Trailer. In
+  den fehlenden F1/F2- und E7-13/17/23/37-Registern steht die (bei relativem
+  Start verschobene) Job-BBox samt Breite/Höhe — offenbar leitet der
+  Controller daraus die Platzierung ab; ohne sie fällt er auf absolut
+  zurück. Zusätzlich angeglichen: Die Layer-Anzeige-BBox (E7 52/53/61/62)
+  bleibt wie in der Referenz in Tischkoordinaten, verschoben werden nur
+  Geometrie und Job-BBox. Tests prüfen die Job-Struktur und dass der
+  relative Modus die Job-BBox (F2 03 = −Anker), nicht aber die Layer-BBox
+  verschiebt. **Bitte an der Maschine gegenprüfen: „Aktuelle Position" und
+  „Benutzerursprung" mit Anker Mitte/Ecken.**
 - E1/E2 (erledigt): Der Inspector ist breiter und resizbar. Layer-Karten trennen
   Identität (Farbe/Name/Modus/Objektzahl), Zustände (Sichtbar/Job/Gesperrt/Luft)
   und Reihenfolge klar; der Name öffnet den Parameterdialog direkt.
