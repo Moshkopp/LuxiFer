@@ -7,6 +7,12 @@ pub enum Tool {
     Rect,
     Ellipse,
     Polygon,
+    Line,
+    Polyline,
+    Spline,
+    Bezier,
+    Measure,
+    Node,
 }
 
 /// Haupt-Ansicht (Reiterleiste oben), analog zur Tauri-App.
@@ -58,8 +64,41 @@ impl Tool {
             Tool::Rect => "Rechteck",
             Tool::Ellipse => "Ellipse",
             Tool::Polygon => "Polygon",
+            Tool::Line => "Linie",
+            Tool::Polyline => "Polylinie",
+            Tool::Spline => "Spline",
+            Tool::Bezier => "Bézier",
+            Tool::Measure => "Messen",
+            Tool::Node => "Knoten",
         }
     }
+
+    /// Icon-Name (siehe icons.rs).
+    pub fn icon(self) -> &'static str {
+        match self {
+            Tool::Select => "select",
+            Tool::Rect => "rect",
+            Tool::Ellipse => "ellipse",
+            Tool::Polygon => "polygon",
+            Tool::Line => "line",
+            Tool::Polyline => "polyline",
+            Tool::Spline => "spline",
+            Tool::Bezier => "bezier",
+            Tool::Measure => "measure",
+            Tool::Node => "node",
+        }
+    }
+}
+
+/// Sofort-Befehl auf der Auswahl (kein Zeichenmodus). Entspricht den `action`-
+/// Werkzeugen der Tauri-ToolsPanel + den Arrange-Aktionen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ToolAction {
+    Boolean,
+    Fillet,
+    Offset,
+    PatternFill,
+    Bridge,
 }
 
 /// Laufende Maus-Geste im Canvas (zwischen Press und Release).

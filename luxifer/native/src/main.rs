@@ -6,6 +6,7 @@ mod app;
 mod camera;
 mod fonts;
 mod gpu;
+mod icons;
 mod image_gpu;
 mod laser;
 mod laserpanel;

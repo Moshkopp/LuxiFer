@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use egui_wgpu::ScreenDescriptor;
+use luxifer_application::{AppError, EditorSession};
 use luxifer_core::geometry::Geo;
 use luxifer_core::state::AppState;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -20,6 +21,28 @@ use crate::ui;
 /// Ziel-Box beim Ziehen eines Skalier-Handles: die vom Handle bewegte(n)
 /// Kante(n) folgen dem Cursor `w` (mm), die gegenüberliegenden bleiben fix.
 /// Negative Größen werden normalisiert (Box klappt sauber um).
+/// Zeichnet ein gestricheltes Segment (Welt-mm) als kurze Striche. `scale` =
+/// Pixel pro mm, damit die Strichlänge am Bildschirm konstant wirkt.
+fn dashed_seg(v: &mut Vec<Vertex>, a: [f32; 2], b: [f32; 2], color: [f32; 4], scale: f32) {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-4 {
+        return;
+    }
+    let dir = [dx / len, dy / len];
+    let dash = 6.0 / scale; // ~6 px Strich
+    let gap = 4.0 / scale; // ~4 px Lücke
+    let step = dash + gap;
+    let mut t = 0.0;
+    while t < len {
+        let s = [a[0] + dir[0] * t, a[1] + dir[1] * t];
+        let e_t = (t + dash).min(len);
+        let e = [a[0] + dir[0] * e_t, a[1] + dir[1] * e_t];
+        scene_geo::push_seg(v, s, e, color);
+        t += step;
+    }
+}
+
 /// Ist der Handle eine Ecke (skaliert beide Achsen)?
 pub fn is_corner(h: luxifer_core::Handle) -> bool {
     use luxifer_core::Handle::*;
@@ -106,9 +129,11 @@ pub fn resize_target(
 pub struct App {
     pub window: Arc<Window>,
     pub gpu: Gpu,
-    pub state: AppState,
+    pub session: EditorSession,
     pub cam: Camera,
     pub tool: Tool,
+    /// Aktive Polygon-Form (Dreieck/Stern/… — beim Polygon-Werkzeug aufgezogen).
+    pub active_shape: luxifer_core::PolyShape,
     pub view: crate::tools::View,
     pub project: crate::project::ProjectBackend,
     /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
@@ -117,6 +142,8 @@ pub struct App {
     pub laser_backend: crate::laser::LaserBackend,
     /// Letzte Laser-Rückmeldung (Statuszeile im Panel).
     pub laser_msg: String,
+    /// Zentraler, nutzerlesbarer Fehlerkanal der Anwendungsschicht.
+    pub app_error: Option<AppError>,
     /// Offener Laser-Einstellungen-Dialog (Profil-Bearbeitung) oder None.
     pub laser_settings: Option<luxifer_core::LaserProfile>,
     pub drag: Drag,
@@ -214,9 +241,10 @@ impl App {
         let mut app = Self {
             window,
             gpu,
-            state,
+            session: EditorSession::new(state),
             cam,
             tool: Tool::Select,
+            active_shape: luxifer_core::PolyShape::Penta,
             // Start-Ansicht per Env (Testhilfe): LUXI_TAB=laser.
             view: if std::env::var("LUXI_TAB").as_deref() == Ok("laser") {
                 crate::tools::View::Laser
@@ -228,6 +256,7 @@ impl App {
             laser: LaserUi::default(),
             laser_backend: crate::laser::LaserBackend::load(),
             laser_msg: String::new(),
+            app_error: None,
             laser_settings: None,
             drag: Drag::None,
             accent,
@@ -300,13 +329,13 @@ impl App {
                     match code {
                         KeyCode::Space => self.space_down = pressed,
                         KeyCode::Delete | KeyCode::Backspace if pressed => {
-                            if !self.state.selected.is_empty() {
-                                self.state.delete_selected();
+                            if !self.session.selected.is_empty() {
+                                self.delete_selected();
                             }
                         }
                         KeyCode::Escape if pressed => {
                             self.poly_pts.clear();
-                            self.state.selected.clear();
+                            self.session.selected.clear();
                         }
                         KeyCode::Enter if pressed => self.finish_polygon(),
                         KeyCode::KeyV if pressed => self.tool = Tool::Select,
@@ -314,10 +343,10 @@ impl App {
                         KeyCode::KeyE if pressed => self.tool = Tool::Ellipse,
                         KeyCode::KeyP if pressed => self.tool = Tool::Polygon,
                         KeyCode::KeyZ if pressed => {
-                            self.state.undo();
+                            self.undo();
                         }
                         KeyCode::KeyY if pressed => {
-                            self.state.redo();
+                            self.redo();
                         }
                         _ => {}
                     }
@@ -347,6 +376,20 @@ impl App {
         self.cam.screen_to_world(self.cursor)
     }
 
+    pub fn delete_selected(&mut self) {
+        if let Err(error) = self.session.delete_selected() {
+            self.app_error = Some(error);
+        }
+    }
+
+    pub fn undo(&mut self) {
+        self.session.undo();
+    }
+
+    pub fn redo(&mut self) {
+        self.session.redo();
+    }
+
     fn on_mouse(&mut self, button: MouseButton, pressed: bool) {
         let w = self.world();
         match button {
@@ -359,9 +402,15 @@ impl App {
                     return;
                 }
                 match self.tool {
-                    Tool::Select => self.begin_select(w),
-                    Tool::Rect | Tool::Ellipse => self.drag = Drag::DrawBox { start: w },
-                    Tool::Polygon => self.poly_pts.push((w[0], w[1])),
+                    Tool::Select | Tool::Node => self.begin_select(w),
+                    // Aufzieh-Werkzeuge (Zentrum/Ecke → Maus).
+                    Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Line | Tool::Measure => {
+                        self.drag = Drag::DrawBox { start: w }
+                    }
+                    // Punkt-für-Punkt-Werkzeuge sammeln in poly_pts.
+                    Tool::Polyline | Tool::Spline | Tool::Bezier => {
+                        self.poly_pts.push((w[0], w[1]))
+                    }
                 }
             }
             MouseButton::Left => {
@@ -375,17 +424,17 @@ impl App {
     /// Kopie der aktuell selektierten Shapes (Index + Shape) — als Ausgangspunkt
     /// für Resize/Rotate, damit vom Startzustand statt inkrementell gerechnet wird.
     fn snapshot_selection(&self) -> Vec<(usize, luxifer_core::Shape)> {
-        self.state
+        self.session
             .selected
             .iter()
-            .filter_map(|&i| self.state.shapes.get(i).map(|s| (i, s.clone())))
+            .filter_map(|&i| self.session.shapes.get(i).map(|s| (i, s.clone())))
             .collect()
     }
 
     /// Stellt die Shapes aus einem Snapshot wieder her (vor jeder Transformation).
     fn restore_snapshot(&mut self, orig: &[(usize, luxifer_core::Shape)]) {
         for (i, s) in orig {
-            if let Some(dst) = self.state.shapes.get_mut(*i) {
+            if let Some(dst) = self.session.shapes.get_mut(*i) {
                 *dst = s.clone();
             }
         }
@@ -393,12 +442,12 @@ impl App {
 
     fn begin_select(&mut self, w: [f64; 2]) {
         // Zuerst: wurde ein Transform-Handle der aktuellen Auswahl getroffen?
-        if let Some(b) = self.state.selection_bbox() {
+        if let Some(b) = self.session.selection_bbox() {
             let pick = self.handle_hw() as f64 * 1.8; // etwas großzügiger als sichtbar
                                                       // Rotate-Handle?
             let rp = self.rotate_handle_pos(&b);
             if (w[0] - rp[0]).hypot(w[1] - rp[1]) <= pick {
-                self.state.push_undo();
+                self.session.push_undo();
                 let pivot = [b.x + b.w / 2.0, b.y + b.h / 2.0];
                 let angle = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
                 self.drag = Drag::Rotate {
@@ -411,7 +460,7 @@ impl App {
             // Skalier-Handle?
             for (handle, (hx, hy)) in luxifer_core::Handle::positions(&b) {
                 if (w[0] - hx).abs() <= pick && (w[1] - hy).abs() <= pick {
-                    self.state.push_undo();
+                    self.session.push_undo();
                     self.drag = Drag::Resize {
                         handle,
                         start_box: b,
@@ -423,13 +472,13 @@ impl App {
         }
 
         let tol = 4.0 / self.cam.scale as f64;
-        if let Some(idx) = self.state.hit_test(w[0], w[1], tol) {
-            if !self.state.selected.contains(&idx) {
-                self.state.selected = vec![idx];
+        if let Some(idx) = self.session.hit_test(w[0], w[1], tol) {
+            if !self.session.selected.contains(&idx) {
+                self.session.selected = vec![idx];
             }
             self.drag = Drag::MoveShapes { last: w };
         } else {
-            self.state.selected.clear();
+            self.session.selected.clear();
             self.drag = Drag::Marquee { start: w };
         }
     }
@@ -447,7 +496,7 @@ impl App {
             Drag::MoveShapes { last } => {
                 let last = *last;
                 self.drag = Drag::MoveShapes { last: w };
-                self.state
+                self.session
                     .translate_selected(w[0] - last[0], w[1] - last[1]);
                 return;
             }
@@ -468,7 +517,7 @@ impl App {
                 if is_corner(handle) && !self.shift_down {
                     target = keep_aspect(start_box, handle, target);
                 }
-                self.state.scale_selection_to(start_box, target);
+                self.session.scale_selection_to(start_box, target);
                 self.drag = Drag::Resize {
                     handle,
                     start_box,
@@ -483,7 +532,7 @@ impl App {
                 self.restore_snapshot(&orig);
                 let a = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
                 let delta_deg = (a - start_angle).to_degrees();
-                self.state.rotate_selection(delta_deg);
+                self.session.rotate_selection(delta_deg);
                 self.drag = Drag::Rotate {
                     pivot,
                     start_angle,
@@ -498,18 +547,48 @@ impl App {
         match std::mem::replace(&mut self.drag, Drag::None) {
             Drag::Marquee { start } => {
                 if (start[0] - w[0]).abs() > 1.0 || (start[1] - w[1]).abs() > 1.0 {
-                    self.state.select_in_rect(start[0], start[1], w[0], w[1]);
+                    self.session.select_in_rect(start[0], start[1], w[0], w[1]);
                 }
             }
             Drag::DrawBox { start } => self.finish_box(start, w),
             Drag::MoveShapes { .. } | Drag::Resize { .. } | Drag::Rotate { .. } => {
-                self.state.discard_last_undo_if_no_change();
+                self.session.discard_last_undo_if_no_change();
             }
             _ => {}
         }
     }
 
     fn finish_box(&mut self, a: [f64; 2], b: [f64; 2]) {
+        // Messen: nichts erzeugen (nur Anzeige während des Ziehens).
+        if self.tool == Tool::Measure {
+            return;
+        }
+        // Polygon: Form vom Zentrum `a` mit Radius = Abstand zur Maus aufziehen
+        // (wie Tauri: ondrawpolygon(shape, cx, cy, r, rot)).
+        if self.tool == Tool::Polygon {
+            let r = (a[0] - b[0]).hypot(a[1] - b[1]);
+            if r < 1.0 {
+                return;
+            }
+            let pts = self.active_shape.points(a[0], a[1], r, 0.0);
+            let idx = self.session.add_shape(Geo::Polyline { pts, closed: true });
+            self.session.selected = vec![idx];
+            self.refresh_accent();
+            return;
+        }
+        // Linie: 2-Punkt-Polyline (auch bei kleinem Zug erlaubt).
+        if self.tool == Tool::Line {
+            if (a[0] - b[0]).hypot(a[1] - b[1]) < 0.5 {
+                return;
+            }
+            let idx = self.session.add_shape(Geo::Polyline {
+                pts: vec![(a[0], a[1]), (b[0], b[1])],
+                closed: false,
+            });
+            self.session.selected = vec![idx];
+            self.refresh_accent();
+            return;
+        }
         let x = a[0].min(b[0]);
         let y = a[1].min(b[1]);
         let w = (a[0] - b[0]).abs();
@@ -526,25 +605,141 @@ impl App {
             },
             _ => Geo::Rect { x, y, w, h },
         };
-        let idx = self.state.add_shape(geo);
-        self.state.selected = vec![idx];
+        let idx = self.session.add_shape(geo);
+        self.session.selected = vec![idx];
         self.refresh_accent();
     }
 
+    /// Schließt den punktbasierten Zug ab (Enter/Doppelklick). Je nach Werkzeug:
+    /// Polygon (geschlossen), Polylinie (offen), Spline (glatt), Bézier (Feder).
     fn finish_polygon(&mut self) {
-        if self.poly_pts.len() >= 3 {
-            let pts = std::mem::take(&mut self.poly_pts);
-            let idx = self.state.add_shape(Geo::Polyline { pts, closed: true });
-            self.state.selected = vec![idx];
-            self.refresh_accent();
-        } else {
-            self.poly_pts.clear();
+        use luxifer_core::geometry::catmull_rom;
+        let pts = std::mem::take(&mut self.poly_pts);
+        if pts.len() < 2 {
+            return;
         }
+        let idx = match self.tool {
+            Tool::Polyline => self.session.add_shape(Geo::Polyline { pts, closed: false }),
+            Tool::Spline => {
+                let smooth = catmull_rom(&pts, false, 12);
+                self.session.add_shape(Geo::Polyline {
+                    pts: smooth,
+                    closed: false,
+                })
+            }
+            Tool::Bezier => self.session.add_bezier(pts, false),
+            _ => return,
+        };
+        self.session.selected = vec![idx];
+        self.refresh_accent();
     }
 
     pub fn pick_color(&mut self, c: [u8; 3]) {
-        self.state.activate_color(c);
+        self.session.activate_color(c);
         self.refresh_accent();
+    }
+
+    // ---- Sofort-Aktionen auf der Auswahl (Werkzeugleiste + Arrange) ----------
+
+    pub fn mirror_h(&mut self) {
+        self.session.push_undo();
+        self.session.mirror_selection(luxifer_core::Axis::Vertical);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn mirror_v(&mut self) {
+        self.session.push_undo();
+        self.session
+            .mirror_selection(luxifer_core::Axis::Horizontal);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn insert_coasters(&mut self, round: bool) {
+        self.session.push_undo();
+        self.session.insert_coasters(round);
+        self.fit_all();
+    }
+    pub fn align(&mut self, kind: luxifer_core::Align) {
+        self.session.push_undo();
+        self.session.align_selection(kind);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn distribute(&mut self, kind: luxifer_core::Distribute) {
+        self.session.push_undo();
+        self.session.distribute_selection(kind);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn group(&mut self) {
+        self.session.push_undo();
+        self.session.group_selected();
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn ungroup(&mut self) {
+        self.session.push_undo();
+        self.session.ungroup_selected();
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn nest(&mut self, gap: f64) {
+        self.session.push_undo();
+        self.session.nest_selected(gap);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn nest_fill(&mut self, gap: f64) {
+        self.session.push_undo();
+        self.session.nest_fill_selected(gap);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn boolean(&mut self, op: luxifer_core::BoolOp) {
+        self.session.push_undo();
+        self.session.boolean_selected(op);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn offset(&mut self, dist: f64) {
+        self.session.push_undo();
+        self.session.offset_selected(dist);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn fillet(&mut self, radius: f64) {
+        self.session.push_undo();
+        self.session.fillet_selected(radius);
+        self.session.discard_last_undo_if_no_change();
+    }
+    pub fn selection_count(&self) -> usize {
+        self.session.selected.len()
+    }
+
+    /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset laufen mit
+    /// sinnvollen Defaults (Parameter-Feinjustage folgt als Dialog); Bridge/
+    /// Muster brauchen Interaktion/mehr Parameter und melden das vorerst.
+    pub fn begin_action(&mut self, a: crate::tools::ToolAction) {
+        use crate::tools::ToolAction as A;
+        match a {
+            A::Boolean => {
+                if self.selection_count() >= 2 {
+                    self.boolean(luxifer_core::BoolOp::Union);
+                } else {
+                    self.laser_msg = "Boolean braucht ≥2 Objekte".into();
+                }
+            }
+            A::Fillet => {
+                if self.selection_count() >= 1 {
+                    self.fillet(2.0);
+                } else {
+                    self.laser_msg = "Fillet braucht eine Auswahl".into();
+                }
+            }
+            A::Offset => {
+                if self.selection_count() >= 1 {
+                    self.offset(2.0);
+                } else {
+                    self.laser_msg = "Offset braucht eine Auswahl".into();
+                }
+            }
+            A::PatternFill => {
+                self.laser_msg = "Muster-Füllung folgt (Dialog)".into();
+            }
+            A::Bridge => {
+                self.laser_msg = "Haltesteg folgt (Interaktion)".into();
+            }
+        }
     }
 
     // ---- Projekt (README-3c) -------------------------------------------------
@@ -552,7 +747,7 @@ impl App {
     /// Projekt öffnen: ersetzt den Canvas-Zustand durch den geladenen.
     pub fn project_open(&mut self, name: &str) {
         if let Some(state) = self.project.open(name) {
-            self.state = state;
+            self.session.replace_state(state);
             self.refresh_accent();
             self.image_dirty = true;
             self.fit_all();
@@ -566,19 +761,19 @@ impl App {
             self.project.msg = "Bitte einen Namen angeben.".into();
             return;
         }
-        self.project.new_from_state(&self.state, name.trim());
-        self.project.save(&self.state);
+        self.project.new_from_state(&self.session, name.trim());
+        self.project.save(&self.session);
         self.view = crate::tools::View::Design;
     }
 
     /// In-place speichern (Strg+S).
     pub fn project_save(&mut self) {
-        self.project.save(&self.state);
+        self.project.save(&self.session);
     }
 
     /// Als neue Version speichern (Shift+Strg+S).
     pub fn project_save_version(&mut self) {
-        self.project.save_version(&self.state);
+        self.project.save_version(&self.session);
     }
 
     /// Öffnet den Text-Dialog und scannt bei Bedarf die System-Fonts.
@@ -624,8 +819,8 @@ impl App {
                     font_path: font_path.to_string_lossy().to_string(),
                     size_mm: size,
                 };
-                let idxs = self.state.add_text_block(contours, meta);
-                self.state.selected = idxs;
+                let idxs = self.session.add_text_block(contours, meta);
+                self.session.selected = idxs;
                 self.refresh_accent();
                 self.fit_all();
                 true
@@ -678,9 +873,9 @@ impl App {
                 let w_mm = meta.width as f64 / 10.0;
                 let h_mm = meta.height as f64 / 10.0;
                 let idx = self
-                    .state
+                    .session
                     .add_image(meta.id.clone(), 20.0, 20.0, w_mm, h_mm);
-                self.state.selected = vec![idx];
+                self.session.selected = vec![idx];
                 self.image_dirty = true;
                 self.fit_all();
                 log::info!(
@@ -711,13 +906,13 @@ impl App {
         match luxifer_core::import::import_vector(&bytes, &ext) {
             Ok(contours) => {
                 let t = std::time::Instant::now();
-                self.state.add_polylines(contours);
+                self.session.add_polylines(contours);
                 self.refresh_accent();
                 self.fit_all();
                 log::info!(
                     "Import {}: {} Shapes in {:?}",
                     path.display(),
-                    self.state.shapes.len(),
+                    self.session.shapes.len(),
                     t.elapsed()
                 );
             }
@@ -727,12 +922,15 @@ impl App {
 
     /// Kamera auf die BBox aller Shapes einpassen (Fallback: Tisch).
     fn fit_all(&mut self) {
-        let b = luxifer_core::geometry::BBox::union_all(self.state.shapes.iter().map(|s| s.bbox()));
+        let b =
+            luxifer_core::geometry::BBox::union_all(self.session.shapes.iter().map(|s| s.bbox()));
         if let Some(b) = b {
             self.cam.fit_bbox([b.x, b.y, b.w, b.h], 0.85);
         } else {
-            self.cam
-                .fit_bbox([0.0, 0.0, self.state.bed_w_mm, self.state.bed_h_mm], 0.85);
+            self.cam.fit_bbox(
+                [0.0, 0.0, self.session.bed_w_mm, self.session.bed_h_mm],
+                0.85,
+            );
         }
     }
 
@@ -740,13 +938,13 @@ impl App {
     /// Für den Fill-Stresstest an importierter Geometrie.
     pub fn toggle_fill(&mut self) {
         use luxifer_core::model::LayerMode;
-        let any_cut = self.state.layers.iter().any(|l| l.mode == LayerMode::Cut);
+        let any_cut = self.session.layers.iter().any(|l| l.mode == LayerMode::Cut);
         let target = if any_cut {
             LayerMode::Fill
         } else {
             LayerMode::Cut
         };
-        for l in &mut self.state.layers {
+        for l in &mut self.session.layers {
             if l.mode == LayerMode::Cut || l.mode == LayerMode::Fill {
                 l.mode = target;
             }
@@ -754,7 +952,7 @@ impl App {
     }
 
     fn refresh_accent(&mut self) {
-        if let Some(c) = self.state.active_color() {
+        if let Some(c) = self.session.active_color() {
             self.accent = c;
         }
     }
@@ -764,15 +962,15 @@ impl App {
     /// Die (ggf. nur selektierten) Shapes + Layer für einen Job.
     fn laser_shapes(&self) -> (Vec<luxifer_core::Shape>, Vec<luxifer_core::Layer>) {
         let shapes = if self.laser.selection_only {
-            self.state
+            self.session
                 .selected
                 .iter()
-                .filter_map(|&i| self.state.shapes.get(i).cloned())
+                .filter_map(|&i| self.session.shapes.get(i).cloned())
                 .collect()
         } else {
-            self.state.shapes.clone()
+            self.session.shapes.clone()
         };
-        (shapes, self.state.layers.clone())
+        (shapes, self.session.layers.clone())
     }
 
     pub fn laser_select(&mut self, id: &str) {
@@ -870,18 +1068,18 @@ impl App {
     fn scene_fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.state.shapes.len().hash(&mut h);
-        self.state.selected.hash(&mut h);
+        self.session.shapes.len().hash(&mut h);
+        self.session.selected.hash(&mut h);
         self.poly_pts.len().hash(&mut h);
         // Layer-Modus/Farbe/Sichtbarkeit beeinflussen Fill + Farbe.
-        for l in &self.state.layers {
+        for l in &self.session.layers {
             l.color.hash(&mut h);
             l.visible.hash(&mut h);
             (l.mode as u8).hash(&mut h);
         }
         // Geometrie-Änderungen (Move/Draw/Import): BBox-Summe als grober Proxy,
         // plus Rotation. Günstig und für Cache-Invalidierung ausreichend.
-        for s in &self.state.shapes {
+        for s in &self.session.shapes {
             let b = s.geo.bbox();
             (b.x.to_bits(), b.y.to_bits(), b.w.to_bits(), b.h.to_bits()).hash(&mut h);
             s.rotation.to_bits().hash(&mut h);
@@ -911,17 +1109,16 @@ impl App {
     fn build_overlay(&self) -> Vec<Vertex> {
         let mut v = Vec::new();
 
-        // Live-Vorschau beim Aufziehen eines Rechtecks/einer Ellipse.
+        let preview = [0.6, 0.8, 1.0, 0.9];
+        // Live-Vorschau beim Aufziehen eines Rechtecks/einer Ellipse/Linie.
         if let Drag::DrawBox { start } = self.drag {
             let cur = self.world();
-            let x = start[0].min(cur[0]) as f32;
-            let y = start[1].min(cur[1]) as f32;
-            let w = (start[0] - cur[0]).abs() as f32;
-            let h = (start[1] - cur[1]).abs() as f32;
-            let col = [0.6, 0.8, 1.0, 0.9];
             match self.tool {
                 Tool::Ellipse => {
-                    // Ellipse als Polygon-Näherung (nur Vorschau).
+                    let x = start[0].min(cur[0]) as f32;
+                    let y = start[1].min(cur[1]) as f32;
+                    let w = (start[0] - cur[0]).abs() as f32;
+                    let h = (start[1] - cur[1]).abs() as f32;
                     let (cx, cy) = (x + w / 2.0, y + h / 2.0);
                     let (rx, ry) = (w / 2.0, h / 2.0);
                     let n = 48;
@@ -929,11 +1126,87 @@ impl App {
                     for i in 1..=n {
                         let a = i as f32 / n as f32 * std::f32::consts::TAU;
                         let p = [cx + rx * a.cos(), cy + ry * a.sin()];
-                        scene_geo::push_seg(&mut v, prev, p, col);
+                        scene_geo::push_seg(&mut v, prev, p, preview);
                         prev = p;
                     }
                 }
-                _ => v.extend(scene_geo::rect_outline(x, y, w, h, col)),
+                Tool::Line | Tool::Measure => {
+                    scene_geo::push_seg(
+                        &mut v,
+                        [start[0] as f32, start[1] as f32],
+                        [cur[0] as f32, cur[1] as f32],
+                        preview,
+                    );
+                }
+                Tool::Polygon => {
+                    // Form vom Zentrum aufziehen (Vorschau der gewählten PolyShape).
+                    let r = (start[0] - cur[0]).hypot(start[1] - cur[1]);
+                    if r > 0.5 {
+                        let pts = self.active_shape.points(start[0], start[1], r, 0.0);
+                        if pts.len() >= 2 {
+                            for wnd in pts.windows(2) {
+                                scene_geo::push_seg(
+                                    &mut v,
+                                    [wnd[0].0 as f32, wnd[0].1 as f32],
+                                    [wnd[1].0 as f32, wnd[1].1 as f32],
+                                    preview,
+                                );
+                            }
+                            // Schlusskante.
+                            let (f, l) = (pts[0], pts[pts.len() - 1]);
+                            scene_geo::push_seg(
+                                &mut v,
+                                [l.0 as f32, l.1 as f32],
+                                [f.0 as f32, f.1 as f32],
+                                preview,
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    let x = start[0].min(cur[0]) as f32;
+                    let y = start[1].min(cur[1]) as f32;
+                    let w = (start[0] - cur[0]).abs() as f32;
+                    let h = (start[1] - cur[1]).abs() as f32;
+                    v.extend(scene_geo::rect_outline(x, y, w, h, preview));
+                }
+            }
+        }
+
+        // Live-Vorschau des Punkt-Zugs (Polyline/Spline/Bézier/Polygon): gesetzte
+        // Segmente + gestricheltes Gummiband zur Maus + Punkt-Marker, wie Tauri.
+        if !self.poly_pts.is_empty()
+            && matches!(self.tool, Tool::Polyline | Tool::Spline | Tool::Bezier)
+        {
+            let col = [0.9, 0.9, 0.95, 0.9];
+            // Gesetzte Segmente.
+            for wnd in self.poly_pts.windows(2) {
+                scene_geo::push_seg(
+                    &mut v,
+                    [wnd[0].0 as f32, wnd[0].1 as f32],
+                    [wnd[1].0 as f32, wnd[1].1 as f32],
+                    col,
+                );
+            }
+            // Gummiband vom letzten Punkt zur Maus (gestrichelt).
+            let cur = self.world();
+            let last = *self.poly_pts.last().unwrap();
+            dashed_seg(
+                &mut v,
+                [last.0 as f32, last.1 as f32],
+                [cur[0] as f32, cur[1] as f32],
+                [1.0, 1.0, 1.0, 0.4],
+                self.cam.scale,
+            );
+            // Punkt-Marker (kleine Quadrate); Startpunkt hervorgehoben.
+            let hw = 3.0 / self.cam.scale;
+            for (i, p) in self.poly_pts.iter().enumerate() {
+                let c = if i == 0 {
+                    [0.25, 0.72, 0.5, 1.0] // Start grün (Schließen-Signal)
+                } else {
+                    [0.3, 0.51, 0.97, 1.0]
+                };
+                v.extend(scene_geo::handle_marker(p.0 as f32, p.1 as f32, hw, c));
             }
         }
 
@@ -941,7 +1214,7 @@ impl App {
         if self.tool != Tool::Select {
             return v;
         }
-        let Some(b) = self.state.selection_bbox() else {
+        let Some(b) = self.session.selection_bbox() else {
             return v;
         };
         let hw = self.handle_hw();
@@ -973,11 +1246,11 @@ impl App {
 
     /// Baut die Zeichendaten (Tisch-Gitter, Shapes, Auswahl-BBox, Polygon-Zug).
     fn build_vertices(&self) -> Vec<Vertex> {
-        let mut v = scene_geo::bed_grid(self.state.bed_w_mm as f32, self.state.bed_h_mm as f32);
+        let mut v = scene_geo::bed_grid(self.session.bed_w_mm as f32, self.session.bed_h_mm as f32);
         // Füllung zuerst (liegt unter den Konturen), dann die Umrisse.
-        v.extend(scene_geo::fill_lines(&self.state));
-        v.extend(scene_geo::shape_lines(&self.state, self.accent));
-        if let Some(b) = self.state.selection_bbox() {
+        v.extend(scene_geo::fill_lines(&self.session));
+        v.extend(scene_geo::shape_lines(&self.session, self.accent));
+        if let Some(b) = self.session.selection_bbox() {
             v.extend(scene_geo::rect_outline(
                 b.x as f32,
                 b.y as f32,
@@ -986,18 +1259,8 @@ impl App {
                 scene_geo::SEL_BOX_COLOR,
             ));
         }
-        // Laufender Polygon-Zug als helle Linie.
-        if self.poly_pts.len() >= 2 {
-            let col = [0.9, 0.9, 0.95, 1.0];
-            for wnd in self.poly_pts.windows(2) {
-                scene_geo::push_seg(
-                    &mut v,
-                    [wnd[0].0 as f32, wnd[0].1 as f32],
-                    [wnd[1].0 as f32, wnd[1].1 as f32],
-                    col,
-                );
-            }
-        }
+        // Der laufende Punkt-Zug (Polyline/Spline/Bézier/Polygon) wird im OVERLAY
+        // gezeichnet (jeden Frame, damit das Gummiband der Maus folgt).
         v
     }
 
@@ -1046,7 +1309,7 @@ impl App {
                 &self.gpu.device,
                 &self.gpu.queue,
                 self.gpu.config.format,
-                &self.state,
+                &self.session,
             );
             self.image_dirty = false;
         }
@@ -1112,7 +1375,7 @@ impl App {
                 &self.gpu.device,
                 &self.gpu.queue,
                 &self.cam,
-                &self.state,
+                &self.session,
                 &mut img_scratch,
             );
             self.gpu.draw_canvas(&mut rp, count);

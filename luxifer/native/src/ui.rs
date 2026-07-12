@@ -35,10 +35,10 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             if app.view == View::Design {
                 ui.separator();
                 if ui.button("Undo").clicked() {
-                    app.state.undo();
+                    app.undo();
                 }
                 if ui.button("Redo").clicked() {
-                    app.state.redo();
+                    app.redo();
                 }
                 ui.separator();
                 if ui.button("Vektor…").clicked() {
@@ -67,6 +67,32 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         ui.add_space(4.0);
     });
 
+    if let Some(error) = app.app_error.as_ref() {
+        let code = error.code();
+        let message = error.message().to_string();
+        egui::TopBottomPanel::top("application_error").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.colored_label(
+                    Color32::from_rgb(0xf8, 0x71, 0x71),
+                    format!("{message}  [{code}]"),
+                );
+                if ui.small_button("Schließen").clicked() {
+                    app.app_error = None;
+                }
+            });
+        });
+    }
+
+    // Zweite Kopfzeile: Anordnen (Ausrichten/Verteilen/Gruppieren/Nesting) — nur
+    // im Design-Reiter. Wie in der Tauri-App liegt das im Kopf.
+    if app.view == View::Design {
+        egui::TopBottomPanel::top("arrange").show(ctx, |ui| {
+            ui.add_space(3.0);
+            arrange_bar(ui, app);
+            ui.add_space(3.0);
+        });
+    }
+
     // Statuszeile unten.
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
         ui.horizontal(|ui| {
@@ -74,7 +100,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             ui.separator();
             ui.label(format!("Werkzeug: {}", app.tool.label()));
             ui.separator();
-            ui.label(format!("{} Objekte", app.state.shapes.len()));
+            ui.label(format!("{} Objekte", app.session.shapes.len()));
             if !app.project.msg.is_empty() {
                 ui.separator();
                 ui.label(RichText::new(&app.project.msg).weak());
@@ -109,13 +135,17 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 });
             app.right_w = right.response.rect.width();
 
-            // Farbpalette als Dock am unteren Canvas-Rand (nur Design), zentriert
-            // wie das Palette-Dock der Tauri-App.
+            // Farbpalette (+ Form-Wähler beim Polygon-Werkzeug) als Dock am
+            // unteren Canvas-Rand (nur Design), zentriert wie in der Tauri-App.
             if !is_laser {
                 egui::TopBottomPanel::bottom("palette_dock")
                     .show_separator_line(true)
                     .show(ctx, |ui| {
                         ui.add_space(6.0);
+                        if app.tool == Tool::Polygon {
+                            ui.vertical_centered(|ui| shape_picker(ui, app));
+                            ui.add_space(4.0);
+                        }
                         ui.vertical_centered(|ui| palette_panel(ui, app));
                         ui.add_space(6.0);
                     });
@@ -348,11 +378,10 @@ fn laser_settings_window(ctx: &egui::Context, app: &mut App) {
     }
 }
 
-/// Werkzeug-Knopf mit gemaltem Icon + Label. `on` = aktiv (Akzent-Hintergrund).
-/// Gibt true bei Klick zurück.
-fn tool_button(ui: &mut egui::Ui, on: bool, tool: Tool) -> bool {
-    let size = egui::vec2(ui.available_width(), 38.0);
-    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+/// Quadratischer Icon-Button (Werkzeugleiste). `on` = aktiv (Akzent),
+/// `dim` = Stub/deaktiviert dezenter. Gibt true bei Klick zurück.
+fn icon_button(ui: &mut egui::Ui, side: f32, icon: &str, tip: &str, on: bool, dim: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::click());
     let accent = Color32::from_rgb(0x3B, 0x82, 0xF6);
     let bg = if on {
         accent.gamma_multiply(0.85)
@@ -363,86 +392,233 @@ fn tool_button(ui: &mut egui::Ui, on: bool, tool: Tool) -> bool {
     };
     ui.painter().rect(
         rect,
-        8.0,
+        7.0,
         bg,
         egui::Stroke::new(1.0, Color32::from_rgb(0x2a, 0x2e, 0x36)),
     );
-    let fg = Color32::from_rgb(0xec, 0xee, 0xf1);
-    // Icon-Bereich links (quadratisch), Label rechts.
-    let ic = egui::Rect::from_min_size(rect.min + egui::vec2(8.0, 7.0), egui::vec2(24.0, 24.0));
-    let c = ic.center();
-    let p = ui.painter();
-    let stroke = egui::Stroke::new(1.6, fg);
-    match tool {
-        Tool::Select => {
-            // Cursor-Pfeil.
-            let pts = vec![
-                c + egui::vec2(-6.0, -7.0),
-                c + egui::vec2(-6.0, 7.0),
-                c + egui::vec2(-1.5, 2.5),
-                c + egui::vec2(2.0, 8.0),
-                c + egui::vec2(4.5, 6.5),
-                c + egui::vec2(1.0, 1.0),
-                c + egui::vec2(7.0, 0.0),
-            ];
-            p.add(egui::Shape::convex_polygon(pts, fg, egui::Stroke::NONE));
-        }
-        Tool::Rect => {
-            p.rect_stroke(
-                egui::Rect::from_center_size(c, egui::vec2(15.0, 12.0)),
-                1.5,
-                stroke,
-            );
-        }
-        Tool::Ellipse => {
-            p.circle_stroke(c, 8.0, stroke);
-        }
-        Tool::Polygon => {
-            // Dreieck/Polygon-Umriss.
-            let pts = vec![
-                c + egui::vec2(0.0, -8.0),
-                c + egui::vec2(8.0, 4.0),
-                c + egui::vec2(-8.0, 4.0),
-            ];
-            p.add(egui::Shape::closed_line(pts, stroke));
-        }
-    }
-    p.text(
-        egui::pos2(ic.right() + 8.0, c.y),
-        egui::Align2::LEFT_CENTER,
-        tool.label(),
-        egui::FontId::proportional(13.0),
-        fg,
+    let fg = if dim {
+        Color32::from_rgb(0x9a, 0xa0, 0xa9)
+    } else {
+        Color32::from_rgb(0xec, 0xee, 0xf1)
+    };
+    // Icon-Box zentriert (etwas kleiner als der Button).
+    let pad = side * 0.22;
+    let ic = egui::Rect::from_min_max(
+        rect.min + egui::vec2(pad, pad),
+        rect.max - egui::vec2(pad, pad),
     );
-    resp.clicked()
+    crate::icons::draw(ui.painter(), ic, icon, fg);
+    resp.on_hover_text(tip).clicked()
 }
 
+/// Werkzeuge in einem 2-Spalten-Grid; gibt das geklickte Werkzeug zurück.
+fn tool_grid(ui: &mut egui::Ui, side: f32, gap: f32, cur: Tool, tools: &[Tool]) -> Option<Tool> {
+    let mut clicked = None;
+    egui::Grid::new(("tg", tools.first().map(|t| t.label()).unwrap_or("")))
+        .spacing([gap, gap])
+        .show(ui, |ui| {
+            for (i, &t) in tools.iter().enumerate() {
+                if icon_button(ui, side, t.icon(), t.label(), cur == t, false) {
+                    clicked = Some(t);
+                }
+                if i % 2 == 1 {
+                    ui.end_row();
+                }
+            }
+        });
+    clicked
+}
+
+/// 2-spaltige Werkzeugleiste, 5 Gruppen wie die Tauri-ToolsPanel — nur Icons.
 fn tools_panel(ui: &mut egui::Ui, app: &mut App) {
-    ui.add_space(6.0);
-    ui.label(RichText::new("WERKZEUG").small().weak());
+    use crate::tools::ToolAction as A;
     ui.add_space(4.0);
-    for t in [Tool::Select, Tool::Rect, Tool::Ellipse, Tool::Polygon] {
-        if tool_button(ui, app.tool == t, t) {
-            app.tool = t;
-        }
+    let full = ui.available_width();
+    let gap = 4.0;
+    let side = ((full - gap) / 2.0).clamp(24.0, 42.0);
+
+    let cur = app.tool;
+    // Gruppe 1: Auswahl (breit über beide Spalten).
+    if icon_button(
+        ui,
+        full.min(side * 2.0 + gap),
+        "select",
+        "Auswahl / Verschieben",
+        cur == Tool::Select,
+        false,
+    ) {
+        app.tool = Tool::Select;
     }
-    // Undo/Redo + Datei-Aktionen liegen jetzt im Header; „Fill an/aus" macht der
-    // Layer-Modus. Das Werkzeug-Panel bleibt bewusst schlank.
+    divider(ui);
+    // Gruppe 2: Zeichnen & Formen.
+    if let Some(t) = tool_grid(
+        ui,
+        side,
+        gap,
+        cur,
+        &[
+            Tool::Rect,
+            Tool::Ellipse,
+            Tool::Polygon,
+            Tool::Line,
+            Tool::Polyline,
+            Tool::Spline,
+            Tool::Bezier,
+        ],
+    ) {
+        app.tool = t;
+    }
+    // Text (Sofort-Aktion) + Node (Werkzeug) in derselben Gruppe.
+    egui::Grid::new("tg_textnode")
+        .spacing([gap, gap])
+        .show(ui, |ui| {
+            if icon_button(ui, side, "text", "Text einfügen (Text→Pfad)", false, false) {
+                app.open_text_dialog();
+            }
+            if icon_button(
+                ui,
+                side,
+                "node",
+                "Knoten bearbeiten",
+                app.tool == Tool::Node,
+                false,
+            ) {
+                app.tool = Tool::Node;
+            }
+            ui.end_row();
+        });
+    divider(ui);
+    // Gruppe 3: Operationen. `trim` bleibt Stub (wie Tauri).
+    egui::Grid::new("tg_ops")
+        .spacing([gap, gap])
+        .show(ui, |ui| {
+            icon_button(ui, side, "trim", "Trimmen (Vorschau)", false, true);
+            if icon_button(ui, side, "bridge", "Haltesteg (Klick+Ziehen)", false, false) {
+                app.begin_action(A::Bridge);
+            }
+            ui.end_row();
+            if icon_button(ui, side, "boolean", "Boolean (Auswahl)", false, false) {
+                app.begin_action(A::Boolean);
+            }
+            if icon_button(
+                ui,
+                side,
+                "fillet",
+                "Ecken verrunden (Auswahl)",
+                false,
+                false,
+            ) {
+                app.begin_action(A::Fillet);
+            }
+            ui.end_row();
+            if icon_button(
+                ui,
+                side,
+                "pattern-fill",
+                "Muster füllen (Auswahl)",
+                false,
+                false,
+            ) {
+                app.begin_action(A::PatternFill);
+            }
+            if icon_button(
+                ui,
+                side,
+                "offset",
+                "Offset / parallele Kontur (Auswahl)",
+                false,
+                false,
+            ) {
+                app.begin_action(A::Offset);
+            }
+            ui.end_row();
+            if icon_button(
+                ui,
+                side,
+                "measure",
+                "Messen (Klick+Ziehen)",
+                app.tool == Tool::Measure,
+                false,
+            ) {
+                app.tool = Tool::Measure;
+            }
+            ui.end_row();
+        });
+    divider(ui);
+    // Gruppe 4: Spiegeln.
+    egui::Grid::new("tg_mirror")
+        .spacing([gap, gap])
+        .show(ui, |ui| {
+            if icon_button(ui, side, "mirror-h", "Horizontal spiegeln", false, false) {
+                app.mirror_h();
+            }
+            if icon_button(ui, side, "mirror-v", "Vertikal spiegeln", false, false) {
+                app.mirror_v();
+            }
+            ui.end_row();
+        });
+    divider(ui);
+    // Gruppe 5: Untersetzer.
+    egui::Grid::new("tg_coaster")
+        .spacing([gap, gap])
+        .show(ui, |ui| {
+            if icon_button(
+                ui,
+                side,
+                "coaster-rect",
+                "4×2 eckige Untersetzer",
+                false,
+                false,
+            ) {
+                app.insert_coasters(false);
+            }
+            if icon_button(
+                ui,
+                side,
+                "coaster-circle",
+                "4×2 runde Untersetzer",
+                false,
+                false,
+            ) {
+                app.insert_coasters(true);
+            }
+            ui.end_row();
+        });
+}
+
+/// Dünner horizontaler Trenner zwischen Werkzeuggruppen.
+fn divider(ui: &mut egui::Ui) {
+    ui.add_space(4.0);
+    let w = ui.available_width() * 0.8;
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+    let y = rect.center().y;
+    let x0 = rect.center().x - w / 2.0;
+    ui.painter().line_segment(
+        [egui::pos2(x0, y), egui::pos2(x0 + w, y)],
+        egui::Stroke::new(1.0, Color32::from_rgb(0x2a, 0x2e, 0x36)),
+    );
+    ui.add_space(4.0);
 }
 
 fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
     ui.label(RichText::new("EBENEN").small().weak());
     ui.add_space(4.0);
-    if app.state.layers.is_empty() {
+    if app.session.layers.is_empty() {
         ui.weak("Keine Ebenen — zeichne etwas.");
         return;
     }
     // Von oben (letzter Layer) nach unten anzeigen.
-    let n = app.state.layers.len();
+    let n = app.session.layers.len();
     for i in (0..n).rev() {
         let (color, name, mut visible, count) = {
-            let l = &app.state.layers[i];
-            let cnt = app.state.shapes.iter().filter(|s| s.layer_id == i).count();
+            let l = &app.session.layers[i];
+            let cnt = app
+                .session
+                .shapes
+                .iter()
+                .filter(|s| s.layer_id == i)
+                .count();
             (l.color, l.name.clone(), l.visible, cnt)
         };
         ui.horizontal(|ui| {
@@ -452,11 +628,35 @@ fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
                 app.pick_color(color);
             }
             if ui.checkbox(&mut visible, "").changed() {
-                app.state.layers[i].visible = visible;
+                app.session.layers[i].visible = visible;
             }
             ui.label(format!("{name}  ·  {count}"));
         });
     }
+}
+
+/// Form-Wähler für das Polygon-Werkzeug (Dreieck/Stern/… wie Tauri-ShapesPanel).
+fn shape_picker(ui: &mut egui::Ui, app: &mut App) {
+    use luxifer_core::PolyShape as P;
+    let shapes = [
+        (P::Tri, "tri"),
+        (P::Quad, "quad"),
+        (P::Penta, "penta"),
+        (P::Hex, "hex"),
+        (P::Octa, "octa"),
+        (P::Star, "star"),
+        (P::Sun, "sun"),
+        (P::Gear, "gear"),
+        (P::Heart, "heart"),
+    ];
+    ui.horizontal(|ui| {
+        for (shape, icon) in shapes {
+            let on = app.active_shape == shape;
+            if icon_button(ui, 30.0, icon, "", on, false) {
+                app.active_shape = shape;
+            }
+        }
+    });
 }
 
 fn palette_panel(ui: &mut egui::Ui, app: &mut App) {
@@ -492,6 +692,97 @@ fn palette_panel(ui: &mut egui::Ui, app: &mut App) {
 /// Theme nah am Tauri-Design (app.css): kühles Blau-Grau, Akzent nur am aktiven
 /// Element, sanfte Rundungen und ein bisschen mehr Luft. Bewusst ohne echtes
 /// Glas/Blur (das kann egui nicht), aber mit denselben Farbwerten.
+/// Kleiner horizontaler Icon-Knopf (Anordnen-Leiste). `dim` = deaktiviert.
+fn bar_icon(ui: &mut egui::Ui, icon: &str, tip: &str, enabled: bool) -> bool {
+    let side = 28.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::click());
+    let hov = resp.hovered() && enabled;
+    let bg = if hov {
+        Color32::from_rgb(0x25, 0x2a, 0x33)
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 6.0, bg);
+    let fg = if enabled {
+        Color32::from_rgb(0xd4, 0xd8, 0xdd)
+    } else {
+        Color32::from_rgb(0x55, 0x5a, 0x62)
+    };
+    let pad = side * 0.2;
+    let ic = egui::Rect::from_min_max(
+        rect.min + egui::vec2(pad, pad),
+        rect.max - egui::vec2(pad, pad),
+    );
+    crate::icons::draw(ui.painter(), ic, icon, fg);
+    enabled && resp.on_hover_text(tip).clicked()
+}
+
+/// Anordnen-Leiste: Ausrichten (7), Verteilen (4), Gruppieren/Lösen, Nesting.
+fn arrange_bar(ui: &mut egui::Ui, app: &mut App) {
+    use luxifer_core::{Align, Distribute};
+    let n = app.selection_count();
+    ui.horizontal(|ui| {
+        // Ausrichten (ab 1 Objekt).
+        let a1 = n >= 1;
+        if bar_icon(ui, "align-left", "Links ausrichten", a1) {
+            app.align(Align::Left);
+        }
+        if bar_icon(ui, "align-hcenter", "Horizontal zentrieren", a1) {
+            app.align(Align::HCenter);
+        }
+        if bar_icon(ui, "align-right", "Rechts ausrichten", a1) {
+            app.align(Align::Right);
+        }
+        ui.add_space(2.0);
+        if bar_icon(ui, "align-top", "Oben ausrichten", a1) {
+            app.align(Align::Top);
+        }
+        if bar_icon(ui, "align-vcenter", "Vertikal zentrieren", a1) {
+            app.align(Align::VCenter);
+        }
+        if bar_icon(ui, "align-bottom", "Unten ausrichten", a1) {
+            app.align(Align::Bottom);
+        }
+        if bar_icon(ui, "align-center", "Auf beiden Achsen zentrieren", a1) {
+            app.align(Align::Center);
+        }
+        ui.separator();
+        // Verteilen (ab 3 Objekten).
+        let a3 = n >= 3;
+        if bar_icon(ui, "dist-h", "Horizontal verteilen", a3) {
+            app.distribute(Distribute::Horizontal);
+        }
+        if bar_icon(ui, "space-h", "Horizontale Abstände angleichen", a3) {
+            app.distribute(Distribute::SpaceHorizontal);
+        }
+        if bar_icon(ui, "dist-v", "Vertikal verteilen", a3) {
+            app.distribute(Distribute::Vertical);
+        }
+        if bar_icon(ui, "space-v", "Vertikale Abstände angleichen", a3) {
+            app.distribute(Distribute::SpaceVertical);
+        }
+        ui.separator();
+        // Gruppieren.
+        if bar_icon(ui, "group", "Gruppieren", n >= 2) {
+            app.group();
+        }
+        if bar_icon(ui, "ungroup", "Gruppierung lösen", n >= 1) {
+            app.ungroup();
+        }
+        ui.separator();
+        // Nesting: Packen (≥2) / Bett füllen (≥1), fester Abstand 2 mm.
+        if bar_icon(ui, "nest", "Auswahl packen (2 mm)", n >= 2) {
+            app.nest(2.0);
+        }
+        if ui
+            .add_enabled(n >= 1, egui::Button::new("Bett füllen"))
+            .clicked()
+        {
+            app.nest_fill(2.0);
+        }
+    });
+}
+
 fn apply_theme(ctx: &egui::Context) {
     use egui::{Rounding, Stroke};
     let bg = Color32::from_rgb(0x10, 0x12, 0x16); // --bg
