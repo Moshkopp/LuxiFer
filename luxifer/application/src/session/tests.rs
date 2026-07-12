@@ -144,7 +144,7 @@ fn punktpfade_werden_nach_typ_im_core_erzeugt() {
     let points = vec![(0.0, 0.0), (10.0, 20.0), (20.0, 0.0)];
     for path in [PointPath::Polyline, PointPath::Spline, PointPath::Bezier] {
         let mut session = EditorSession::default();
-        let index = session.add_point_path(path, points.clone()).unwrap();
+        let index = session.add_point_path(path, points.clone(), false).unwrap();
         assert_eq!(session.selected, vec![index]);
         assert_eq!(session.shapes.len(), 1);
         assert_eq!(
@@ -165,8 +165,9 @@ fn fertige_bezier_knoten_behalten_ihre_tangenten() {
         luxifer_core::bezier::BezierNode::corner((20.0, 10.0)),
     ];
     let mut session = EditorSession::default();
-    let index = session.add_bezier_nodes(nodes.clone()).unwrap();
+    let index = session.add_bezier_nodes(nodes.clone(), true).unwrap();
     assert_eq!(session.shapes[index].bezier.as_ref().unwrap().nodes, nodes);
+    assert!(session.shapes[index].bezier.as_ref().unwrap().closed);
     assert!(session.undo());
     assert!(session.shapes.is_empty());
 }

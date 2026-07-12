@@ -53,21 +53,26 @@ impl EditorSession {
         )
     }
 
-    pub fn add_point_path(&mut self, path: PointPath, points: Vec<(f64, f64)>) -> Option<usize> {
+    pub fn add_point_path(
+        &mut self,
+        path: PointPath,
+        points: Vec<(f64, f64)>,
+        closed: bool,
+    ) -> Option<usize> {
         if points.len() < 2 {
             return None;
         }
         let index = match path {
             PointPath::Polyline => self.state.add_shape(luxifer_core::Geo::Polyline {
                 pts: points,
-                closed: false,
+                closed,
             }),
             PointPath::Spline => {
-                let pts = luxifer_core::geometry::catmull_rom(&points, false, 12);
+                let pts = luxifer_core::geometry::catmull_rom(&points, closed, 12);
                 self.state
-                    .add_shape(luxifer_core::Geo::Polyline { pts, closed: false })
+                    .add_shape(luxifer_core::Geo::Polyline { pts, closed })
             }
-            PointPath::Bezier => self.state.add_bezier(points, false),
+            PointPath::Bezier => self.state.add_bezier(points, closed),
         };
         Some(index)
     }
@@ -77,10 +82,11 @@ impl EditorSession {
     pub fn add_bezier_nodes(
         &mut self,
         nodes: Vec<luxifer_core::bezier::BezierNode>,
+        closed: bool,
     ) -> Option<usize> {
         if nodes.len() < 2 {
             return None;
         }
-        Some(self.state.add_bezier_nodes(nodes, false))
+        Some(self.state.add_bezier_nodes(nodes, closed))
     }
 }

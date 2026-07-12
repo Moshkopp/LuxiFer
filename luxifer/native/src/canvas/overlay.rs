@@ -153,6 +153,9 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
     // Segmente + gestricheltes Gummiband zur Maus + Punkt-Marker, wie Tauri.
     if !input.poly_pts.is_empty() && matches!(input.tool, Tool::Polyline | Tool::Spline) {
         let col = [0.9, 0.9, 0.95, 0.9];
+        let first = input.poly_pts[0];
+        let snap_start = input.poly_pts.len() >= 3
+            && (first.0 - cur[0]).hypot(first.1 - cur[1]) <= 10.0 / input.cam_scale as f64;
         // Gesetzte Segmente.
         for wnd in input.poly_pts.windows(2) {
             scene_geo::push_seg(
@@ -164,17 +167,22 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
         }
         // Gummiband vom letzten Punkt zur Maus (gestrichelt).
         let last = *input.poly_pts.last().unwrap();
+        let rubber_end = if snap_start {
+            [first.0 as f32, first.1 as f32]
+        } else {
+            [cur[0] as f32, cur[1] as f32]
+        };
         dashed_seg(
             &mut v,
             [last.0 as f32, last.1 as f32],
-            [cur[0] as f32, cur[1] as f32],
+            rubber_end,
             [1.0, 1.0, 1.0, 0.4],
             input.cam_scale,
         );
         // Punkt-Marker (kleine Quadrate); Startpunkt hervorgehoben.
         let hw = 3.0 / input.cam_scale;
         for (i, p) in input.poly_pts.iter().enumerate() {
-            let c = if i == 0 {
+            let c = if i == 0 && snap_start {
                 [0.25, 0.72, 0.5, 1.0] // Start grün (Schließen-Signal)
             } else {
                 [0.3, 0.51, 0.97, 1.0]
@@ -184,6 +192,9 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
     }
 
     if input.tool == Tool::Bezier && !input.bezier_nodes.is_empty() {
+        let first = input.bezier_nodes[0].p;
+        let snap_start = input.bezier_nodes.len() >= 3
+            && (first.0 - cur[0]).hypot(first.1 - cur[1]) <= 10.0 / input.cam_scale as f64;
         let path = luxifer_core::bezier::BezierPath {
             nodes: input.bezier_nodes.to_vec(),
             closed: false,
@@ -198,10 +209,15 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
             );
         }
         let last = input.bezier_nodes.last().unwrap();
+        let rubber_end = if snap_start {
+            [first.0 as f32, first.1 as f32]
+        } else {
+            [cur[0] as f32, cur[1] as f32]
+        };
         dashed_seg(
             &mut v,
             [last.p.0 as f32, last.p.1 as f32],
-            [cur[0] as f32, cur[1] as f32],
+            rubber_end,
             [1.0, 1.0, 1.0, 0.4],
             input.cam_scale,
         );
@@ -221,7 +237,7 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
                     [0.55, 0.65, 0.8, 1.0],
                 ));
             }
-            let color = if i == 0 {
+            let color = if i == 0 && snap_start {
                 [0.25, 0.72, 0.5, 1.0]
             } else {
                 [0.3, 0.51, 0.97, 1.0]

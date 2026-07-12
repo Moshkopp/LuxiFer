@@ -302,7 +302,7 @@ impl App {
                 }
             }
             S::FinishPolygon => {
-                if self.canvas.finish_polygon(&mut self.session) {
+                if self.canvas.finish_point_path(&mut self.session, true) {
                     self.refresh_accent();
                 }
             }

@@ -19,7 +19,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 |----|--------|------|--------------|
 | A1 | ERLEDIGT | P1 | Auswahl-Werkzeug zeichnet einen bildschirmkonstant gestrichelten Marquee-Rahmen. |
 | A2 | ERLEDIGT | P1 | Bézier-Feder: Drücken setzt Anker, Ziehen erzeugt symmetrische Tangenten; Enter schließt den Entwurf ab. |
-| A3 | UX | P2 | Spline/Polyline/Bézier: Klick auf ersten Node ODER Enter schließt die Form; Startnode leuchtet farbig, wenn die Maus in die Nähe kommt (kein Zielen nötig). |
+| A3 | ERLEDIGT | P2 | Spline/Polyline/Bézier rasten nahe dem Startknoten ein; Klick oder Enter schließt den Pfad, der Startknoten signalisiert die Fangzone farbig. |
 | A4 | ERLEDIGT | P1 | Strg+Z = Undo, Strg+Shift+Z und Strg+Y = Redo. |
 | A5 | UX | P3 | Undo/Redo sollen als Icons in den Header. |
 
@@ -87,3 +87,6 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 - A2 (erledigt): Der Canvas hält während des Zeichnens echte `BezierNode`-Drafts.
   Beim Drag entstehen `h_in`/`h_out`, das Overlay zeigt Kurve, Tangenten und
   Anker live; die Application übernimmt den fertigen Pfad als einen Undo-Schritt.
+- A3 (erledigt): Eine bildschirmkonstante 10-px-Fangzone schließt Pfade ab drei
+  Knoten. Overlay-Gummiband und Startmarker zeigen das Einrasten; Application
+  erzeugt für Klick und Enter echte geschlossene Polyline-/Spline-/Bézier-Pfade.

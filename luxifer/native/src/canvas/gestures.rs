@@ -49,6 +49,10 @@ impl CanvasState {
                         return out;
                     }
                 }
+                if self.near_point_path_start(w) {
+                    out.shape_added = self.finish_point_path(session, true);
+                    return out;
+                }
                 match self.tool {
                     Tool::Select | Tool::Node => self.begin_select(session, w),
                     // Aufzieh-Werkzeuge (Zentrum/Ecke → Maus).
@@ -74,6 +78,19 @@ impl CanvasState {
             _ => {}
         }
         out
+    }
+
+    /// Bildschirmkonstante Fangzone am ersten Knoten. Mindestens drei Knoten
+    /// verhindern, dass der zweite Klick versehentlich sofort schließt.
+    fn near_point_path_start(&self, w: [f64; 2]) -> bool {
+        let first = match self.tool {
+            Tool::Bezier if self.bezier_nodes.len() >= 3 => self.bezier_nodes.first().map(|n| n.p),
+            Tool::Polyline | Tool::Spline if self.poly_pts.len() >= 3 => {
+                self.poly_pts.first().copied()
+            }
+            _ => None,
+        };
+        first.is_some_and(|p| (p.0 - w[0]).hypot(p.1 - w[1]) <= 10.0 / self.cam.scale as f64)
     }
 
     /// Kopie der aktuell selektierten Shapes (Index + Shape) — als Ausgangspunkt
@@ -254,14 +271,14 @@ impl CanvasState {
         session.add_box_shape(shape, a, b).is_some()
     }
 
-    /// Schließt den punktbasierten Zug ab (Enter/Doppelklick). Je nach Werkzeug:
-    /// Polylinie (offen), Spline (glatt), Bézier (Feder). Gibt true zurück, wenn
-    /// ein Shape entstand.
-    pub fn finish_polygon(&mut self, session: &mut EditorSession) -> bool {
+    /// Schließt den punktbasierten Zug ab. `closed` bestimmt, ob Core und
+    /// Application auch die Schlusskante erzeugen. Gibt true zurück, wenn ein
+    /// Shape entstand.
+    pub fn finish_point_path(&mut self, session: &mut EditorSession, closed: bool) -> bool {
         if self.tool == Tool::Bezier {
             self.poly_pts.clear();
             let nodes = std::mem::take(&mut self.bezier_nodes);
-            return session.add_bezier_nodes(nodes).is_some();
+            return session.add_bezier_nodes(nodes, closed).is_some();
         }
         let pts = std::mem::take(&mut self.poly_pts);
         let path = match self.tool {
@@ -270,7 +287,7 @@ impl CanvasState {
             Tool::Bezier => unreachable!("Bézier-Knoten wurden bereits behandelt"),
             _ => return false,
         };
-        session.add_point_path(path, pts).is_some()
+        session.add_point_path(path, pts, closed).is_some()
     }
 }
 
@@ -297,12 +314,32 @@ mod tests {
 
         assert_eq!(canvas.bezier_nodes[0].h_out, Some((15.0, 12.0)));
         assert_eq!(canvas.bezier_nodes[0].h_in, Some((5.0, 8.0)));
-        assert!(canvas.finish_polygon(&mut session));
+        assert!(canvas.finish_point_path(&mut session, true));
         assert!(canvas.bezier_nodes.is_empty());
         assert_eq!(session.shapes.len(), 1);
         assert_eq!(
             session.shapes[0].bezier.as_ref().unwrap().nodes[0].h_out,
             Some((15.0, 12.0))
         );
+        assert!(session.shapes[0].bezier.as_ref().unwrap().closed);
+    }
+
+    #[test]
+    fn klick_nahe_start_schliesst_punktpfad_ohne_zusaetzlichen_knoten() {
+        let mut canvas = CanvasState::new(Camera::new());
+        canvas.tool = Tool::Polyline;
+        canvas.poly_pts = vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0)];
+        let mut session = EditorSession::default();
+        canvas.cursor = canvas.cam.world_to_screen([1.0, 1.0]);
+
+        let out = canvas.on_mouse(&mut session, MouseButton::Left, true);
+
+        assert!(out.shape_added);
+        assert!(canvas.poly_pts.is_empty());
+        let luxifer_core::Geo::Polyline { pts, closed } = &session.shapes[0].geo else {
+            panic!("erwartete Polyline");
+        };
+        assert!(*closed);
+        assert_eq!(pts.len(), 3);
     }
 }
