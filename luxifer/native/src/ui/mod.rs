@@ -135,7 +135,17 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         View::Projekt => {
             app.left_w = 0.0;
             app.right_w = 0.0;
-            egui::CentralPanel::default().show(ctx, |ui| project::project_browser(ui, app));
+            let projects = app.project.list();
+            let open_name = app.project.open_name().map(|s| s.to_string());
+            let draft = &mut app.new_project_name;
+            let actions = egui::CentralPanel::default()
+                .show(ctx, |ui| {
+                    project::project_browser(ui, draft, &projects, open_name.as_deref())
+                })
+                .inner;
+            for action in actions {
+                app.dispatch(action);
+            }
         }
         View::Design | View::Laser => {
             let cur_tool = app.tool;

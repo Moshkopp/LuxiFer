@@ -632,6 +632,15 @@ impl App {
             A::ToggleLayer(index, toggle) => self.toggle_layer(index, toggle),
             A::OpenLayerDialog(index) => self.open_layer_dialog(index),
             A::MoveLayer { from, to } => self.move_layer(from, to),
+            A::NewProject => {
+                // Draft-Lebenszyklus liegt am Root: Namen auslesen, anlegen, leeren.
+                let name = self.new_project_name.clone();
+                self.project_new(&name);
+                self.new_project_name.clear();
+            }
+            A::SaveProject => self.project_save(),
+            A::SaveProjectVersion => self.project_save_version(),
+            A::OpenProject(name) => self.project_open(&name),
         }
     }
 

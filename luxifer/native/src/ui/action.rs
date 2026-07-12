@@ -13,7 +13,8 @@ use luxifer_core::{Align, Distribute, PolyShape};
 use crate::tools::{Tool, ToolAction};
 
 /// Eine vom UI ausgelöste Absicht. Rein beschreibend — kein Verhalten.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Nicht `Copy`, weil einzelne Varianten Eigentum tragen (z. B. Projektname).
+#[derive(Debug, Clone, PartialEq)]
 pub enum UiAction {
     /// Auswahl ausrichten.
     Align(Align),
@@ -49,4 +50,12 @@ pub enum UiAction {
     OpenLayerDialog(usize),
     /// Einen Layer in der Brenn-Reihenfolge verschieben.
     MoveLayer { from: usize, to: usize },
+    /// Neues Projekt aus dem aktuellen Namensentwurf anlegen.
+    NewProject,
+    /// Aktuelles Projekt in-place speichern.
+    SaveProject,
+    /// Aktuelles Projekt als neue Version speichern.
+    SaveProjectVersion,
+    /// Projekt mit diesem Namen öffnen.
+    OpenProject(String),
 }
