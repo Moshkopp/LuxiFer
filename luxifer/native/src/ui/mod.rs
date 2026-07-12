@@ -86,7 +86,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         app.fps(),
         app.canvas.tool.label(),
         app.session.shapes.len(),
-        app.project.msg.clone(),
+        app.project_msg.clone(),
     );
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
         status::status_bar(ui, fps, tool_label, shapes, &msg);

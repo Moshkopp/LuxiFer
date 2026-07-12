@@ -23,6 +23,13 @@ impl AppError {
         self
     }
 
+    /// Kapselt einen technischen Core-/I/O-Fehler (String) unter einem stabilen
+    /// Code und einer nutzerlesbaren Meldung; der Originaltext wandert in die
+    /// technischen Details.
+    pub fn wrap(code: &'static str, message: impl Into<String>, cause: impl Into<String>) -> Self {
+        Self::new(code, message).with_details(cause)
+    }
+
     pub fn code(&self) -> &'static str {
         self.code
     }

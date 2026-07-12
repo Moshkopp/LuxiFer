@@ -4,7 +4,9 @@
 //! vollständige Anwendungsfälle. Sie kennt weder egui/winit/wgpu noch Tauri.
 
 mod error;
+mod project;
 mod session;
 
 pub use error::AppError;
+pub use project::ProjectService;
 pub use session::{BoxShape, EditorSession, LayerParams, LayerToggle, PointPath};

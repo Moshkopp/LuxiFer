@@ -26,7 +26,10 @@ pub struct App {
     /// GPU-Ressourcen und Frame-Ablauf.
     renderer: Renderer,
     pub view: crate::tools::View,
-    pub project: crate::project::ProjectBackend,
+    /// Projekt-/Versions-/Asset-Lebenszyklus (Application-Dienst).
+    pub project: luxifer_application::ProjectService,
+    /// Kurze Erfolgs-/Statusmeldung zum Projekt (Fehler laufen über `app_error`).
+    pub project_msg: String,
     /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
     pub new_project_name: String,
     pub laser: LaserUi,
@@ -104,7 +107,8 @@ impl App {
             } else {
                 crate::tools::View::Design
             },
-            project: crate::project::ProjectBackend::default(),
+            project: luxifer_application::ProjectService::new(),
+            project_msg: String::new(),
             new_project_name: String::new(),
             laser: LaserUi::default(),
             laser_backend: crate::laser::LaserBackend::load(),
@@ -421,38 +425,48 @@ impl App {
 
     /// Projekt öffnen: ersetzt den Canvas-Zustand durch den geladenen.
     pub fn project_open(&mut self, name: &str) {
-        if let Some(state) = self.project.open(name) {
-            self.session.replace_state(state);
-            self.refresh_accent();
-            self.image_dirty = true;
-            // Der neue State führt seinen eigenen Revisionszähler; erzwinge den
-            // Vertex-Neuaufbau, statt auf einen zufälligen Zählervergleich zu
-            // vertrauen.
-            self.renderer.invalidate_scene();
-            self.fit_all();
-            self.view = crate::tools::View::Design;
+        match self.project.open(name) {
+            Ok(state) => {
+                self.session.replace_state(state);
+                self.refresh_accent();
+                self.image_dirty = true;
+                // Der neue State führt seinen eigenen Revisionszähler; erzwinge
+                // den Vertex-Neuaufbau, statt auf einen zufälligen
+                // Zählervergleich zu vertrauen.
+                self.renderer.invalidate_scene();
+                self.fit_all();
+                self.project_msg = format!("Geöffnet: {name}");
+                self.view = crate::tools::View::Design;
+            }
+            Err(error) => self.app_error = Some(error),
         }
     }
 
-    /// Neues Projekt aus dem aktuellen Canvas anlegen und in-place speichern.
+    /// Neues Projekt aus dem aktuellen Canvas anlegen und speichern.
     pub fn project_new(&mut self, name: &str) {
-        if name.trim().is_empty() {
-            self.project.msg = "Bitte einen Namen angeben.".into();
-            return;
+        match self.project.new_project(self.session.state(), name) {
+            Ok(()) => {
+                self.project_msg = format!("Neues Projekt: {}", name.trim());
+                self.view = crate::tools::View::Design;
+            }
+            Err(error) => self.app_error = Some(error),
         }
-        self.project.new_from_state(&self.session, name.trim());
-        self.project.save(&self.session);
-        self.view = crate::tools::View::Design;
     }
 
     /// In-place speichern (Strg+S).
     pub fn project_save(&mut self) {
-        self.project.save(&self.session);
+        match self.project.save(self.session.state()) {
+            Ok(v) => self.project_msg = format!("Gespeichert ({})", v.label),
+            Err(error) => self.app_error = Some(error),
+        }
     }
 
     /// Als neue Version speichern (Shift+Strg+S).
     pub fn project_save_version(&mut self) {
-        self.project.save_version(&self.session);
+        match self.project.save_version(self.session.state()) {
+            Ok(v) => self.project_msg = format!("Neue Version {}", v.label),
+            Err(error) => self.app_error = Some(error),
+        }
     }
 
     /// Öffnet den Text-Dialog und scannt bei Bedarf die System-Fonts.

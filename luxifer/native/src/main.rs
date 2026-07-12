@@ -11,7 +11,6 @@ mod icons;
 mod image_gpu;
 mod laser;
 mod laserpanel;
-mod project;
 mod render;
 mod scene_geo;
 mod tools;
