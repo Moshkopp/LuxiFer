@@ -32,8 +32,8 @@ Sammelmodul werden; Projekt-, Asset- und Laserabläufe erhalten eigene Services.
 | `job_preview` | Core/Application | teilweise nativ | read-only `EditorSession::job_preview`, Cut/Fill/Travel nativ; Bilder vorläufig aus GPU-Asset-Cache, verarbeitete Rastertextur noch offen |
 | `get_ui_settings` | Application | fehlt | plattformneutral laden, Defaults bei fehlender Datei |
 | `save_ui_settings` | Application | fehlt | validieren und fehlersicher speichern |
-| `undo` | Core/Application | über `EditorSession` | Basisschnitt getestet; Gesten-Undo folgt in Phase 2 |
-| `redo` | Core/Application | über `EditorSession` | Basisschnitt getestet; Gesten-Redo folgt in Phase 2 |
+| `undo` | Core/Application | über `EditorSession` | Strg+Z; Gesten erzeugen genau einen Undo-Schritt; Shortcut-Zuordnung getestet |
+| `redo` | Core/Application | über `EditorSession` | Strg+Shift+Z und Strg+Y; Modal-/Fokus-Gate wirksam |
 | `frontend_ready` | entfällt | entfällt | reiner Tauri/WebView-Lebenszyklus |
 
 ## Editor, Auswahl und Layer
@@ -65,27 +65,27 @@ Quelle: `frontend/src-tauri/src/commands/shapes.rs`.
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `import_vector_file` | Application/Core | vorhanden, prüfen | SVG/DXF, Dateifehler, großer Import, Undo |
-| `pattern_fill_op` | Core/Application | UI-Aktion, prüfen | Parameterdialog, Auswahlvoraussetzung, Fehler |
-| `add_spline` | Core/Application | über `EditorSession` | Abschluss/Abbruch und einzelner Core-Undo-Punkt |
-| `upload_font` | Application | fehlt | Zielverzeichnis, Namens-/Schreibfehler |
-| `list_fonts` | Application | eigene Native-Variante | eine kanonische Fontquelle herstellen |
-| `add_text` | Core/Application | vorhanden, prüfen | Font, Metadaten, Gruppierung, Undo |
-| `text_preview` | Core/Application | fehlt | Vorschau ohne Mutation |
-| `update_text` | Core/Application | fehlt | bestehenden Textblock atomar ersetzen |
-| `add_bezier` | Core/Application | über `EditorSession` | Basis-Zeichenablauf und Undo migriert; Tangentenregeln folgen Node-Schnitt |
-| `add_bezier_nodes` | Core/Application | prüfen | Handles und geschlossener Pfad |
-| `drag_node` | Core | fehlt/prüfen | Anker/Tangenten, smooth-Regel, Gesten-Undo |
-| `split_node` | Core | fehlt | Segmentparameter und Metadaten |
-| `hit_bezier_segment` | Core | fehlt/prüfen | nur Core-Hit-Test, zoomabhängige Toleranz |
-| `toggle_node_smooth` | Core | fehlt | tangentiale Kopplung und Undo |
-| `delete_node` | Core | fehlt | Mindestknoten und Formlöschung klären |
-| `trace_image` | Core/Application | fehlt | Asset, Parameter, Ergebnis-/Fehlerzustand |
-| `boolean_op` | Core/Application | Basis über `EditorSession` | Union-UI aktiv; Varianten-/Parameterdialog folgt |
-| `offset_op` | Core/Application | Basis über `EditorSession` | Defaultwert aktiv; Distanzdialog folgt |
-| `bridge_op` | Core/Application | UI-Aktion, prüfen | Geste, Breite, ungültige Treffer |
-| `fillet_corners_op` | Core/Application | fehlt | Eckenauswahl, Radiusgrenzen, Undo |
-| `fillet_op` | Core/Application | Basis über `EditorSession` | Defaultwert aktiv; Radiusdialog folgt |
+| `import_vector_file` | Application/Core | über `EditorSession::import_path` | SVG/DXF mit Fehlerbehandlung; großer Import weiter beobachten |
+| `pattern_fill_op` | Core/Application | **offen** (Stub) | Core-Op vorhanden; UI meldet `not_migrated`; Parameterdialog fehlt |
+| `add_spline` | Core/Application | über `EditorSession` | Abschluss/Abbruch, Fangzone am Startknoten, ein Core-Undo-Punkt |
+| `upload_font` | Application | **offen** | Zielverzeichnis, Namens-/Schreibfehler (Bedienungsliste G2) |
+| `list_fonts` | Application | eigene Native-Variante (`fonts.rs`) | eine kanonische Fontquelle herstellen |
+| `add_text` | Core/Application | über `EditorSession::add_text_block` | nativer Dialog; Font-Lesefehler/leere Konturen werden gemeldet |
+| `text_preview` | Core/Application | **offen** | Vorschau ohne Mutation (Bedienungsliste G1) |
+| `update_text` | Core/Application | über `replace_text_block` | Doppelklick auf Textblock öffnet den Dialog; atomarer Ersatz |
+| `add_bezier` | Core/Application | über `EditorSession` | Drücken setzt Anker, Ziehen erzeugt Tangenten; ein Undo-Schritt |
+| `add_bezier_nodes` | Core/Application | über `EditorSession` | Draft-Knoten mit `h_in`/`h_out`; geschlossener Pfad über Fangzone |
+| `drag_node` | Core | **offen** | Node-Editing-Schnitt: Anker/Tangenten, smooth-Regel, Gesten-Undo |
+| `split_node` | Core | **offen** | Segmentparameter und Metadaten |
+| `hit_bezier_segment` | Core | **offen** | nur Core-Hit-Test, zoomabhängige Toleranz |
+| `toggle_node_smooth` | Core | **offen** | tangentiale Kopplung und Undo |
+| `delete_node` | Core | **offen** | Mindestknoten und Formlöschung klären |
+| `trace_image` | Core/Application | **offen** | Asset, Parameter, Ergebnis-/Fehlerzustand (Bedienungsliste C3) |
+| `boolean_op` | Core/Application | über `EditorSession::boolean` | Union/Schnitt/Differenz mit Parameterdialog (`dialogs/geo_op.rs`) |
+| `offset_op` | Core/Application | über `EditorSession::offset` | Distanzdialog; Core hält harte Miter-Ecken bei konvexen Konturen |
+| `bridge_op` | Core/Application | **offen** (Stub) | UI meldet `not_migrated`; Geste, Breite, ungültige Treffer |
+| `fillet_corners_op` | Core/Application | **offen** | Eckenauswahl, Radiusgrenzen, Undo |
+| `fillet_op` | Core/Application | über `EditorSession::fillet` | Radiusdialog über Session |
 | `nest_op` | Core/Application | über `EditorSession` | Auswahlvoraussetzung und Core-Undo |
 | `nest_fill_op` | Core/Application | über `EditorSession` | Auswahlvoraussetzung und Core-Undo |
 | `insert_coasters` | Core/Application | über `EditorSession` | rund/eckig; genau ein Core-Undo |
@@ -102,91 +102,86 @@ Quelle: `frontend/src-tauri/src/commands/image.rs` sowie Projekt-Assets.
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `import_image_file` | Application/Core | vorhanden, prüfen | Asset atomar anlegen; Undo/Fehler ohne Waise |
-| `image_render` | Core/Application | teilweise Renderer | Parameter-Vorschau ohne dauerhafte Mutation |
-| `set_image_params` | Core/Application | fehlt | alle Modi/Parameter, Undo, Textur invalidieren |
-| `project_assets` | Application/Core | fehlt | nur `asset_id`, Metadaten und sichere Pfade |
+| `import_image_file` | Application/Core | über Session/Asset-Store | Asset-Anlage und Textur-Invalidierung (`image_dirty`) |
+| `image_render` | Core/Application | teilweise Renderer | **offen:** Live-Vorschau im Dialog; Wirkung erst nach Übernahme (C2) |
+| `set_image_params` | Core/Application | über `EditorSession::set_image_params` | Modus/Schwelle/Helligkeit/Kontrast/Gamma/Invert validiert; Dialog per Doppelklick |
+| `project_assets` | Application/Core | über Core-`ProjectFile` | Assets laufen durch die kanonische Projektkette; keine Base64-Dauerablage |
 
 ## Projekte und Versionen
 
-Quelle: `frontend/src-tauri/src/commands/project.rs`. Die aktuelle
-`native/src/project.rs`-Implementierung ist bis zur Gegenprüfung als Duplikat,
-nicht als Zielimplementierung, zu behandeln.
+Quelle: `frontend/src-tauri/src/commands/project.rs`. Das frühere
+Native-Duplikat `native/src/project.rs` ist gelöscht; kanonisch ist der
+`ProjectService` in `luxifer-application` (nutzt die Core-`ProjectFile`-Kette).
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `new_project` | Application | vorhanden, fehleranfällig/unvollständig | Dirty-Guard, leere Session, Name/Metadaten |
-| `save_project` | Application/Core | vorhanden, unvollständig | Assets, Metadaten, Thumbnail, atomarer Fehlerpfad |
-| `save_version` | Application/Core | vorhanden, unvollständig | Notiz, Thumbnail, current_version |
-| `open_project` | Application/Core | vorhanden, unvollständig | Dirty-Guard, Assets, Fehler ohne Zustandsverlust |
-| `open_version` | Application/Core | fehlt | Version wird kanonischer Sessionzustand |
-| `delete_version` | Application/Core | fehlt | aktuelle/letzte Version schützen |
-| `project_list` | Application/Core | vorhanden, teilweise | Metadaten, Sortierung und beschädigte Projekte |
-| `project_detail` | Application/Core | fehlt | Versionen/Metadaten vollständig |
-| `project_assets` | Application/Core | fehlt | siehe Bilder/Assets |
-| `project_thumb` | Application/Core | fehlt | fehlendes Thumbnail als normaler Zustand |
-| `version_thumb` | Application/Core | fehlt | fehlendes Thumbnail als normaler Zustand |
-| `project_delete` | Application/Core | fehlt | offenes Projekt und I/O-Fehler behandeln |
-| `project_rename` | Application/Core | fehlt | Kollision, offenes Projekt und Pfade |
-| `project_export` | Application/Core | fehlt | sicheres Ziel, vollständige Assets/Versionen |
+| `new_project` | Application | `ProjectService::new_project` | Dirty-Guard vor Neu/Öffnen/Beenden; Roundtrip getestet |
+| `save_project` | Application/Core | `ProjectService::save` | in-place (Strg+S-Workflow); **offen:** Thumbnail, atomarer Teilfehlerpfad |
+| `save_version` | Application/Core | `ProjectService::save_version` | **offen:** Notiz und Thumbnail (Dienst übergibt leeres PNG) |
+| `open_project` | Application/Core | `ProjectService::open` | Öffnen-Fehler lässt bisheriges Projekt erhalten (Test) |
+| `open_version` | Application/Core | Dienst vorhanden, **UI offen** | Version wird kanonischer Sessionzustand; Versionsliste fehlt (E4) |
+| `delete_version` | Application/Core | Dienst vorhanden, **UI offen** | aktuelle/letzte Version schützt der Core |
+| `project_list` | Application/Core | `ProjectService::list` | Metadaten/Sortierung; beschädigte Projekte weiter prüfen |
+| `project_detail` | Application/Core | **offen** | Detailbereich mit Versionen/Metadaten im Browser (E4) |
+| `project_assets` | Application/Core | über Core-`ProjectFile` | siehe Bilder/Assets |
+| `project_thumb` | Application/Core | **offen** | Thumbnails werden noch nicht erzeugt; fehlend = normaler Zustand |
+| `version_thumb` | Application/Core | **offen** | siehe `project_thumb` |
+| `project_delete` | Application/Core | `ProjectService::delete` + Browser-UI | offenes Projekt und I/O-Fehler behandelt |
+| `project_rename` | Application/Core | Dienst vorhanden, **UI offen** | Kollision/offenes Projekt im Dienst; Umbenennen-Dialog fehlt (E4) |
+| `project_export` | Application/Core | `ProjectService::export` + Browser-UI | nativer Zieldialog; vollständige Assets/Versionen |
 
 ## Laser, Job und Geräte
 
-Quelle: `frontend/src-tauri/src/commands/laser.rs`. Die aktuelle
-`native/src/laser.rs`-Implementierung ist bis zur Gegenprüfung als Duplikat,
-nicht als Zielimplementierung, zu behandeln.
+Quelle: `frontend/src-tauri/src/commands/laser.rs`. Das frühere Native-Duplikat
+`native/src/laser.rs` ist gelöscht; kanonisch ist der `LaserService` in
+`luxifer-application` (hardwarelos mit Fake-Ruida getestet).
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
-| `laser_job_start` | Application/Core | teilweise | Jobparameter, Startposition, Gerätefehler |
-| `laser_list` | Application | vorhanden, prüfen | Registry laden, beschädigte Datei/Defaults |
-| `laser_save` | Application | vorhanden, prüfen | validieren, persistieren, ID-Regel |
-| `laser_delete` | Application | vorhanden, prüfen | aktives Profil und Persistenzfehler |
-| `laser_set_active` | Application | vorhanden, prüfen | Existenz und Persistenz |
-| `laser_actions` | Application/Driver | vorhanden, prüfen | Capabilities des aktiven Treibers |
-| `laser_run_action` | Application/Driver | vorhanden, prüfen | connect, Zustandsautomat, Rückmeldung |
-| `laser_export` | Application/Driver | vorhanden, prüfen | nativer Zieldialog, deterministische Bytes |
-| `laser_jog` | Application/Driver | vorhanden, prüfen | Verbindung, Grenzen, Geschwindigkeit |
-| `laser_home` | Application/Driver | vorhanden, prüfen | Verbindung und Fehlerstatus |
-| `laser_position` | Application/Driver | fehlt | nicht unterstützte Geräte und Fehler |
-| `laser_ping` | Application/Driver | fehlt/prüfen | Timeout, offline ist kein Panic |
+| `laser_job_start` | Application/Core | `LaserService::run_action` | Jobparameter/Startmodus/Anker aus dem Dienst; echte HW = manueller Test |
+| `laser_list` | Application | `LaserService::load` | Registry laden; beschädigte Datei fällt auf Defaults zurück |
+| `laser_save` | Application | `LaserService::save_profile` | validieren, persistieren, ID-Regel |
+| `laser_delete` | Application | `LaserService::delete_profile` | aktives Profil und Persistenzfehler |
+| `laser_set_active` | Application | `LaserService::set_active` | Existenz und Persistenz |
+| `laser_actions` | Application/Driver | `LaserService::actions` | Capabilities des aktiven Treibers; Panel baut daraus die Slots |
+| `laser_run_action` | Application/Driver | `LaserService::run_action` | Fehler als stabiler `AppError`; kein Treiberbau in der UI |
+| `laser_export` | Application/Driver | `LaserService::export_to` | nativer Zieldialog; nicht-leere Bytes mit Fake-Ruida getestet |
+| `laser_jog` | Application/Driver | `LaserService::jog` | Verbindung/Fehlerstatus über Treiberfehler |
+| `laser_home` | Application/Driver | `LaserService::home` | Verbindung und Fehlerstatus |
+| `laser_position` | Application/Driver | **offen** | nicht unterstützte Geräte und Fehler |
+| `laser_ping` | Application/Driver | **offen** | Timeout, offline ist kein Panic |
 
-Zusätzlich zu prüfen, obwohl es keine separaten Commands sind:
+Zusätzlich, obwohl es keine separaten Commands sind:
 
 - `effective_shapes`: Sichtbarkeit/Aktivierung muss eine Core-/Application-Regel
   sein, nicht pro UI neu entstehen.
-- `action_from_key`: Stringschlüssel entfallen nativ; typisierte `JobAction`
-  verwenden.
-- `needs_connection` und `connect_active`: gehören in den `LaserService`, nicht
-  in egui-Callbacks oder einen UI-Adapter.
+- `action_from_key`: erledigt — nativ läuft alles über die typisierte
+  `JobAction`, keine Stringschlüssel.
+- `needs_connection` und `connect_active`: erledigt — liegen im `LaserService`
+  (`driver_for`), nicht in egui-Callbacks.
 
 ## Native-spezifische sichtbare Aktionen ohne direkten Tauri-Command
 
 | Native-Aktion | Ziel | Aktueller Status | Abnahme |
 |---|---|---|---|
-| Projekt/Design/Laser-Reiter | Native | vorhanden | Zustand bleibt bei Reiterwechsel konsistent |
-| nativer Datei-/Ordnerdialog | Native | vorhanden | Abbruch mutiert nichts; Pfad an Application |
-| `Aztec laden` | entfernen/dev-only | Demo | kein nutzerspezifischer absoluter Pfad im Produkt |
+| Projekt/Design/Preview/Laser-Reiter | Native | vorhanden | Preview read-only; Laser-Tab sperrt Zeichnen/Löschen, Layer temporär freigebbar |
+| nativer Datei-/Ordnerdialog | Native | vorhanden | Abbruch mutiert nichts; Pfad an Application (rfd) |
+| `Aztec laden` | entfernen/dev-only | **noch Demo** | kein nutzerspezifischer absoluter Pfad im Produkt |
 | Fit/Zoom/Pan/Kamera | Native | vorhanden, prüfen | DPI, Cursor-Zoom, Panelgrößen, großes Fenster |
-| Werkzeugauswahl/Shortcuts | Native | vorhanden, prüfen | Fokusregeln und deaktivierte Werkzeuge |
-| Drag-/Marquee-/Handle-Vorschau | Native | vorhanden, prüfen | nur Präsentationszustand; Commit über Application |
+| Werkzeugauswahl/Shortcuts | Native | typisierte `Shortcut`-Ebene, getestet | Fokus-/Modal-Gate wirksam; Space-Key-up kommt immer durch |
+| Drag-/Marquee-/Handle-Vorschau | Native | vorhanden | Marquee als gestricheltes Overlay; nur Präsentationszustand, Commit über Session |
 | FPS-/Statuszeile | Native | vorhanden | Dev-Metrik optional; Fehler/Projektstatus klar |
-| Laser-Profil-Dialog | Native + Application | vorhanden, prüfen | UI validiert Darstellung, Service fachlich |
-| Text-Dialog | Native + Application | vorhanden, prüfen | Vorschau, Editieren, Fehler und Abbruch |
+| Laser-Profil-Dialog | Native + Application | vorhanden | UI hält nur den Draft; Fachprüfung im Service |
+| Text-Dialog | Native + Application | vorhanden | Anlegen + Editieren (Doppelklick); **offen:** Vorschau (G1), eigene Fonts (G2) |
+| Bildparameter-Dialog | Native + Application | vorhanden | Doppelklick aufs Bild; **offen:** Live-Vorschau (C2) |
+| Rechtes Panel (Inspector) | Native | resizierbar 300–460 px | Panelbreite ist Layout-Zustand des Roots, kein Fachzustand |
 
-## Befund für den ersten Umsetzungsschnitt
+## Befund für den ersten Umsetzungsschnitt (historisch, umgesetzt)
 
-Der kleinste belastbare Schnitt für Phase 1 ist nicht Projekt oder Laser. Beide
-enthalten bereits I/O- und Lebenszyklusfragen. Empfohlen wird:
-
-1. `luxifer-application` mit `EditorSession` und `AppError` anlegen;
-2. `get_scene` nicht als serialisiertes DTO kopieren, sondern einen direkten,
-   read-only Sessionzugriff für Native definieren;
-3. `delete_selected`, `undo` und `redo` als erste vollständige Mutationen über
-   die Session führen;
-4. Native-Fehleranzeige ergänzen;
-5. Tests für Dirty-, Auswahl- und Undo-Zustand schreiben;
-6. erst danach die gestenreichen Transformoperationen migrieren.
-
-Damit wird die Abhängigkeitsgrenze mit geringem UI-Risiko bewiesen, ohne bereits
-die schwierigen Projekt- oder Hardwareentscheidungen vorwegzunehmen.
+Der damals empfohlene Einstieg (Anlage von `luxifer-application` mit
+`EditorSession`/`AppError`, read-only Sessionzugriff statt DTO, erste
+Mutationen `delete_selected`/`undo`/`redo`, Fehleranzeige, Tests) ist
+vollständig umgesetzt; die Abhängigkeitsgrenze `native → application →
+core/drivers` steht. Aktuelle offene Punkte stehen in der Übergabenotiz der
+[Migrations-Taskliste](native_only_migration_tasks.md) und in
+[`docs/native_todo_bedienung.md`](native_todo_bedienung.md).

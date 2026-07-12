@@ -30,13 +30,15 @@ entfernte oder ausdrücklich verbliebene Altimplementierung.
 - [x] Nativer `winit + wgpu + egui`-Spike rendert performant.
 - [x] `luxifer-core` wird nativ direkt gelinkt.
 - [ ] Native ist funktional gleichwertig zur bisherigen Anwendung.
-- [ ] Tauri-unabhängige Anwendungsschicht existiert.
+- [x] Tauri-unabhängige Anwendungsschicht existiert (`luxifer-application`
+      mit `EditorSession`, `ProjectService`, `LaserService`, `AppError`).
 - [ ] Tauri/Svelte ist entfernt.
 
-Bekannte Arbeitskopie zu Beginn dieser Liste: uncommittete Änderungen in
-`luxifer/native/src/app.rs`, `main.rs`, `tools.rs`, `ui.rs` sowie die neue Datei
-`icons.rs`. Diese Änderungen gehören dem Nutzer und dürfen bei Architekturarbeit
-nicht überschrieben oder ungeprüft in einen Commit aufgenommen werden.
+Die zu Beginn dieser Liste erwähnten uncommitteten Nutzeränderungen sind längst
+als Spike-Checkpoints committet; die Arbeitskopie ist sauber. Die vom Nutzer am
+laufenden Fenster gesammelte Bedienungs-/Mängelliste liegt in
+[`docs/native_todo_bedienung.md`](native_todo_bedienung.md) und wird pro Schnitt
+fortgeschrieben.
 
 ## Definition of Done der Gesamtmigration
 
@@ -59,14 +61,18 @@ nicht überschrieben oder ungeprüft in einen Commit aufgenommen werden.
 
 Ziel: Keine weitere scheinbare Funktionsbreite; belastbare Migrationsmatrix.
 
-- [ ] Aktuelle Native-Änderungen prüfen und als eigenen Spike-Checkpoint sichern.
+- [x] Aktuelle Native-Änderungen prüfen und als eigenen Spike-Checkpoint sichern.
 - [ ] Native-Demodaten aus `App::new` entfernen oder klar hinter einen
-      Entwicklungsmodus stellen.
-- [ ] Alle sichtbaren Native-Aktionen inventarisieren.
-- [ ] Nicht implementierte Aktionen deaktivieren und mit Tooltip
-      „Noch nicht migriert“ kennzeichnen.
-- [ ] Fehlerhafte Aktionen entweder reparieren oder bis zu ihrem Schnitt
-      deaktivieren.
+      Entwicklungsmodus stellen (offen: Demo-Shapes beim Start sowie der
+      pfad-abhängige „Aztec laden“-Knopf existieren noch).
+- [x] Alle sichtbaren Native-Aktionen inventarisieren (Funktionsmatrix und
+      `docs/native_todo_bedienung.md`).
+- [x] Nicht implementierte Aktionen deaktivieren oder klar kennzeichnen
+      (Pattern Fill/Bridge melden einen stabilen `not_migrated`-`AppError`;
+      Trim ist als Stub gedimmt).
+- [x] Fehlerhafte Aktionen entweder reparieren oder bis zu ihrem Schnitt
+      deaktivieren (P1-Regressionen A1/A4/B1/C1 sind behoben; Rest siehe
+      Bedienungsliste).
 - [x] Tauri-Commands auf Funktionsebene vollständig inventarisieren:
   - [x] `frontend/src-tauri/src/lib.rs`
   - [x] `commands/shapes.rs`
@@ -74,7 +80,7 @@ Ziel: Keine weitere scheinbare Funktionsbreite; belastbare Migrationsmatrix.
   - [x] `commands/image.rs`
   - [x] `commands/project.rs`
   - [x] `commands/laser.rs`
-- [ ] Für jeden Command eine Zeile in der Funktionsmatrix ergänzen:
+- [x] Für jeden Command eine Zeile in der Funktionsmatrix ergänzen:
 
 | Bereich | Funktion | Quelle heute | Ziel | Status | Entscheidung/Abnahme |
 |---|---|---|---|---|---|
@@ -93,8 +99,10 @@ Abnahmebefunde werden pro vertikalem Schnitt fortgeschrieben.
 Abnahme Phase 0:
 
 - [ ] Jeder sichtbare Native-Button ist `funktioniert`, `deaktiviert` oder
-      `bewusst entfällt`; es gibt keine Attrappen.
-- [ ] Jeder Tauri-Command ist einer Zielverantwortung zugeordnet.
+      `bewusst entfällt`; es gibt keine Attrappen. (Fast erfüllt: Pattern
+      Fill/Bridge melden `not_migrated`; offen bleiben Demo-Startinhalt und
+      „Aztec laden“.)
+- [x] Jeder Tauri-Command ist einer Zielverantwortung zugeordnet.
 
 ## Phase 1 — `luxifer-application` als Grenze einführen
 
@@ -480,9 +488,20 @@ einzige verbliebene eigene Verantwortung mit Fremd-Ressource; er gehört jedoch
 in den Application-`LaserService` (Phase 6), nicht in einen kosmetischen
 Native-Split — daher hier belassen. `left_w`/`right_w` bleiben Layout-Rück-
 schreibung wie dokumentiert.
+
+Größenstand 2026-07-12 (ehrlich): `app.rs` ist durch die seither ergänzten
+Dialog-Lebenszyklen (Text/Layer/Bild/Geo-Op/Dirty-Guard), `dispatch` und die
+Projekt-/Laser-Koordination wieder auf ~1190 Zeilen gewachsen. Das ist
+weiterhin Composition-Root-Arbeit, kein neues Fachmodul — aber die Regel
+bleibt: neue Fachlogik gehört in Core/Application, neue Interaktion in
+`canvas/`, neue Panels/Dialoge in `ui/`. Ein erneuter Schnitt lohnt erst,
+wenn ein Block eigenen Zustand mit schmaler Schnittstelle bildet (Kandidat:
+Dialog-Lebenszyklen als eigenes Modul mit `DialogHost`-artiger API).
+
 - [ ] UI-Größen, DPI-Skalierung und Ultrawide-/kleine Fenster testen.
 - [ ] Tooltips, deaktivierte Zustände, Fokus und Tastaturnavigation.
-- [ ] Rechte Panels sinnvoll skalierbar/resizable machen.
+- [x] Rechte Panels sinnvoll skalierbar/resizable machen (Inspector 340 px
+      vorbelegt, 300–460 px verstellbar; Bedienungsliste E1).
 - [ ] Leere, Lade-, Fehler- und Fortschrittszustände gestalten.
 - [ ] Ungespeichert-/Projektstatus deutlich sichtbar machen.
 - [ ] Performancebudgets dokumentieren und messen:
@@ -557,14 +576,33 @@ eingetragen werden; sie blockieren nicht Phase 0/1:
 
 ## Übergabenotiz für den nächsten Agenten
 
-Nächster sinnvoller Schritt ist **Phase 0**, nicht weitere UI-Implementierung:
+Stand 2026-07-12: Phasen 0–2 sind im Kern abgeschlossen (Rest: Demo-Daten,
+manueller Smoke-Test), Phasen 3–6 sind im Kern umgesetzt (`ProjectService`,
+`LaserService`, Bild-/Text-/Geometrie-Workflows über die Session; die nativen
+Duplikate `native/src/{project,laser}.rs` sind gelöscht), Phase 7 ist begonnen
+(UiAction-Grenze vollständig, canvas-/render-Zerlegung abgeschlossen,
+`app.rs` ~1190 Zeilen als Composition-Root).
 
-1. `git status --short` lesen und die vorhandenen Native-Änderungen schützen.
-2. Die vollständige Inventur in `docs/native_function_matrix.md` gegen die
-   aktuelle UI prüfen und Statusabweichungen ergänzen.
-3. Native-Buttons den Funktionen zuordnen und Attrappen deaktivieren.
-4. Danach den dort beschriebenen minimalen `luxifer-application`-Schnitt
-   umsetzen.
+Ausdrücklich **offen** (nicht als fertig behandeln):
+
+- Preview/Simulation: read-only Preview-Reiter existiert (Cut/Fill/Travel);
+  verarbeitete Rastertexturen, Legende und Simulation fehlen (D2).
+- Trace (Bild → Vektor).
+- Pattern Fill (Core-Op vorhanden; UI/Parameterdialog fehlt — Stub).
+- Bridge/Haltesteg (Stub) und Ecken-Fillet.
+- Bézier-Node-Editing (Anlegen vorhanden; Hit-Test/Knoten ziehen/teilen/
+  löschen/glatt-eckig fehlen).
+- Projektbrowser: Versionsliste, Thumbnails, Umbenennen/Detailbereich in der
+  UI (Dienstmethoden existieren; Bedienungsliste E4).
+- Laser Ping/Verbindungsstatus/Position.
+- Live-Bildvorschau im Bildparameter-Dialog.
+- Demo-Startinhalt und „Aztec laden“ hinter einen Dev-Modus stellen.
+
+Nächste sinnvolle Schnitte in dieser Reihenfolge: E4 (Projektbrowser mit
+Detailbereich/Versionen), dann D2 (Preview vervollständigen), dann die Stubs
+(Trace/Pattern Fill/Bridge) und Bézier-Node-Editing. Arbeitsgrundlage ist
+`docs/native_todo_bedienung.md`; nach jedem Schnitt diese Liste, die
+Bedienungsliste und die Funktionsmatrix pflegen.
 
 Bei Unsicherheit gilt die Grenze aus ADR 0011: Core besitzt Fachregeln,
 Application besitzt Abläufe und Ressourcenkoordination, Native besitzt nur
