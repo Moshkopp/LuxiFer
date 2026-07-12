@@ -96,5 +96,6 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   Konkave und offene Konturen behalten die robuste Selbstschnittbehandlung.
 - C1 (erledigt): RGBA-Textur und Shader waren korrekt. Der nachfolgende native
   Vektor-Fill-Pass behandelte jedoch `LayerMode::Image` als Füllkontur und malte
-  die rechteckige Bildfläche in der Layer-Kennfarbe über. Image-Layer werden nun
-  ausschließlich von `image_gpu` texturiert; ihr Konturrahmen bleibt sichtbar.
+  die rechteckige Bildfläche in der Layer-Kennfarbe über. Zusätzlich lag die
+  Textur vor dem opaken Bett. Die Reihenfolge ist nun Bett/Gitter → Bildtexturen
+  → Vektorgeometrie → Overlay; Image-Layer erzeugen keine Fill-Scanlines mehr.

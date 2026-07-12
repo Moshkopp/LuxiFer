@@ -36,6 +36,7 @@ pub struct Renderer {
     // der Zustand ändert — nicht pro Frame. Pan/Zoom lassen die Vertices
     // unberührt (die Projektion macht der Shader), daher bleiben sie gecacht.
     verts: Vec<crate::scene_geo::Vertex>,
+    background_end: u32,
     /// Render-Revision (aus dem Core) beim letzten Vertex-Aufbau.
     last_render_rev: u64,
     last_frame: Instant,
@@ -54,6 +55,7 @@ impl Renderer {
             egui_renderer,
             images: ImageStore::default(),
             verts: Vec::new(),
+            background_end: 0,
             // MAX erzwingt den Aufbau im ersten Frame (Core startet bei 0).
             last_render_rev: u64::MAX,
             last_frame: Instant::now(),
@@ -123,7 +125,9 @@ impl Renderer {
         let scene_changed = rev != self.last_render_rev;
         if scene_changed {
             self.last_render_rev = rev;
-            self.verts = base_vertices(scene.session);
+            let geometry = base_vertices(scene.session);
+            self.background_end = geometry.background_end;
+            self.verts = geometry.vertices;
             let verts = std::mem::take(&mut self.verts);
             self.gpu.upload_verts(&verts);
             self.verts = verts;
@@ -192,7 +196,9 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            // Bilder zuunterst, dann Linien/Fill, dann Handles.
+            // Opakes Bett/Gitter zuerst. Danach echte Bildtexturen, anschließend
+            // Vektor-Fills und Konturen; Handles bleiben ganz oben.
+            self.gpu.draw_canvas_range(&mut rp, 0..self.background_end);
             self.images.draw(
                 &mut rp,
                 &self.gpu.device,
@@ -201,7 +207,8 @@ impl Renderer {
                 scene.session,
                 &mut img_scratch,
             );
-            self.gpu.draw_canvas(&mut rp, count);
+            self.gpu
+                .draw_canvas_range(&mut rp, self.background_end..count);
             self.gpu.draw_overlay(&mut rp);
             // egui obendrauf (eigener Lebenszeit-Scope via forget_lifetime).
             let mut rp = rp.forget_lifetime();

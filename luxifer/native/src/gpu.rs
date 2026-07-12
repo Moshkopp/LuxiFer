@@ -243,14 +243,18 @@ impl Gpu {
 
     /// Zeichnet die hochgeladenen Linien in den Render-Pass (Clear + Canvas).
     /// egui zeichnet danach in denselben Encoder (siehe App).
-    pub fn draw_canvas<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>, count: u32) {
-        if count == 0 {
+    pub fn draw_canvas_range<'a>(
+        &'a self,
+        rp: &mut wgpu::RenderPass<'a>,
+        range: std::ops::Range<u32>,
+    ) {
+        if range.is_empty() {
             return;
         }
         rp.set_pipeline(&self.pipeline);
         rp.set_bind_group(0, &self.bind, &[]);
         rp.set_vertex_buffer(0, self.vbuf.slice(..));
-        rp.draw(0..count, 0..1);
+        rp.draw(range, 0..1);
     }
 }
 
