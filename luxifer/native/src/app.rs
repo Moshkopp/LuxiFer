@@ -16,7 +16,7 @@ use crate::camera::Camera;
 use crate::gpu::Gpu;
 use crate::scene_geo::{self, Vertex};
 use crate::tools::{Drag, LaserUi, Tool};
-use crate::ui;
+use crate::ui::{self, LayerDialogState, TextDialogState};
 
 /// Zeichnet ein gestricheltes Segment (Welt-mm) als kurze Striche. `scale` =
 /// Pixel pro mm, damit die Strichlänge am Bildschirm konstant wirkt.
@@ -97,32 +97,6 @@ pub struct App {
     pub layer_dialog: Option<LayerDialogState>,
     /// Verfügbare System-Fonts (einmalig gescannt, lazy).
     pub fonts: Vec<crate::fonts::FontEntry>,
-}
-
-/// Kurzlebiger Entwurf des Layer-Parameter-Dialogs. Native hält nur diesen
-/// Entwurf; die Wahrheit liegt im `AppState`. Speichern läuft über die Session,
-/// Abbrechen verwirft den Entwurf ohne Mutation.
-pub struct LayerDialogState {
-    pub index: usize,
-    pub params: LayerParams,
-}
-
-/// Zustand des Text-Dialogs.
-pub struct TextDialogState {
-    pub text: String,
-    pub size_mm: f64,
-    /// Index in `App::fonts`, oder None (kein Font gewählt).
-    pub font_idx: Option<usize>,
-}
-
-impl Default for TextDialogState {
-    fn default() -> Self {
-        Self {
-            text: "Text".into(),
-            size_mm: 20.0,
-            font_idx: None,
-        }
-    }
 }
 
 impl App {

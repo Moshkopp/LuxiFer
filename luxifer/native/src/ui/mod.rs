@@ -15,11 +15,13 @@ mod dialogs;
 mod layers;
 mod palette;
 mod project;
+mod state;
 mod status;
 mod tools;
 mod topbar;
 
 pub use action::UiAction;
+pub use state::{LayerDialogState, TextDialogState};
 
 use egui::Color32;
 

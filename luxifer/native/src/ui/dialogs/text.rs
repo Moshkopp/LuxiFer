@@ -1,7 +1,7 @@
 //! Text-Dialog: Eingabe, Font-Auswahl, Größe → Text als Pfad einfügen.
 
+use super::super::state::TextDialogState;
 use super::DialogOutcome;
-use crate::app::TextDialogState;
 
 /// Zeichnet das Fenster auf den Entwurf `st`; `font_names` ist die reine
 /// Anzeigeliste der Systemfonts (Index korrespondiert mit `st.font_idx`).
