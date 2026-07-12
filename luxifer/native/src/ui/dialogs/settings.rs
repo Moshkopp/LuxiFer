@@ -10,7 +10,9 @@
 //! wird. Zusätzlich schließen Esc und das Titel-✕ den Dialog immer.
 
 use egui::RichText;
-use luxifer_core::ui_settings::{GRID_SIZE_MAX, GRID_SIZE_MIN, INTENSITY_MAX, INTENSITY_MIN};
+use luxifer_core::ui_settings::{
+    GRID_SIZE_MAX, GRID_SIZE_MIN, INTENSITY_MAX, INTENSITY_MIN, SPLASH_MS_MAX, SPLASH_MS_MIN,
+};
 use luxifer_core::{LaserProfile, LaserRegistry, ScanOffsetPoint};
 
 use crate::ui::state::{SettingsDialogState, SettingsSection};
@@ -162,6 +164,19 @@ fn ui_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
 
             ui.label("Buttonfarbe");
             theme_color_row(ui, &mut s.theme.button);
+            ui.end_row();
+
+            ui.label("Splash beim Start");
+            ui.checkbox(&mut s.show_splash, "");
+            ui.end_row();
+
+            ui.label("Splash-Dauer (ms)");
+            ui.add_enabled(
+                s.show_splash,
+                egui::DragValue::new(&mut s.splash_ms)
+                    .range(SPLASH_MS_MIN..=SPLASH_MS_MAX)
+                    .speed(50),
+            );
             ui.end_row();
         });
 

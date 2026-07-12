@@ -1868,6 +1868,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "env_logger",
+ "image",
  "log",
  "luxifer-application",
  "luxifer-core",

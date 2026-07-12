@@ -45,6 +45,8 @@ pub struct App {
     pub project_save_dialog: Option<crate::ui::ProjectSaveDialogState>,
     /// Persistente GUI-Einstellungen (Arbeitsplatz, Theme, Raster) — ADR 0002.
     pub ui_settings: luxifer_core::UiSettings,
+    /// Laufender Start-Splash oder None (abgelaufen/übersprungen/deaktiviert).
+    pub splash: Option<crate::ui::Splash>,
     /// Offener Einstellungen-Dialog (Entwurf) oder None.
     pub settings_dialog: Option<crate::ui::SettingsDialogState>,
     /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
@@ -124,7 +126,9 @@ impl App {
         cam.viewport = viewport;
         cam.fit_bbox([0.0, 0.0, state.bed_w_mm, state.bed_h_mm], 0.85);
 
+        let ui_settings = luxifer_core::UiSettings::load();
         let mut app = Self {
+            splash: ui_settings.show_splash.then(crate::ui::Splash::new),
             window,
             session: EditorSession::new(state),
             canvas: CanvasState::new(cam),
@@ -138,7 +142,7 @@ impl App {
             project: luxifer_application::ProjectService::new(),
             toasts: Default::default(),
             project_save_dialog: None,
-            ui_settings: luxifer_core::UiSettings::load(),
+            ui_settings,
             settings_dialog: None,
             project_browser: Default::default(),
             preview_material: Default::default(),
@@ -179,6 +183,22 @@ impl App {
     }
 
     pub fn window_event(&mut self, event: &WindowEvent) -> bool {
+        // Splash aktiv: Klick/Taste überspringt ihn nur — nichts sickert zur
+        // App oder zu egui durch. Alles andere (Resize, Cursor) läuft normal.
+        if self.splash.is_some() {
+            let skip = match event {
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    ..
+                } => true,
+                WindowEvent::KeyboardInput { event, .. } => event.state == ElementState::Pressed,
+                _ => false,
+            };
+            if skip {
+                self.splash = None;
+                return true;
+            }
+        }
         // egui zuerst — verschluckt es das Event (Panel getroffen), geht es nicht
         // an den Canvas.
         let resp = self.renderer.on_window_event(&self.window, event);
@@ -269,6 +289,7 @@ impl App {
             || self.settings_dialog.is_some()
             || self.pending_project.is_some()
             || self.close_pending
+            || self.splash.is_some()
     }
 
     /// Führt eine typisierte Tastatur-Aktion aus. Die Zuordnung Taste→Aktion

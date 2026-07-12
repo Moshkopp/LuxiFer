@@ -16,6 +16,7 @@ mod layers;
 mod palette;
 mod preview;
 mod project;
+mod splash;
 mod state;
 mod status;
 mod toast;
@@ -23,6 +24,7 @@ mod tools;
 mod topbar;
 
 pub use action::UiAction;
+pub use splash::Splash;
 pub use state::{
     CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState,
     PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState, SettingsDialogState,
@@ -371,6 +373,13 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
 
     // Toasts zuletzt, damit sie über allen Panels liegen.
     app.toasts.show(ctx);
+
+    // Start-Splash zuoberst (Tooltip-Ebene); nach Ablauf wegwerfen.
+    if let Some(splash) = app.splash.as_mut() {
+        if !splash.show(ctx, app.ui_settings.splash_ms) {
+            app.splash = None;
+        }
+    }
 }
 
 /// Hält den Detail-/Vorschau-Cache des Projektbrowsers aktuell. Cache-Schlüssel
