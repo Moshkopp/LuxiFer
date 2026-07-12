@@ -1,7 +1,8 @@
 //! Laser-Bedienpanel in egui, nach dem frischen Svelte-Design (ADR 0007 +
 //! Redesign): Ampel-Grid (Start grün / Pause orange / Stopp rot / Ursprung blau /
 //! Rahmen · Gummiband), Job-Parameter, Job-Nullpunkt-Anker (3×3), Jog-Kreuz +
-//! Slider. Ohne echten Treiber-Anschluss im Umbau — Aktionen loggen vorerst.
+//! Slider. Die Kacheln lösen `UiAction::LaserRun` aus; der Root führt sie über
+//! den `LaserService` aus (echte Treiber-Aktionen, hardwarelos getestet).
 
 use egui::{Color32, RichText, Sense, Vec2};
 use luxifer_core::{JobAction, StartMode};
@@ -95,24 +96,28 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
             .find(|(id, _)| *id == view.active_id)
             .map(|(_, l)| l.clone())
             .unwrap_or_else(|| "—".into());
+        // Rechts-nach-links: erst der „Verwalten"-Knopf am Panelrand, dann
+        // füllt die Combo exakt den Rest — nichts läuft über die Panelbreite.
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("laser_sel")
-                .selected_text(active_label)
-                .width(ui.available_width() - 34.0)
-                .show_ui(ui, |ui| {
-                    for (id, label) in &view.profiles {
-                        if ui.selectable_label(*id == view.active_id, label).clicked() {
-                            actions.push(UiAction::LaserSelect(id.clone()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button("Verwalten")
+                    .on_hover_text("Laser verwalten")
+                    .clicked()
+                {
+                    actions.push(UiAction::OpenLaserSettings { edit_active: true });
+                }
+                egui::ComboBox::from_id_salt("laser_sel")
+                    .selected_text(active_label)
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for (id, label) in &view.profiles {
+                            if ui.selectable_label(*id == view.active_id, label).clicked() {
+                                actions.push(UiAction::LaserSelect(id.clone()));
+                            }
                         }
-                    }
-                });
-            if ui
-                .button("Verwalten")
-                .on_hover_text("Laser verwalten")
-                .clicked()
-            {
-                actions.push(UiAction::OpenLaserSettings { edit_active: true });
-            }
+                    });
+            });
         });
     }
     ui.add_space(10.0);
@@ -149,6 +154,12 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     ui.checkbox(&mut ui_state.selection_only, "Nur Auswahl lasern");
     if view.can_export && ui.button("Als Datei exportieren").clicked() {
         actions.push(UiAction::LaserExport);
+    }
+    // Treiber-Rückmeldung direkt bei den Job-Kacheln — dahin schaut man nach
+    // einem Klick auf Start/Stopp/Rahmen.
+    if !view.msg.is_empty() {
+        ui.add_space(4.0);
+        ui.label(RichText::new(&view.msg).small().weak());
     }
 
     ui.add_space(8.0);
@@ -200,14 +211,6 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     ui.add_space(8.0);
     slider_row(ui, "Schritt", "mm", &mut ui_state.jog_step, 0.1, 100.0);
     slider_row(ui, "Speed", "mm/s", &mut ui_state.jog_speed, 1.0, 1000.0);
-
-    // Statuszeile: letzte Treiber-Rückmeldung.
-    if !view.msg.is_empty() {
-        ui.add_space(8.0);
-        ui.separator();
-        ui.add_space(4.0);
-        ui.label(RichText::new(&view.msg).small().weak());
-    }
 
     actions
 }

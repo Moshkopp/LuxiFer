@@ -156,19 +156,37 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             };
             let layer_rows: Vec<layers::LayerRow> = layer_rows(app);
             let laser_editable = app.canvas.laser_editable_layers.clone().unwrap_or_default();
+            // Der Inspector-Inhalt (Laserpanel + Ebenen) ist länger als kleine
+            // Fenster: vertikal scrollen, ohne die Breite schrumpfen zu lassen
+            // (auto_shrink false hält die Zeilen exakt auf Panelbreite).
             let right = egui::SidePanel::right("inspector")
                 .default_width(340.0)
                 .width_range(300.0..=460.0)
                 .resizable(true)
                 .show(ctx, |ui| {
-                    ui.add_space(6.0);
-                    if let Some(view) = &laser_view {
-                        let mut actions = laserpanel::show(ui, view, &mut app.laser);
-                        actions.extend(layers::laser_edit_layers(ui, &layer_rows, &laser_editable));
-                        actions
-                    } else {
-                        layers::layers_panel(ui, &layer_rows)
-                    }
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add_space(6.0);
+                            if let Some(view) = &laser_view {
+                                let mut actions = laserpanel::show(ui, view, &mut app.laser);
+                                // Volle Ebenenliste auch im Laser-Tab: Job an/aus,
+                                // Parameter und Reihenfolge gehören zur Brennvorbereitung.
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.add_space(6.0);
+                                actions.extend(layers::layers_panel(ui, &layer_rows));
+                                actions.extend(layers::laser_edit_layers(
+                                    ui,
+                                    &layer_rows,
+                                    &laser_editable,
+                                ));
+                                actions
+                            } else {
+                                layers::layers_panel(ui, &layer_rows)
+                            }
+                        })
+                        .inner
                 });
             app.right_w = right.response.rect.width();
             for action in right.inner {
