@@ -7,6 +7,7 @@
 resolver = "2"
 members = [
     "luxifer/core",
+    "luxifer/application",
     "luxifer/native",
     "luxifer/drivers/grbl",
     "luxifer/drivers/ruida",
