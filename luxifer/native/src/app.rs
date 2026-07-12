@@ -523,9 +523,9 @@ impl App {
         }
     }
 
-    /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset öffnen einen
-    /// Parameterdialog (Variante bzw. Distanz/Radius); Bridge/Muster brauchen
-    /// Interaktion/mehr Parameter und melden das vorerst.
+    /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset/Muster
+    /// öffnen einen Parameterdialog; Bridge braucht eine eigene Geste und
+    /// meldet das vorerst.
     pub fn begin_action(&mut self, a: crate::tools::ToolAction) {
         use crate::tools::ToolAction as A;
         match a {
@@ -533,10 +533,7 @@ impl App {
             A::Fillet => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Fillet)),
             A::Offset => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Offset)),
             A::PatternFill => {
-                self.app_error = Some(AppError::new(
-                    "not_migrated",
-                    "Muster-Füllung ist noch nicht migriert.",
-                ))
+                self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::PatternFill))
             }
             A::Bridge => {
                 self.app_error = Some(AppError::new(
@@ -558,6 +555,7 @@ impl App {
             GeoOpKind::Boolean => self.session.boolean(st.bool_op),
             GeoOpKind::Offset => self.session.offset(st.distance),
             GeoOpKind::Fillet => self.session.fillet(st.radius),
+            GeoOpKind::PatternFill => self.session.pattern_fill(&st.fill),
         };
         match result {
             Ok(()) => true,

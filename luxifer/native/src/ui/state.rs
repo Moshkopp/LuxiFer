@@ -45,10 +45,12 @@ pub enum GeoOpKind {
     Boolean,
     Offset,
     Fillet,
+    PatternFill,
 }
 
 /// Entwurf des Geometrie-Parameterdialogs (Boolean-Variante, Offset-Distanz,
-/// Fillet-Radius). Reiner UI-Zustand; die Ausführung läuft über die Session.
+/// Fillet-Radius, Muster-Füllung). Reiner UI-Zustand; die Ausführung läuft
+/// über die Session.
 pub struct GeoOpDialogState {
     pub kind: GeoOpKind,
     /// Boolean-Variante (nur bei `Boolean`).
@@ -57,6 +59,8 @@ pub struct GeoOpDialogState {
     pub distance: f64,
     /// Radius in mm (Fillet).
     pub radius: f64,
+    /// Muster-Parameter (nur bei `PatternFill`).
+    pub fill: luxifer_core::pattern_fill::FillParams,
 }
 
 impl GeoOpDialogState {
@@ -66,6 +70,7 @@ impl GeoOpDialogState {
             bool_op: luxifer_core::BoolOp::Union,
             distance: 2.0,
             radius: 2.0,
+            fill: Default::default(),
         }
     }
 }

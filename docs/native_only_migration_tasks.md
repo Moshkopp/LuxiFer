@@ -378,8 +378,9 @@ Ziel: Alle produktiv benötigten Operationen mit expliziten Voraussetzungen.
 - [x] Offset und Fillet (Distanz-/Radiusdialog über Session).
 - [ ] Bridge und Ecken-Fillet (eigene Operationen; „nicht migriert").
 - [x] Nesting und Nest-Fill (über Session; feste 2 mm — Gap-Dialog optional).
-- [ ] Pattern Fill (Core hat `pattern_fill_selected`; UI/Parameterdialog offen)
-      und Coaster-Einfügen (über Session vorhanden).
+- [x] Pattern Fill (Parameterdialog über Session, validiert; leere Treffer
+      melden einen Fehler statt stiller No-Op) und Coaster-Einfügen (über
+      Session vorhanden).
 - [ ] Bézier/Spline: Anlegen (vorhanden), Segment-Hit-Test, Knoten teilen/
       löschen, glatt/eckig und Handles ziehen (Node-Editing offen).
 - [ ] Aktionen bei ungeeigneter Auswahl deaktivieren; Grund per Tooltip oder
@@ -619,7 +620,6 @@ Ausdrücklich **offen** (nicht als fertig behandeln):
 - Preview-Simulation (Scrubber/Abspielen): der Reiter selbst ist fertig
   (Cut/Fill/Travel, verarbeitete Rastertexturen, Legende — D2 abgeschlossen).
 - Trace (Bild → Vektor).
-- Pattern Fill (Core-Op vorhanden; UI/Parameterdialog fehlt — Stub).
 - Bridge/Haltesteg (Stub) und Ecken-Fillet.
 - Bézier-Node-Editing (Anlegen vorhanden; Hit-Test/Knoten ziehen/teilen/
   löschen/glatt-eckig fehlen).
@@ -629,8 +629,8 @@ Ausdrücklich **offen** (nicht als fertig behandeln):
 - Live-Bildvorschau im Bildparameter-Dialog.
 - Demo-Startinhalt und „Aztec laden“ hinter einen Dev-Modus stellen.
 
-Nächste sinnvolle Schnitte in dieser Reihenfolge: die Stubs
-(Trace/Pattern Fill/Bridge), dann Bézier-Node-Editing. Arbeitsgrundlage ist
+Nächste sinnvolle Schnitte in dieser Reihenfolge: Trace, Bridge (eigene
+Geste), dann Bézier-Node-Editing. Arbeitsgrundlage ist
 `docs/native_todo_bedienung.md`; nach jedem Schnitt diese Liste, die
 Bedienungsliste und die Funktionsmatrix pflegen.
 

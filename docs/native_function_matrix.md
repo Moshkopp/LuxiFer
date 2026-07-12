@@ -66,7 +66,7 @@ Quelle: `frontend/src-tauri/src/commands/shapes.rs`.
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
 | `import_vector_file` | Application/Core | über `EditorSession::import_path` | SVG/DXF mit Fehlerbehandlung; großer Import weiter beobachten |
-| `pattern_fill_op` | Core/Application | **offen** (Stub) | Core-Op vorhanden; UI meldet `not_migrated`; Parameterdialog fehlt |
+| `pattern_fill_op` | Core/Application | über `EditorSession::pattern_fill` | Parameterdialog (Muster/Abstände/Winkel/Größe); validiert; leere Treffer melden Fehler |
 | `add_spline` | Core/Application | über `EditorSession` | Abschluss/Abbruch, Fangzone am Startknoten, ein Core-Undo-Punkt |
 | `upload_font` | Application | **offen** | Zielverzeichnis, Namens-/Schreibfehler (Bedienungsliste G2) |
 | `list_fonts` | Application | eigene Native-Variante (`fonts.rs`) | eine kanonische Fontquelle herstellen |

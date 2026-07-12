@@ -28,7 +28,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
 | B1 | ERLEDIGT | P1 | Geschlossene konvexe Linienkonturen behalten beim Offset harte Miter-Ecken statt verrundeter Übergänge. |
-| B2 | FEHLT | P2 | Musterfüllung ist nur Stub. |
+| B2 | ERLEDIGT | P2 | Muster-Füllung mit Parameterdialog (Linien/Kreise/Langlöcher/Waben, Abstände, Winkel, Elementgröße); Füllung landet auf eigenem Layer, ein Undo-Schritt. |
 | B3 | FEHLT | P2 | Haltesteg ist nur Stub. |
 
 ## C. Bilder
@@ -90,6 +90,11 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 - A3 (erledigt): Eine bildschirmkonstante 10-px-Fangzone schließt Pfade ab drei
   Knoten. Overlay-Gummiband und Startmarker zeigen das Einrasten; Application
   erzeugt für Klick und Enter echte geschlossene Polyline-/Spline-/Bézier-Pfade.
+- B2 (erledigt): `EditorSession::pattern_fill` validiert Abstände/Größe/Winkel
+  und macht die stille Core-No-Op (keine geschlossene Kontur in der Auswahl)
+  als stabilen Fehler sichtbar. Der Dialog erweitert den bestehenden
+  GeoOp-Parameterdialog (vierte Variante); die Elementgröße ist bei „Linien"
+  deaktiviert, weil sie dort keine Bedeutung hat.
 - B1 (erledigt): `cavalier_contours` erzeugte standardmäßig runde Außen-Joins.
   Geschlossene konvexe Linienkonturen nutzen nun im Core Schnittpunkte
   benachbarter Parallelkanten (Miter); kollabierte Innenoffsets bleiben leer.

@@ -565,3 +565,63 @@ fn job_preview_ueberspringt_fehlende_assets_ohne_panik() {
     assert!(preview.rasters.is_empty());
     assert!(preview.moves.is_empty());
 }
+
+#[test]
+fn pattern_fill_fuellt_geschlossene_kontur_auf_eigenem_layer() {
+    let mut session = session_with_rect();
+    session.selected = vec![0];
+    let layers_before = session.state().layers.len();
+    let shapes_before = session.state().shapes.len();
+
+    session
+        .pattern_fill(&luxifer_core::pattern_fill::FillParams::default())
+        .expect("Füllung");
+
+    // Muster-Konturen entstanden, auf einem eigenen Layer (Farbe = Layer).
+    assert!(session.state().shapes.len() > shapes_before);
+    assert_eq!(session.state().layers.len(), layers_before + 1);
+
+    // Genau ein Undo-Schritt: rückgängig stellt den Ausgangszustand her.
+    assert!(session.undo());
+    assert_eq!(session.state().shapes.len(), shapes_before);
+}
+
+#[test]
+fn pattern_fill_weist_fehler_stabil_ab() {
+    use luxifer_core::pattern_fill::{FillParams, Pattern};
+
+    // Ohne Auswahl.
+    let mut session = session_with_rect();
+    session.selected = vec![];
+    let err = session.pattern_fill(&FillParams::default()).unwrap_err();
+    assert_eq!(err.code(), "selection_required");
+
+    // Ungültiger Abstand.
+    session.selected = vec![0];
+    let err = session
+        .pattern_fill(&FillParams {
+            gap_y: 0.0,
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert_eq!(err.code(), "pattern_gap");
+
+    // Ungültige Elementgröße bei Formen-Muster.
+    let err = session
+        .pattern_fill(&FillParams {
+            pattern: Pattern::Circles,
+            size: 0.0,
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert_eq!(err.code(), "pattern_size");
+
+    // Offene Kontur (Linie): nichts zu füllen → Fehler statt stiller No-Op.
+    let mut session = EditorSession::default();
+    let idx = session.add_line([0.0, 0.0], [50.0, 0.0]).expect("Linie");
+    session.selected = vec![idx];
+    let shapes_before = session.state().shapes.len();
+    let err = session.pattern_fill(&FillParams::default()).unwrap_err();
+    assert_eq!(err.code(), "pattern_no_closed");
+    assert_eq!(session.state().shapes.len(), shapes_before);
+}

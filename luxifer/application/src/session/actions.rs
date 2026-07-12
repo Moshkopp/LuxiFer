@@ -90,4 +90,43 @@ impl EditorSession {
         self.state.fillet_selected(radius);
         Ok(())
     }
+
+    /// Muster-Füllung der Auswahl (eigener Layer, ein Core-Undo). Ungültige
+    /// Parameter und eine Auswahl ohne geschlossene Konturen liefern einen
+    /// stabilen Fehler ohne Mutation.
+    pub fn pattern_fill(
+        &mut self,
+        params: &luxifer_core::pattern_fill::FillParams,
+    ) -> Result<(), AppError> {
+        use luxifer_core::pattern_fill::Pattern;
+        self.require_selection("Muster-Füllung")?;
+        let gap_ok = |g: f64| g.is_finite() && g > 0.0;
+        if !gap_ok(params.gap_x) || !gap_ok(params.gap_y) {
+            return Err(AppError::new(
+                "pattern_gap",
+                "Die Rasterabstände müssen größer als 0 mm sein.",
+            ));
+        }
+        // Die Elementgröße zählt nur bei Formen-Mustern; Linien haben keine.
+        if params.pattern != Pattern::Lines && !(params.size.is_finite() && params.size > 0.0) {
+            return Err(AppError::new(
+                "pattern_size",
+                "Die Elementgröße muss größer als 0 mm sein.",
+            ));
+        }
+        if !params.angle_deg.is_finite() {
+            return Err(AppError::new("pattern_angle", "Der Winkel ist ungültig."));
+        }
+        // Der Core füllt nur geschlossene Konturen und mutiert sonst nichts —
+        // das machen wir als Fehler sichtbar, statt still nichts zu tun.
+        let before = self.state.shapes.len();
+        self.state.pattern_fill_selected(params);
+        if self.state.shapes.len() == before {
+            return Err(AppError::new(
+                "pattern_no_closed",
+                "Die Auswahl enthält keine geschlossene Kontur — nichts zu füllen.",
+            ));
+        }
+        Ok(())
+    }
 }
