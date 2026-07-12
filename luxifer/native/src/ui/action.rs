@@ -64,6 +64,12 @@ pub enum UiAction {
     DeleteProject(String),
     /// Projekt mit diesem Namen exportieren (Zieldialog im Root).
     ExportProject(String),
+    /// Projekt umbenennen (`from` → `to`).
+    RenameProject { from: String, to: String },
+    /// Eine Version des offenen Projekts in den Canvas laden (Versions-ID).
+    OpenProjectVersion(String),
+    /// Eine Version des offenen Projekts löschen (Versions-ID).
+    DeleteProjectVersion(String),
     /// Haupt-Ansicht (Reiter) wechseln.
     SelectView(View),
     /// Einen Layer im Laser-Tab vorübergehend für Transformationen freigeben.

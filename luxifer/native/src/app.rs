@@ -35,6 +35,8 @@ pub struct App {
     pub project_msg: String,
     /// Puffer für den „Neues Projekt"-Namen im Projekt-Reiter.
     pub new_project_name: String,
+    /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
+    pub project_browser: crate::ui::ProjectBrowserState,
     pub laser: LaserUi,
     pub laser_backend: luxifer_application::LaserService,
     /// Letzte Laser-Rückmeldung (Statuszeile im Panel).
@@ -124,6 +126,7 @@ impl App {
             project: luxifer_application::ProjectService::new(),
             project_msg: String::new(),
             new_project_name: String::new(),
+            project_browser: Default::default(),
             laser: LaserUi::default(),
             laser_backend: luxifer_application::LaserService::load(),
             laser_msg: String::new(),
@@ -415,6 +418,9 @@ impl App {
             A::OpenProject(name) => self.project_open(&name),
             A::DeleteProject(name) => self.project_delete(&name),
             A::ExportProject(name) => self.project_export(&name),
+            A::RenameProject { from, to } => self.project_rename(&from, &to),
+            A::OpenProjectVersion(id) => self.project_open_version(&id),
+            A::DeleteProjectVersion(id) => self.project_delete_version(&id),
             A::SelectView(view) => {
                 self.view = view;
                 if view == crate::tools::View::Laser {
@@ -595,6 +601,8 @@ impl App {
         match self.pending_project.take() {
             Some(PendingProjectAction::New(name)) => self.do_project_new(&name),
             Some(PendingProjectAction::Open(name)) => self.do_project_open(&name),
+            Some(PendingProjectAction::OpenVersion(id)) => self.do_project_open_version(&id),
+            Some(PendingProjectAction::DeleteVersion(id)) => self.do_project_delete_version(&id),
             None => {}
         }
     }
@@ -622,20 +630,87 @@ impl App {
         self.should_exit
     }
 
+    /// Ersetzt den Editorzustand durch einen geladenen (Projekt/Version öffnen,
+    /// Beförderung nach Versionslöschung) und setzt Renderer/Kamera/Akzent nach.
+    fn replace_editor_state(&mut self, state: AppState) {
+        self.session.replace_state(state);
+        self.refresh_accent();
+        self.image_dirty = true;
+        // Der neue State führt seinen eigenen Revisionszähler; erzwinge den
+        // Vertex-Neuaufbau, statt auf einen zufälligen Zählervergleich zu
+        // vertrauen.
+        self.renderer.invalidate_scene();
+        self.fit_all();
+    }
+
     /// Projekt öffnen: ersetzt den Editorzustand durch den geladenen.
     fn do_project_open(&mut self, name: &str) {
         match self.project.open(name) {
             Ok(state) => {
-                self.session.replace_state(state);
-                self.refresh_accent();
-                self.image_dirty = true;
-                // Der neue State führt seinen eigenen Revisionszähler; erzwinge
-                // den Vertex-Neuaufbau, statt auf einen zufälligen
-                // Zählervergleich zu vertrauen.
-                self.renderer.invalidate_scene();
-                self.fit_all();
+                self.replace_editor_state(state);
                 self.project_msg = format!("Geöffnet: {name}");
                 self.view = crate::tools::View::Design;
+            }
+            Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Eine Version des offenen Projekts laden: ersetzt den Editorzustand
+    /// (Dirty-Guard wie beim Öffnen).
+    pub fn project_open_version(&mut self, id: &str) {
+        if self.session.is_dirty() {
+            self.pending_project = Some(PendingProjectAction::OpenVersion(id.to_string()));
+        } else {
+            self.do_project_open_version(id);
+        }
+    }
+
+    fn do_project_open_version(&mut self, id: &str) {
+        match self.project.open_version(id) {
+            Ok(state) => {
+                self.replace_editor_state(state);
+                self.project_msg = "Version geladen.".into();
+                self.view = crate::tools::View::Design;
+            }
+            Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Eine Version löschen. Trifft es die AKTUELLE Version, befördert der Core
+    /// die vorherige in den Canvas — das ersetzt den Editorzustand, also greift
+    /// dafür der Dirty-Guard.
+    pub fn project_delete_version(&mut self, id: &str) {
+        let deletes_current = self.project.current_version_id() == Some(id);
+        if deletes_current && self.session.is_dirty() {
+            self.pending_project = Some(PendingProjectAction::DeleteVersion(id.to_string()));
+            return;
+        }
+        self.do_project_delete_version(id);
+    }
+
+    fn do_project_delete_version(&mut self, id: &str) {
+        match self.project.delete_version(id) {
+            Ok(Some(state)) => {
+                // Die aktuelle Version wurde gelöscht: Canvas auf die vom Core
+                // beförderte Version setzen, sonst zeigt er veraltete Geometrie.
+                self.replace_editor_state(state);
+                self.project_msg = "Version gelöscht — vorherige Version geladen.".into();
+            }
+            Ok(None) => self.project_msg = "Version gelöscht.".into(),
+            Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Projekt umbenennen (Browser-Detailbereich). Hält die Browserauswahl auf
+    /// dem neuen Namen, damit der Detailbereich nicht leer springt.
+    pub fn project_rename(&mut self, from: &str, to: &str) {
+        match self.project.rename(from, to) {
+            Ok(()) => {
+                let to = to.trim();
+                if self.project_browser.selected.as_deref() == Some(from) {
+                    self.project_browser.selected = Some(to.to_string());
+                }
+                self.project_msg = format!("Umbenannt: {from} → {to}");
             }
             Err(error) => self.app_error = Some(error),
         }

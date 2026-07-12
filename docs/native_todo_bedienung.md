@@ -53,7 +53,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | E1 | ERLEDIGT | P1 | Rechtes Panel ist mit 340 px sinnvoll vorbelegt und zwischen 300–460 px responsiv verstellbar. |
 | E2 | ERLEDIGT | P2 | Layer erscheinen als lesbare Inspector-Karten mit Name, Modus, Objektzahl und ausgeschriebenen Zuständen. |
 | E3 | ERLEDIGT | P2 | Laser-Tab erzwingt Auswahl, sperrt Zeichnen/Löschen und gibt Layer nur temporär für Verschieben/Skalieren/Drehen frei. |
-| E4 | UX | P1 | Projektmanager unbrauchbar: nur eine überbreite Liste, keine Details, keine Thumbnails. |
+| E4 | ERLEDIGT | P1 | Projektbrowser ist Master-Detail: Liste links, rechts Metadaten, Vektor-Miniatur, Umbenennen, Export, zweistufiges Löschen und Versionsliste (Laden/Löschen). PNG-Thumbnails pro Version bleiben offen. |
 
 ## F. Header / Werkzeug-Zugänge
 
@@ -111,6 +111,16 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   nutzen vorläufig die bereits gecachte Design-Textur, damit große Assets den
   Reiter nicht durch unsichtbare Rasterberechnung blockieren. Die verarbeitete
   Rastertextur und erklärende Preview-UI folgen separat.
+- E4 (erledigt): Der Browser zeigt links die wählbare Projektliste (Doppelklick
+  öffnet), rechts den Detailbereich aus `ProjectService::detail`: Metadaten,
+  eine live gezeichnete Vektor-Miniatur (`peek_state`, beim offenen Projekt die
+  Session), Umbenennen-Entwurf, Export und zweistufiges Löschen. Die
+  Versionsliste lädt/löscht Versionen des offenen Projekts; das Löschen der
+  aktuellen Version ersetzt den Canvas durch die vom Core beförderte Version
+  (Service-Bug behoben: der beförderte Zustand wurde zuvor verworfen) und läuft
+  wie Version-Laden über den Dirty-Guard. Statt gespeicherter PNG-Thumbnails
+  gibt es die Live-Miniatur; PNG-Thumbnails pro Version (Speicherpfad ist im
+  Core vorhanden) bleiben als Feinarbeit offen.
 - E1/E2 (erledigt): Der Inspector ist breiter und resizbar. Layer-Karten trennen
   Identität (Farbe/Name/Modus/Objektzahl), Zustände (Sichtbar/Job/Gesperrt/Luft)
   und Reihenfolge klar; der Name öffnet den Parameterdialog direkt.

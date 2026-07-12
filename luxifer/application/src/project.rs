@@ -18,6 +18,35 @@ use luxifer_core::{
 
 use crate::AppError;
 
+/// UI-unabhängige Detailsicht eines Projekts für den Browser: Metadaten und
+/// Versionsliste, ohne Geometrie. Kommt für das offene Projekt aus dem
+/// Speicher, sonst aus einer nur-lesenden Dateiladung.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectDetail {
+    pub name: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub created_at: String,
+    pub modified_at: String,
+    pub versions: Vec<VersionInfo>,
+    /// ID der aktuellen Version (die, die im Canvas landet).
+    pub current_version: String,
+}
+
+impl ProjectDetail {
+    fn from_file(pf: &ProjectFile) -> Self {
+        Self {
+            name: pf.name.clone(),
+            description: pf.description.clone(),
+            tags: pf.tags.clone(),
+            created_at: pf.created_at.clone(),
+            modified_at: pf.modified_at.clone(),
+            versions: pf.versions.clone(),
+            current_version: pf.current_version.clone(),
+        }
+    }
+}
+
 /// Hält das offene Projekt und dessen Ablageort. Ohne offenes Projekt ist der
 /// Arbeitsstand „namenlos" (erst Anlegen/Speichern vergibt einen Namen).
 #[derive(Default)]
@@ -58,6 +87,41 @@ impl ProjectService {
             .as_ref()
             .map(|p| p.versions.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// ID der aktuellen Version des offenen Projekts.
+    pub fn current_version_id(&self) -> Option<&str> {
+        self.open.as_ref().map(|p| p.current_version.as_str())
+    }
+
+    /// Detailsicht eines Projekts für den Browser (Metadaten + Versionen),
+    /// ohne das offene Projekt zu wechseln. Für das offene Projekt kommt die
+    /// Sicht aus dem Speicher, sonst wird die Projektdatei nur gelesen.
+    pub fn detail(&self, name: &str) -> Result<ProjectDetail, AppError> {
+        if let Some(pf) = self.open.as_ref().filter(|p| p.name == name) {
+            return Ok(ProjectDetail::from_file(pf));
+        }
+        let pf = ProjectFile::load_by_name(&Self::dir(), name).map_err(|e| {
+            AppError::wrap(
+                "project_read",
+                format!("Projekt {name} konnte nicht gelesen werden."),
+                e,
+            )
+        })?;
+        Ok(ProjectDetail::from_file(&pf))
+    }
+
+    /// Zustand eines Projekts nur lesen (z. B. für eine Vorschau im Browser).
+    /// Wechselt das offene Projekt **nicht** und mutiert nichts.
+    pub fn peek_state(&self, name: &str) -> Result<AppState, AppError> {
+        let pf = ProjectFile::load_by_name(&Self::dir(), name).map_err(|e| {
+            AppError::wrap(
+                "project_read",
+                format!("Projekt {name} konnte nicht gelesen werden."),
+                e,
+            )
+        })?;
+        Ok(pf.into_state())
     }
 
     // ---- Lebenszyklus -------------------------------------------------------
@@ -126,13 +190,16 @@ impl ProjectService {
         Ok(state)
     }
 
-    /// Eine Version löschen. Die aktuelle/letzte Version schützt der Core.
-    pub fn delete_version(&mut self, version_id: &str) -> Result<(), AppError> {
+    /// Eine Version löschen. Die letzte Version schützt der Core. War es die
+    /// **aktuelle** Version, befördert der Core die vorherige und gibt deren
+    /// Zustand zurück — der Aufrufer MUSS den Canvas dann darauf setzen, sonst
+    /// zeigt der Editor stillschweigend veraltete Geometrie.
+    pub fn delete_version(&mut self, version_id: &str) -> Result<Option<AppState>, AppError> {
         let pf = self.require_open_mut()?;
-        pf.delete_version(&Self::dir(), version_id).map_err(|e| {
+        let promoted = pf.delete_version(&Self::dir(), version_id).map_err(|e| {
             AppError::wrap("version_delete", "Version konnte nicht gelöscht werden.", e)
         })?;
-        Ok(())
+        Ok(promoted.map(|snap| snap.into_state()))
     }
 
     /// Projekt umbenennen. Benennt das offene Projekt bei Bedarf mit um.

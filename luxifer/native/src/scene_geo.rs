@@ -30,8 +30,9 @@ fn col(rgb: [u8; 3], a: f32) -> [f32; 4] {
 }
 
 /// Weltpunkte einer Form inkl. Rotation (um den BBox-Mittelpunkt), wie der Core
-/// sie für Hit-Test/BBox verwendet.
-fn world_outline(shape: &luxifer_core::model::Shape) -> (Vec<(f64, f64)>, bool) {
+/// sie für Hit-Test/BBox verwendet. Auch die Projektbrowser-Miniatur nutzt das,
+/// damit es genau EINE Outline-Ableitung gibt.
+pub(crate) fn world_outline(shape: &luxifer_core::model::Shape) -> (Vec<(f64, f64)>, bool) {
     let (pts, closed) = shape.geo.outline_points();
     if shape.rotation.abs() <= f64::EPSILON {
         return (pts, closed);

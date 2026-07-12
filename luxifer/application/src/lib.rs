@@ -10,5 +10,5 @@ mod session;
 
 pub use error::AppError;
 pub use laser::LaserService;
-pub use project::ProjectService;
+pub use project::{ProjectDetail, ProjectService};
 pub use session::{BoxShape, EditorSession, LayerParams, LayerToggle, PointPath};

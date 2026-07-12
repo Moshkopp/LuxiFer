@@ -119,15 +119,15 @@ Native-Duplikat `native/src/project.rs` ist gelöscht; kanonisch ist der
 | `save_project` | Application/Core | `ProjectService::save` | in-place (Strg+S-Workflow); **offen:** Thumbnail, atomarer Teilfehlerpfad |
 | `save_version` | Application/Core | `ProjectService::save_version` | **offen:** Notiz und Thumbnail (Dienst übergibt leeres PNG) |
 | `open_project` | Application/Core | `ProjectService::open` | Öffnen-Fehler lässt bisheriges Projekt erhalten (Test) |
-| `open_version` | Application/Core | Dienst vorhanden, **UI offen** | Version wird kanonischer Sessionzustand; Versionsliste fehlt (E4) |
-| `delete_version` | Application/Core | Dienst vorhanden, **UI offen** | aktuelle/letzte Version schützt der Core |
+| `open_version` | Application/Core | Dienst + Versionsliste im Browser | ersetzt den Canvas über den Dirty-Guard; „Laden" nur beim offenen Projekt |
+| `delete_version` | Application/Core | Dienst + Browser (zweistufig) | letzte Version schützt der Core; Löschen der aktuellen ersetzt den Canvas durch die beförderte Version (Dirty-Guard) |
 | `project_list` | Application/Core | `ProjectService::list` | Metadaten/Sortierung; beschädigte Projekte weiter prüfen |
-| `project_detail` | Application/Core | **offen** | Detailbereich mit Versionen/Metadaten im Browser (E4) |
+| `project_detail` | Application/Core | `ProjectService::detail` + Browser | Metadaten/Versionen ohne Wechsel des offenen Projekts; Cache verfällt über `modified_at`/`render_rev` |
 | `project_assets` | Application/Core | über Core-`ProjectFile` | siehe Bilder/Assets |
-| `project_thumb` | Application/Core | **offen** | Thumbnails werden noch nicht erzeugt; fehlend = normaler Zustand |
-| `version_thumb` | Application/Core | **offen** | siehe `project_thumb` |
-| `project_delete` | Application/Core | `ProjectService::delete` + Browser-UI | offenes Projekt und I/O-Fehler behandelt |
-| `project_rename` | Application/Core | Dienst vorhanden, **UI offen** | Kollision/offenes Projekt im Dienst; Umbenennen-Dialog fehlt (E4) |
+| `project_thumb` | Application/Core | Live-Vektor-Miniatur statt PNG | Browser zeichnet aus `peek_state`; gespeicherte PNG-Thumbnails **offen** |
+| `version_thumb` | Application/Core | **offen** | PNG pro Version; Core-Speicherpfad vorhanden, Dienst übergibt leeres PNG |
+| `project_delete` | Application/Core | `ProjectService::delete` + Browser-UI | zweistufige Bestätigung; offenes Projekt und I/O-Fehler behandelt |
+| `project_rename` | Application/Core | Dienst + Umbenennen-Entwurf im Browser | Kollision/offenes Projekt im Dienst; Auswahl folgt dem neuen Namen |
 | `project_export` | Application/Core | `ProjectService::export` + Browser-UI | nativer Zieldialog; vollständige Assets/Versionen |
 
 ## Laser, Job und Geräte

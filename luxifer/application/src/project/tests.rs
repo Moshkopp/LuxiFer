@@ -102,6 +102,78 @@ fn version_anlegen_und_auflisten() {
 }
 
 #[test]
+fn detail_und_peek_wechseln_nichts() {
+    let _g = with_temp_dir("detail_peek");
+    let mut svc = ProjectService::new();
+    let state = state_with_rect();
+    svc.new_project(&state, "A").unwrap();
+    svc.new_project(&state, "B").unwrap();
+    assert_eq!(svc.open_name(), Some("B"));
+
+    // Detail eines NICHT offenen Projekts: nur lesen, offenes bleibt.
+    let d = svc.detail("A").unwrap();
+    assert_eq!(d.name, "A");
+    assert_eq!(d.versions.len(), 1);
+    assert_eq!(d.current_version, d.versions[0].id);
+    assert_eq!(svc.open_name(), Some("B"));
+
+    // Detail des offenen Projekts kommt aus dem Speicher.
+    let d = svc.detail("B").unwrap();
+    assert_eq!(d.name, "B");
+
+    // Peek liefert den Zustand, ohne das offene Projekt zu wechseln.
+    let peeked = svc.peek_state("A").unwrap();
+    assert_eq!(peeked.shapes.len(), state.shapes.len());
+    assert_eq!(svc.open_name(), Some("B"));
+
+    // Unbekanntes Projekt scheitert sauber.
+    assert_eq!(svc.detail("nix").unwrap_err().code(), "project_read");
+    assert_eq!(svc.peek_state("nix").unwrap_err().code(), "project_read");
+}
+
+#[test]
+fn version_loeschen_befoerdert_bei_aktueller() {
+    let _g = with_temp_dir("version_delete");
+    let mut svc = ProjectService::new();
+    let v1_state = state_with_rect();
+    svc.new_project(&v1_state, "V").unwrap();
+
+    // Zweite Version mit zusätzlicher Form anlegen; sie wird die aktuelle.
+    let mut v2_state = state_with_rect();
+    v2_state.add_shape(Geo::Rect {
+        x: 50.0,
+        y: 50.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    svc.save_version(&v2_state).unwrap();
+    let v2_id = svc.current_version_id().unwrap().to_string();
+    let v1_id = svc
+        .versions()
+        .iter()
+        .find(|v| v.id != v2_id)
+        .unwrap()
+        .id
+        .clone();
+
+    // Nicht-aktuelle Version löschen: kein Zustandswechsel nötig.
+    svc.save_version(&v2_state).unwrap(); // dritte Version, damit V1 löschbar
+    assert!(svc.delete_version(&v1_id).unwrap().is_none());
+
+    // Aktuelle Version löschen: der beförderte Zustand kommt zurück.
+    let current = svc.current_version_id().unwrap().to_string();
+    let promoted = svc.delete_version(&current).unwrap();
+    assert!(promoted.is_some());
+
+    // Letzte Version ist geschützt.
+    let last = svc.current_version_id().unwrap().to_string();
+    assert_eq!(
+        svc.delete_version(&last).unwrap_err().code(),
+        "version_delete"
+    );
+}
+
+#[test]
 fn umbenennen_und_loeschen() {
     let _g = with_temp_dir("rename_delete");
     let mut svc = ProjectService::new();

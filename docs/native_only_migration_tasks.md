@@ -281,10 +281,10 @@ Ziel: Verlustfreies Arbeiten und vollständiger Datei-/Asset-Lebenszyklus.
 - [x] Eine kanonische `ProjectService`-Implementierung in Application
       hergestellt; `native/src/project.rs` gelöscht.
 - [x] Neues Projekt, Liste, Öffnen, Speichern und „Neue Version“.
-- [x] Umbenennen, Löschen, Export von Projekten (im Dienst; UI-Aktionen im
-      Browser folgen als eigener Schnitt).
-- [x] Version öffnen/löschen (im Dienst: `open_version`/`delete_version`);
-      Versionsliste/Thumbnails in der UI folgen.
+- [x] Umbenennen, Löschen, Export von Projekten (Dienst + Browser-UI mit
+      Umbenennen-Entwurf und zweistufigem Löschen).
+- [x] Version öffnen/löschen (Dienst + Versionsliste im Browser-Detailbereich;
+      Dirty-Guard beim Ersetzen des Canvas; PNG-Thumbnails noch offen).
 - [x] Asset-Verzeichnis und `asset_id`-Referenzen unverändert (der Dienst nutzt
       die kanonische Core-API `ProjectFile`; keine Base64-Dauerablage).
 - [x] Manuell speichern beibehalten (kein Autosave; ADR 0003, Strg+S-Workflow).
@@ -312,8 +312,23 @@ in luxifer-application ersetzt das native `ProjectBackend`; Fehler über
 Öffnen/Export/Löschen im Browser. Validierung: 35 Application-Tests (7 Projekt-,
 1 Dirty-Guard-Test) und Clippy mit `-D warnings` grün.
 
-Offen (spätere Feinarbeit, blockiert Phase 4 nicht): Umbenennen-Dialog und
-Versionsliste/Detailansicht in der UI; atomisches Speichern bei Teilfehlern.
+Projektbrowser-Schnitt 2026-07-12 (E4): Master-Detail-Browser mit Auswahl-
+Liste, Detailbereich (`ProjectService::detail`, neu), live gezeichneter
+Vektor-Miniatur (`ProjectService::peek_state`, neu; nutzt dieselbe
+`world_outline`-Ableitung wie der Canvas), Umbenennen, Export, zweistufigem
+Löschen und Versionsliste (Laden/Löschen). Dabei Service-Bug behoben:
+`delete_version` verwarf den vom Core beförderten Zustand, wenn die aktuelle
+Version gelöscht wurde — jetzt gibt der Dienst `Option<AppState>` zurück und
+Native ersetzt den Canvas; Version-Laden und das Löschen der aktuellen Version
+laufen über den Dirty-Guard. Browserauswahl/Drafts sind reiner
+Native-Präsentationszustand; der Detail-Cache verfällt über den Schlüssel
+`name:modified_at` bzw. `name:rev<render_rev>` von selbst. Validierung: 293
+Workspace-Tests (49 Application) und Clippy mit `-D warnings` grün;
+Release-Smoke-Test ohne Panic.
+
+Offen (spätere Feinarbeit, blockiert Phase 4 nicht): atomisches Speichern bei
+Teilfehlern; PNG-Thumbnails pro Version (Core-Speicherpfad vorhanden, Dienst
+übergibt leeres PNG).
 
 ## Phase 4 — Import, Text und Bildbearbeitung
 
@@ -592,14 +607,14 @@ Ausdrücklich **offen** (nicht als fertig behandeln):
 - Bridge/Haltesteg (Stub) und Ecken-Fillet.
 - Bézier-Node-Editing (Anlegen vorhanden; Hit-Test/Knoten ziehen/teilen/
   löschen/glatt-eckig fehlen).
-- Projektbrowser: Versionsliste, Thumbnails, Umbenennen/Detailbereich in der
-  UI (Dienstmethoden existieren; Bedienungsliste E4).
+- Projektbrowser: PNG-Thumbnails pro Version (Master-Detail-Browser mit
+  Versionen/Umbenennen/Live-Miniatur ist seit dem E4-Schnitt umgesetzt).
 - Laser Ping/Verbindungsstatus/Position.
 - Live-Bildvorschau im Bildparameter-Dialog.
 - Demo-Startinhalt und „Aztec laden“ hinter einen Dev-Modus stellen.
 
-Nächste sinnvolle Schnitte in dieser Reihenfolge: E4 (Projektbrowser mit
-Detailbereich/Versionen), dann D2 (Preview vervollständigen), dann die Stubs
+Nächste sinnvolle Schnitte in dieser Reihenfolge: D2 (Preview
+vervollständigen: verarbeitete Rastertexturen + Legende), dann die Stubs
 (Trace/Pattern Fill/Bridge) und Bézier-Node-Editing. Arbeitsgrundlage ist
 `docs/native_todo_bedienung.md`; nach jedem Schnitt diese Liste, die
 Bedienungsliste und die Funktionsmatrix pflegen.

@@ -79,4 +79,52 @@ pub enum PendingProjectAction {
     New(String),
     /// Projekt mit diesem Namen öffnen.
     Open(String),
+    /// Eine Version des offenen Projekts laden (Versions-ID).
+    OpenVersion(String),
+    /// Die AKTUELLE Version löschen (Versions-ID) — der Core befördert dann
+    /// die vorherige in den Canvas, ersetzt also den Editorzustand.
+    DeleteVersion(String),
+}
+
+/// Präsentationszustand des Projektbrowsers: Auswahl, Umbenennen-Entwurf,
+/// Lösch-Bestätigungen und die gecachte Detail-/Vorschausicht. Reiner
+/// UI-Zustand — die Wahrheit liegt im `ProjectService`/Core.
+#[derive(Default)]
+pub struct ProjectBrowserState {
+    /// Im Browser markiertes Projekt (unabhängig vom offenen Projekt).
+    pub selected: Option<String>,
+    /// `Some` = Umbenennen-Feld ist sichtbar und hält den Namensentwurf.
+    pub rename_draft: Option<String>,
+    /// Zweistufiges Löschen des markierten Projekts („Wirklich löschen?").
+    pub confirm_delete: bool,
+    /// Zweistufiges Löschen einer Version (Versions-ID der ersten Stufe).
+    pub confirm_delete_version: Option<String>,
+    /// Gecachte Detailsicht + Vektor-Miniatur des markierten Projekts.
+    /// `cache_key` macht den Cache gegen Umbenennen/Speichern/Editieren stabil.
+    pub cached: Option<CachedProjectDetail>,
+}
+
+/// Gecachte Browser-Detailsicht: Metadaten/Versionen aus der Application und
+/// die daraus vorbereitete Vektor-Miniatur.
+pub struct CachedProjectDetail {
+    /// Schlüssel `name:modified_at` (bzw. `name:rev<render_rev>` beim offenen
+    /// Projekt), damit Änderungen den Cache automatisch verwerfen.
+    pub cache_key: String,
+    pub detail: luxifer_application::ProjectDetail,
+    pub preview: ProjectPreview,
+}
+
+/// Vorbereitete Vektor-Miniatur eines Projektzustands (Weltkoordinaten in mm;
+/// das Panel skaliert sie in seinen Vorschau-Rahmen).
+pub struct ProjectPreview {
+    /// Bettgröße (Breite, Höhe) in mm.
+    pub bed: (f32, f32),
+    pub outlines: Vec<PreviewOutline>,
+}
+
+/// Eine Shape-Kontur der Miniatur in Layer-Farbe.
+pub struct PreviewOutline {
+    pub points: Vec<(f32, f32)>,
+    pub closed: bool,
+    pub color: [u8; 3],
 }

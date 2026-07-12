@@ -22,8 +22,8 @@ mod topbar;
 
 pub use action::UiAction;
 pub use state::{
-    GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState, PendingProjectAction,
-    TextDialogState,
+    CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState,
+    PendingProjectAction, ProjectBrowserState, TextDialogState,
 };
 
 use egui::Color32;
@@ -101,10 +101,18 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             app.right_w = 0.0;
             let projects = app.project.list();
             let open_name = app.project.open_name().map(|s| s.to_string());
-            let draft = &mut app.new_project_name;
+            sync_project_browser(app, &projects, open_name.as_deref());
+            let dirty = app.session.is_dirty();
             let actions = egui::CentralPanel::default()
                 .show(ctx, |ui| {
-                    project::project_browser(ui, draft, &projects, open_name.as_deref())
+                    project::project_browser(
+                        ui,
+                        &mut app.new_project_name,
+                        &mut app.project_browser,
+                        &projects,
+                        open_name.as_deref(),
+                        dirty,
+                    )
                 })
                 .inner;
             for action in actions {
@@ -270,6 +278,8 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         let label = match pending {
             PendingProjectAction::New(_) => "Neues Projekt anlegen",
             PendingProjectAction::Open(_) => "Projekt öffnen",
+            PendingProjectAction::OpenVersion(_) => "Version laden",
+            PendingProjectAction::DeleteVersion(_) => "Löschen der aktuellen Version",
         };
         match dialogs::guard_dialog(ctx, label) {
             dialogs::DialogOutcome::None => {}
@@ -285,6 +295,69 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => app.confirm_close(),
             dialogs::DialogOutcome::Cancel => app.close_pending = false,
+        }
+    }
+}
+
+/// Hält den Detail-/Vorschau-Cache des Projektbrowsers aktuell. Cache-Schlüssel
+/// ist `name:modified_at` (beim offenen Projekt `name:rev<render_rev>`), so
+/// verfallen Details nach Speichern/Umbenennen/Editieren von selbst. Läuft im
+/// Root, weil nur er den `ProjectService` kennt; das Panel liest nur den Cache.
+fn sync_project_browser(
+    app: &mut App,
+    projects: &[luxifer_core::ProjectInfo],
+    open_name: Option<&str>,
+) {
+    // Auswahl validieren: gelöschte/umbenannte Projekte abwählen.
+    if let Some(sel) = app.project_browser.selected.clone() {
+        if !projects.iter().any(|p| p.name == sel) {
+            app.project_browser.selected = None;
+        }
+    }
+    let Some(sel) = app.project_browser.selected.clone() else {
+        app.project_browser.cached = None;
+        return;
+    };
+    let is_open = open_name == Some(sel.as_str());
+    let cache_key = if is_open {
+        format!("{sel}:rev{}", app.session.state().render_rev())
+    } else {
+        let modified = projects
+            .iter()
+            .find(|p| p.name == sel)
+            .map(|p| p.modified_at.as_str())
+            .unwrap_or("");
+        format!("{sel}:{modified}")
+    };
+    let cached_ok = app
+        .project_browser
+        .cached
+        .as_ref()
+        .is_some_and(|c| c.cache_key == cache_key);
+    if cached_ok {
+        return;
+    }
+    // Vorschau des offenen Projekts kommt aus der Session (aktueller als die
+    // Datei); für andere Projekte wird der Zustand nur-lesend geladen.
+    let preview = if is_open {
+        Ok(project::preview_from_state(app.session.state()))
+    } else {
+        app.project
+            .peek_state(&sel)
+            .map(|st| project::preview_from_state(&st))
+    };
+    match (app.project.detail(&sel), preview) {
+        (Ok(detail), Ok(preview)) => {
+            app.project_browser.cached = Some(CachedProjectDetail {
+                cache_key,
+                detail,
+                preview,
+            });
+        }
+        (Err(e), _) | (_, Err(e)) => {
+            app.app_error = Some(e);
+            app.project_browser.selected = None;
+            app.project_browser.cached = None;
         }
     }
 }
