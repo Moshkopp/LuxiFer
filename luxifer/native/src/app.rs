@@ -5,10 +5,10 @@
 use std::sync::Arc;
 
 use egui_wgpu::ScreenDescriptor;
-use luxifer_application::{AppError, BoxShape, EditorSession, LayerParams, LayerToggle, PointPath};
+use luxifer_application::{AppError, EditorSession, LayerParams, LayerToggle};
 use luxifer_core::geometry::Geo;
 use luxifer_core::state::AppState;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Window;
 
@@ -16,7 +16,7 @@ use crate::camera::Camera;
 use crate::canvas::CanvasState;
 use crate::gpu::Gpu;
 use crate::scene_geo::Vertex;
-use crate::tools::{Drag, LaserUi, Tool};
+use crate::tools::{Drag, LaserUi};
 use crate::ui::{self, LayerDialogState, TextDialogState};
 
 pub struct App {
@@ -197,11 +197,17 @@ impl App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let new = [position.x as f32, position.y as f32];
-                self.on_cursor_move(new);
-                self.canvas.cursor = new;
+                self.canvas.on_cursor_move(&mut self.session, new);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                self.on_mouse(*button, *state == ElementState::Pressed);
+                let added = self.canvas.on_mouse(
+                    &mut self.session,
+                    *button,
+                    *state == ElementState::Pressed,
+                );
+                if added {
+                    self.refresh_accent();
+                }
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let s = match delta {
@@ -265,229 +271,15 @@ impl App {
                     self.session.clear_selection();
                 }
             }
-            S::FinishPolygon => self.finish_polygon(),
+            S::FinishPolygon => {
+                if self.canvas.finish_polygon(&mut self.session) {
+                    self.refresh_accent();
+                }
+            }
             S::Undo => self.undo(),
             S::Redo => self.redo(),
             S::SelectTool(tool) => self.canvas.tool = tool,
             S::PanModifier(down) => self.canvas.space_down = down,
-        }
-    }
-
-    fn on_mouse(&mut self, button: MouseButton, pressed: bool) {
-        let w = self.canvas.world();
-        match button {
-            MouseButton::Middle => {
-                self.canvas.drag = if pressed { Drag::Pan } else { Drag::None };
-            }
-            MouseButton::Left if pressed => {
-                if self.canvas.space_down {
-                    self.canvas.drag = Drag::Pan;
-                    return;
-                }
-                match self.canvas.tool {
-                    Tool::Select | Tool::Node => self.begin_select(w),
-                    // Aufzieh-Werkzeuge (Zentrum/Ecke → Maus).
-                    Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Line | Tool::Measure => {
-                        self.canvas.drag = Drag::DrawBox { start: w }
-                    }
-                    // Punkt-für-Punkt-Werkzeuge sammeln in poly_pts.
-                    Tool::Polyline | Tool::Spline | Tool::Bezier => {
-                        self.canvas.poly_pts.push((w[0], w[1]))
-                    }
-                }
-            }
-            MouseButton::Left => {
-                // Loslassen: Zug abschließen.
-                self.finish_drag(w);
-            }
-            _ => {}
-        }
-    }
-
-    /// Kopie der aktuell selektierten Shapes (Index + Shape) — als Ausgangspunkt
-    /// für Resize/Rotate, damit vom Startzustand statt inkrementell gerechnet wird.
-    fn snapshot_selection(&self) -> Vec<(usize, luxifer_core::Shape)> {
-        self.session
-            .selected
-            .iter()
-            .filter_map(|&i| self.session.shapes.get(i).map(|s| (i, s.clone())))
-            .collect()
-    }
-
-    /// Stellt die Shapes aus einem Snapshot wieder her (vor jeder Transformation).
-    fn restore_snapshot(&mut self, orig: &[(usize, luxifer_core::Shape)]) {
-        for (i, s) in orig {
-            if let Some(dst) = self.session.shapes.get_mut(*i) {
-                *dst = s.clone();
-            }
-        }
-    }
-
-    fn begin_select(&mut self, w: [f64; 2]) {
-        // Zuerst: wurde ein Transform-Handle der aktuellen Auswahl getroffen?
-        if let Some(b) = self.session.selection_bbox() {
-            // etwas großzügiger als sichtbar; Handle-Geometrie aus canvas::overlay.
-            let pick = crate::canvas::overlay::handle_hw(self.canvas.cam.scale) as f64 * 1.8;
-            // Rotate-Handle?
-            let rp = crate::canvas::overlay::rotate_handle_pos(&b, self.canvas.cam.scale);
-            if (w[0] - rp[0]).hypot(w[1] - rp[1]) <= pick {
-                self.session.begin_edit();
-                let pivot = [b.x + b.w / 2.0, b.y + b.h / 2.0];
-                let angle = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
-                self.canvas.drag = Drag::Rotate {
-                    pivot,
-                    start_angle: angle,
-                    orig: self.snapshot_selection(),
-                };
-                return;
-            }
-            // Skalier-Handle?
-            for (handle, (hx, hy)) in luxifer_core::Handle::positions(&b) {
-                if (w[0] - hx).abs() <= pick && (w[1] - hy).abs() <= pick {
-                    self.session.begin_edit();
-                    self.canvas.drag = Drag::Resize {
-                        handle,
-                        start_box: b,
-                        orig: self.snapshot_selection(),
-                    };
-                    return;
-                }
-            }
-        }
-
-        let tol = 4.0 / self.canvas.cam.scale as f64;
-        let hit = self
-            .session
-            .select_at(w[0], w[1], tol, self.canvas.shift_down);
-        if self.canvas.shift_down {
-            self.canvas.drag = Drag::None;
-        } else if hit.is_some() {
-            self.session.begin_edit();
-            self.canvas.drag = Drag::MoveShapes { last: w };
-        } else {
-            self.canvas.drag = Drag::Marquee { start: w };
-        }
-    }
-
-    fn on_cursor_move(&mut self, new: [f32; 2]) {
-        let dx = new[0] - self.canvas.cursor[0];
-        let dy = new[1] - self.canvas.cursor[1];
-        let w = self.canvas.cam.screen_to_world(new);
-        // Erst die reinen Kamera-/Move-Fälle (kein Snapshot nötig).
-        match &mut self.canvas.drag {
-            Drag::Pan => {
-                self.canvas.cam.pan_pixels(dx, dy);
-                return;
-            }
-            Drag::MoveShapes { last } => {
-                let last = *last;
-                self.canvas.drag = Drag::MoveShapes { last: w };
-                self.session.translate_edit(w[0] - last[0], w[1] - last[1]);
-                return;
-            }
-            _ => {}
-        }
-        // Resize/Rotate: immer vom Snapshot (Ausgangszustand) rechnen, damit sich
-        // die Transformation nicht Schritt für Schritt aufschaukelt.
-        match std::mem::replace(&mut self.canvas.drag, Drag::None) {
-            Drag::Resize {
-                handle,
-                start_box,
-                orig,
-            } => {
-                self.restore_snapshot(&orig);
-                let mut target = luxifer_core::resize_to_cursor(start_box, handle, w);
-                // Eck-Handles halten standardmäßig das Seitenverhältnis; Shift
-                // löst es (frei). Kanten-Handles skalieren nur eine Achse.
-                if handle.is_corner() && !self.canvas.shift_down {
-                    target = luxifer_core::keep_aspect(start_box, handle, target);
-                }
-                self.session.scale_edit(start_box, target);
-                self.canvas.drag = Drag::Resize {
-                    handle,
-                    start_box,
-                    orig,
-                };
-            }
-            Drag::Rotate {
-                pivot,
-                start_angle,
-                orig,
-            } => {
-                self.restore_snapshot(&orig);
-                let a = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
-                let delta_deg = (a - start_angle).to_degrees();
-                self.session.rotate_edit(delta_deg);
-                self.canvas.drag = Drag::Rotate {
-                    pivot,
-                    start_angle,
-                    orig,
-                };
-            }
-            other => self.canvas.drag = other,
-        }
-    }
-
-    fn finish_drag(&mut self, w: [f64; 2]) {
-        match std::mem::replace(&mut self.canvas.drag, Drag::None) {
-            Drag::Marquee { start } => {
-                if (start[0] - w[0]).abs() > 1.0 || (start[1] - w[1]).abs() > 1.0 {
-                    self.session.select_rect(start, w);
-                }
-            }
-            Drag::DrawBox { start } => self.finish_box(start, w),
-            Drag::MoveShapes { .. } | Drag::Resize { .. } | Drag::Rotate { .. } => {
-                self.session.commit_edit();
-            }
-            _ => {}
-        }
-    }
-
-    fn finish_box(&mut self, a: [f64; 2], b: [f64; 2]) {
-        // Messen: nichts erzeugen (nur Anzeige während des Ziehens).
-        if self.canvas.tool == Tool::Measure {
-            return;
-        }
-        // Polygon: Form vom Zentrum `a` mit Radius = Abstand zur Maus aufziehen
-        // (wie Tauri: ondrawpolygon(shape, cx, cy, r, rot)).
-        if self.canvas.tool == Tool::Polygon {
-            if self
-                .session
-                .add_polygon(self.canvas.active_shape, a, b)
-                .is_some()
-            {
-                self.refresh_accent();
-            }
-            return;
-        }
-        // Linie: 2-Punkt-Polyline (auch bei kleinem Zug erlaubt).
-        if self.canvas.tool == Tool::Line {
-            if self.session.add_line(a, b).is_some() {
-                self.refresh_accent();
-            }
-            return;
-        }
-        let shape = match self.canvas.tool {
-            Tool::Ellipse => BoxShape::Ellipse,
-            _ => BoxShape::Rect,
-        };
-        if self.session.add_box_shape(shape, a, b).is_some() {
-            self.refresh_accent();
-        }
-    }
-
-    /// Schließt den punktbasierten Zug ab (Enter/Doppelklick). Je nach Werkzeug:
-    /// Polygon (geschlossen), Polylinie (offen), Spline (glatt), Bézier (Feder).
-    fn finish_polygon(&mut self) {
-        let pts = std::mem::take(&mut self.canvas.poly_pts);
-        let path = match self.canvas.tool {
-            Tool::Polyline => PointPath::Polyline,
-            Tool::Spline => PointPath::Spline,
-            Tool::Bezier => PointPath::Bezier,
-            _ => return,
-        };
-        if self.session.add_point_path(path, pts).is_some() {
-            self.refresh_accent();
         }
     }
 

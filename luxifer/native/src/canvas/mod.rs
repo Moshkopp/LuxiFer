@@ -9,6 +9,7 @@
 //!
 //! Beide sind reine Funktionen ohne GPU-/Eingabe-Bezug; sie lesen nur Zustand.
 
+pub mod gestures;
 pub mod overlay;
 pub mod scene;
 pub mod state;
