@@ -222,13 +222,19 @@ pub fn fill_rect(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex>
     ]
 }
 
-/// `major_mm` = Hauptraster aus den GUI-Settings; das Feinraster ist ein
-/// Fünftel davon (wie das alte 10/50-Verhältnis).
-pub fn bed_grid(w: f32, h: f32, major_mm: f32) -> Vec<Vertex> {
+/// `grid_mm` = Rasterweite aus den GUI-Settings = Abstand der FEINEN Linien
+/// (dieselbe Semantik wie der Tauri-Canvas); Hauptlinien alle 5 Schritte.
+/// Default-Settings (10 mm) ergeben das gewohnte 10/50-Bild.
+pub fn bed_grid(w: f32, h: f32, grid_mm: f32) -> Vec<Vertex> {
     // Bett-Fläche zuunterst, etwas heller als der Fenster-Hintergrund.
     let mut v = fill_rect(0.0, 0.0, w, h, [0.10, 0.11, 0.13, 1.0]);
-    let major = major_mm.max(1.0);
-    let minor = major / 5.0;
+    // Schutzkappe: mehr als ~200 Linien pro Richtung werden zur Tapete
+    // (der Puffer ist zoom-unabhängig gecacht, ausdünnen per Zoom gibt es
+    // hier nicht) — dann Schrittweite verdoppeln.
+    let mut minor = grid_mm.max(1.0);
+    while w.max(h) / minor > 200.0 {
+        minor *= 2.0;
+    }
     let fine = [1.0, 1.0, 1.0, 0.05];
     let coarse = [1.0, 1.0, 1.0, 0.12];
 
@@ -295,5 +301,21 @@ mod tests {
         state.add_image("asset".into(), 0.0, 0.0, 20.0, 10.0);
 
         assert!(fill_lines(&state).is_empty());
+    }
+
+    /// Die Rasterweite ist das Feinraster; absurd kleine Werte dürfen das Bett
+    /// nicht zur Linien-Tapete machen (Schutzkappe verdoppelt die Schrittweite).
+    #[test]
+    fn bett_raster_bleibt_begrenzt() {
+        let fein = bed_grid(900.0, 600.0, 10.0);
+        let tapete = bed_grid(900.0, 600.0, 1.0);
+        // 1-mm-Raster würde ungekappt ~9x so viele Linien liefern wie 10 mm —
+        // mit Kappe (max ~200 Linien je Richtung) bleibt es in derselben Liga.
+        assert!(
+            tapete.len() <= fein.len() * 2,
+            "{} > {}",
+            tapete.len(),
+            fein.len() * 2
+        );
     }
 }

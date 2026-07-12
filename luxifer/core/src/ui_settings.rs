@@ -106,8 +106,10 @@ fn default_splash_ms() -> u32 {
 }
 
 /// Default-Rasterweite (mm), wenn eine alte Settings-Datei das Feld nicht hat.
+/// Die Rasterweite ist der Abstand der FEINEN Gitterlinien; der native Canvas
+/// zeichnet Hauptlinien alle 5 Schritte (10 → gewohntes 10/50-Bild).
 fn default_grid_size() -> f64 {
-    50.0
+    10.0
 }
 
 fn default_true() -> bool {

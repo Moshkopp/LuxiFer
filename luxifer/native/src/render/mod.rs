@@ -39,7 +39,7 @@ pub struct FrameScene<'a> {
     pub preview_material: PreviewMaterial,
     /// Leerfahrten in der Vorschau zeichnen (Kennzahlen zählen immer).
     pub preview_show_travel: bool,
-    /// Hauptraster des Tisch-Gitters in mm (GUI-Settings).
+    /// Feinraster-Abstand des Tisch-Gitters in mm (GUI-Settings).
     pub grid_mm: f32,
 }
 

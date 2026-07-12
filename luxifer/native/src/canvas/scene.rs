@@ -13,7 +13,7 @@ pub struct BaseGeometry {
 }
 
 /// Baut die gecachten Zeichendaten (Tisch-Gitter, Shapes-Füllung/Kontur).
-/// `grid_mm` = Hauptraster aus den GUI-Settings.
+/// `grid_mm` = Feinraster-Abstand aus den GUI-Settings.
 pub fn base_vertices(session: &EditorSession, grid_mm: f32) -> BaseGeometry {
     let mut v = scene_geo::bed_grid(session.bed_w_mm as f32, session.bed_h_mm as f32, grid_mm);
     let background_end = v.len() as u32;
