@@ -333,12 +333,9 @@ impl App {
                             ctrl: self.ctrl_down,
                             shift: self.shift_down,
                         };
-                        // Fokus-Gate: hat ein egui-Textfeld/Dialog den Tastatur-
-                        // fokus, feuert kein Canvas-Shortcut. Das schützt die
-                        // Szene vor Tippen hinter einem offenen Dialog.
-                        let editing = self.egui_ctx.wants_keyboard_input();
+                        let blocked = self.input_blocked();
                         if let Some(shortcut) =
-                            crate::tools::resolve_shortcut(key, mods, pressed, editing)
+                            crate::tools::resolve_shortcut(key, mods, pressed, blocked)
                         {
                             self.apply_shortcut(shortcut);
                         }
@@ -381,6 +378,18 @@ impl App {
 
     pub fn redo(&mut self) {
         self.session.redo();
+    }
+
+    /// Tastatur-Eingabe für den Canvas ist blockiert, wenn ein egui-Textfeld
+    /// den Fokus hat ODER ein modaler Dialog offen ist. `wants_keyboard_input`
+    /// allein greift nur bei fokussiertem Feld; ein bloß geöffneter Dialog ohne
+    /// aktives Feld ließe sonst Delete/Werkzeugwechsel/Undo durch und würde die
+    /// Szene hinter dem Dialog verändern.
+    fn input_blocked(&self) -> bool {
+        self.egui_ctx.wants_keyboard_input()
+            || self.layer_dialog.is_some()
+            || self.text_dialog.is_some()
+            || self.laser_settings.is_some()
     }
 
     /// Führt eine typisierte Tastatur-Aktion aus. Die Zuordnung Taste→Aktion

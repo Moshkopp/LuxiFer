@@ -159,7 +159,8 @@ Ziel: Ein kleiner, ehrlicher Editor, der zuverlässig benutzt werden kann.
 - [x] Löschen, Gruppieren, Aufheben, Undo und Redo laufen über
       `EditorSession`.
 - [x] Tastaturkürzel einschließlich Fokusregeln für Textfelder/Dialoge
-      (typisierte `Shortcut`-Zuordnung, Fokus-Gate über `wants_keyboard_input`).
+      (typisierte `Shortcut`-Zuordnung; Gate blockiert bei fokussiertem Feld
+      oder offenem modalem Dialog).
 - [x] Jede direkte Move-/Resize-/Rotate-Geste erzeugt genau einen sinnvollen
       Undo-Schritt.
 - [x] Abbruch einer direkten Manipulationsgeste stellt den Ausgangszustand
@@ -220,15 +221,20 @@ die Session, Abbrechen verändert nichts. Validierung: 262 Workspace-Tests
 
 Tastatur-/Fokusschnitt 2026-07-12: Die Canvas-Tastatur läuft über eine
 typisierte `Shortcut`-Ebene (`tools::resolve_shortcut`), getrennt vom Auslösen,
-und ist ohne winit/egui testbar. Das Fokus-Gate nutzt
-`egui::Context::wants_keyboard_input`: hat ein Textfeld oder Dialog den
-Tastaturfokus, feuert kein Canvas-Shortcut — Tippen hinter einem offenen
-Layer-/Text-Dialog mutiert die Szene nicht mehr und wechselt kein Werkzeug.
-Zusätzlich behoben: Undo/Redo verlangen jetzt Strg (ein nacktes „z"/„y" war
-zuvor Undo/Redo). Die Ausführung (`App::apply_shortcut`) läuft weiter über die
-`EditorSession`; die reine Taste→Aktion-Zuordnung bleibt Native-Präsentation.
-Validierung: 267 Workspace-Tests (16 Native, davon 5 Shortcut-Tests) und Clippy
-mit `-D warnings` grün; native App startet und rendert ohne Panic.
+und ist ohne winit/egui testbar. Das Eingabe-Gate (`App::input_blocked`)
+blockiert Canvas-Shortcuts, wenn ein Textfeld den Tastaturfokus hat
+(`egui::Context::wants_keyboard_input`) ODER ein modaler Dialog offen ist
+(Layer-/Text-/Laser-Dialog). `wants_keyboard_input` allein greift nur bei
+fokussiertem Feld; ein bloß geöffneter Dialog ohne aktives Feld ließe sonst
+Delete/Werkzeugwechsel/Undo durch und würde die Szene dahinter verändern. Die
+Leertaste ruht als Pan-Modifier zwar beim Drücken, ihr Loslassen kommt aber
+immer durch, damit `space_down` nicht hängen bleibt, wenn während gehaltenem
+Space ein Dialog den Fokus übernimmt. Zusätzlich behoben: Undo/Redo verlangen
+jetzt Strg (ein nacktes „z"/„y" war zuvor Undo/Redo). Die Ausführung
+(`App::apply_shortcut`) läuft weiter über die `EditorSession`; die reine
+Taste→Aktion-Zuordnung bleibt Native-Präsentation. Validierung: 268
+Workspace-Tests (17 Native, davon 6 Shortcut-Tests) und Clippy mit `-D warnings`
+grün; native App startet und rendert ohne Panic.
 
 ## Phase 3 — Projekt, Versionen und Assets
 

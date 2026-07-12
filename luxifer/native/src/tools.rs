@@ -145,27 +145,29 @@ pub struct Mods {
 
 /// Bildet eine gedrückte Taste auf eine typisierte Aktion ab.
 ///
-/// `text_editing` ist true, wenn egui gerade Tastatureingaben will (ein
-/// Textfeld oder Dialog hat den Fokus). Dann feuert **kein** Canvas-Shortcut,
-/// damit Tippen hinter einem offenen Layer-/Text-Dialog die Szene nicht
+/// `input_blocked` ist true, wenn ein Textfeld den Tastaturfokus hat **oder**
+/// ein modaler Dialog offen ist. Dann feuert **kein** Canvas-Shortcut, damit
+/// Tippen hinter einem offenen Layer-/Text-/Laser-Dialog die Szene nicht
 /// mutiert. `pressed` unterscheidet Down/Up; nur die Leertaste braucht beide
 /// Flanken, alle anderen Befehle lösen auf Down aus.
 pub fn resolve_shortcut(
     key: Key,
     mods: Mods,
     pressed: bool,
-    text_editing: bool,
+    input_blocked: bool,
 ) -> Option<Shortcut> {
-    // Die Leertaste ist ein gehaltener Pan-Modifier, kein Befehl. Auch sie ruht,
-    // solange ein Textfeld tippt (sonst scrollt Pan beim Leerzeichen).
+    // Die Leertaste ist ein gehaltener Pan-Modifier, kein Befehl. Das Loslassen
+    // muss IMMER durch — sonst bliebe `space_down` hängen, wenn während
+    // gehaltenem Space ein Dialog den Fokus übernimmt. Nur das Drücken (Pan an)
+    // ruht bei blockierter Eingabe.
     if key == Key::Space {
-        return if text_editing {
+        return if pressed && input_blocked {
             None
         } else {
             Some(Shortcut::PanModifier(pressed))
         };
     }
-    if !pressed || text_editing {
+    if !pressed || input_blocked {
         return None;
     }
     match key {
@@ -305,7 +307,17 @@ mod shortcut_tests {
             resolve_shortcut(Key::Space, NONE, false, false),
             Some(Shortcut::PanModifier(false))
         );
-        // Aber nicht, während ein Textfeld tippt.
+        // Pan an ruht bei blockierter Eingabe (Dialog/Textfeld).
         assert_eq!(resolve_shortcut(Key::Space, NONE, true, true), None);
+    }
+
+    #[test]
+    fn leertaste_loslassen_kommt_auch_bei_blockade_durch() {
+        // Sonst bliebe `space_down` hängen, wenn während gehaltenem Space ein
+        // Dialog den Fokus übernimmt: das Key-up träfe auf `input_blocked`.
+        assert_eq!(
+            resolve_shortcut(Key::Space, NONE, false, true),
+            Some(Shortcut::PanModifier(false))
+        );
     }
 }
