@@ -27,6 +27,43 @@ pub fn base_vertices(session: &EditorSession) -> BaseGeometry {
     }
 }
 
+/// Read-only Jobpfad: Arbeitsbewegungen nach Layerfarbe, Leerfahrten dezent
+/// gestrichelt. Grundlage ist ausschließlich die Application-Preview.
+pub fn preview_vertices(session: &EditorSession, selection_only: bool) -> BaseGeometry {
+    let mut v = scene_geo::bed_grid(session.bed_w_mm as f32, session.bed_h_mm as f32);
+    let background_end = v.len() as u32;
+    let preview = session.job_preview(selection_only);
+    for movement in preview.moves {
+        let color = match movement.kind {
+            luxifer_core::preview::MoveKind::Travel => [0.55, 0.6, 0.68, 0.45],
+            luxifer_core::preview::MoveKind::Fill => [1.0, 0.58, 0.2, 0.9],
+            luxifer_core::preview::MoveKind::Raster => [0.75, 0.75, 0.75, 0.9],
+            luxifer_core::preview::MoveKind::Cut => session
+                .layers
+                .get(movement.layer_id)
+                .map(|l| {
+                    [
+                        l.color[0] as f32 / 255.0,
+                        l.color[1] as f32 / 255.0,
+                        l.color[2] as f32 / 255.0,
+                        1.0,
+                    ]
+                })
+                .unwrap_or([0.9, 0.2, 0.2, 1.0]),
+        };
+        scene_geo::push_seg(
+            &mut v,
+            [movement.from.0 as f32, movement.from.1 as f32],
+            [movement.to.0 as f32, movement.to.1 as f32],
+            color,
+        );
+    }
+    BaseGeometry {
+        vertices: v,
+        background_end,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

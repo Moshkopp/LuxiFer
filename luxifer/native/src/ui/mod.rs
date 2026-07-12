@@ -111,6 +111,10 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 app.dispatch(action);
             }
         }
+        View::Preview => {
+            app.left_w = 0.0;
+            app.right_w = 0.0;
+        }
         View::Design | View::Laser => {
             let cur_tool = app.canvas.tool;
             let left = egui::SidePanel::left("tools")

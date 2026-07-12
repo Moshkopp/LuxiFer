@@ -14,7 +14,7 @@ pub(super) fn topbar(ui: &mut egui::Ui, view: View, project_name: &str) -> Vec<U
     let mut actions = Vec::new();
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        for v in [View::Projekt, View::Design, View::Laser] {
+        for v in [View::Projekt, View::Design, View::Preview, View::Laser] {
             if ui
                 .selectable_label(view == v, format!("  {}  ", v.label()))
                 .clicked()

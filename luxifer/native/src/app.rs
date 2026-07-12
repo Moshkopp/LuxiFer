@@ -182,6 +182,9 @@ impl App {
                 self.canvas.cam.viewport = [sz.width as f32, sz.height as f32];
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                if self.view == crate::tools::View::Preview {
+                    return true;
+                }
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if let Some(key) = crate::canvas::input::map_keycode(code) {
@@ -202,6 +205,9 @@ impl App {
             // Geste ein Shape, frischt der Root die Zeichenfarbe auf; ein
             // Doppelklick auf ein Objekt öffnet den passenden Editor.
             _ => {
+                if self.view == crate::tools::View::Preview {
+                    return true;
+                }
                 let out = self.canvas.handle_pointer_event(&mut self.session, event);
                 if out.shape_added {
                     self.refresh_accent();
@@ -399,7 +405,10 @@ impl App {
             A::OpenProject(name) => self.project_open(&name),
             A::DeleteProject(name) => self.project_delete(&name),
             A::ExportProject(name) => self.project_export(&name),
-            A::SelectView(view) => self.view = view,
+            A::SelectView(view) => {
+                self.view = view;
+                self.renderer.invalidate_scene();
+            }
             A::Undo => self.undo(),
             A::Redo => self.redo(),
             A::ImportVector => self.import_dialog(),
@@ -1026,6 +1035,8 @@ impl App {
                 cam_scale: self.canvas.cam.scale,
             },
             image_dirty,
+            preview: self.view == crate::tools::View::Preview,
+            selection_only: self.laser.selection_only,
         };
         self.renderer.draw_frame(&self.window, scene, full, tris);
     }

@@ -173,6 +173,19 @@ fn fertige_bezier_knoten_behalten_ihre_tangenten() {
 }
 
 #[test]
+fn job_preview_ist_abgeleitete_read_only_sicht() {
+    let mut session = EditorSession::default();
+    session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [20.0, 10.0]);
+    let dirty_before = session.is_dirty();
+
+    let preview = session.job_preview(false);
+
+    assert_eq!(preview.moves.len(), 4);
+    assert!((preview.total_len_mm - 60.0).abs() < 1e-6);
+    assert_eq!(session.is_dirty(), dirty_before);
+}
+
+#[test]
 fn auswahloperation_ohne_voraussetzung_mutiert_nicht() {
     let mut session = EditorSession::default();
     let error = session.align(Align::Left).unwrap_err();

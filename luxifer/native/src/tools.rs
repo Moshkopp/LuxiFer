@@ -20,6 +20,7 @@ pub enum Tool {
 pub enum View {
     Projekt,
     Design,
+    Preview,
     Laser,
 }
 
@@ -28,6 +29,7 @@ impl View {
         match self {
             View::Projekt => "Projekt",
             View::Design => "Design",
+            View::Preview => "Vorschau",
             View::Laser => "Laser",
         }
     }

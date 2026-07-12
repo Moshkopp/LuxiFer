@@ -2,6 +2,7 @@ mod actions;
 mod drawing;
 mod images;
 mod layers;
+mod preview;
 mod selection;
 
 pub use layers::LayerParams;

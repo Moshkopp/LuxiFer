@@ -14,7 +14,7 @@ use winit::window::Window;
 
 use crate::camera::Camera;
 use crate::canvas::overlay::{overlay_vertices, OverlayInput};
-use crate::canvas::scene::base_vertices;
+use crate::canvas::scene::{base_vertices, preview_vertices};
 use crate::gpu::Gpu;
 use crate::image_gpu::ImageStore;
 
@@ -25,6 +25,8 @@ pub struct FrameScene<'a> {
     pub overlay: OverlayInput<'a>,
     /// Ob externe Ereignisse (Import) neue Bild-Texturen nötig machen.
     pub image_dirty: bool,
+    pub preview: bool,
+    pub selection_only: bool,
 }
 
 pub struct Renderer {
@@ -125,7 +127,11 @@ impl Renderer {
         let scene_changed = rev != self.last_render_rev;
         if scene_changed {
             self.last_render_rev = rev;
-            let geometry = base_vertices(scene.session);
+            let geometry = if scene.preview {
+                preview_vertices(scene.session, scene.selection_only)
+            } else {
+                base_vertices(scene.session)
+            };
             self.background_end = geometry.background_end;
             self.verts = geometry.vertices;
             let verts = std::mem::take(&mut self.verts);
@@ -142,7 +148,11 @@ impl Renderer {
             );
         }
         let count = self.verts.len() as u32;
-        let overlay = overlay_vertices(&scene.overlay);
+        let overlay = if scene.preview {
+            Vec::new()
+        } else {
+            overlay_vertices(&scene.overlay)
+        };
         self.gpu.upload_overlay(&overlay);
 
         let frame = match self.gpu.surface.get_current_texture() {
@@ -199,14 +209,16 @@ impl Renderer {
             // Opakes Bett/Gitter zuerst. Danach echte Bildtexturen, anschließend
             // Vektor-Fills und Konturen; Handles bleiben ganz oben.
             self.gpu.draw_canvas_range(&mut rp, 0..self.background_end);
-            self.images.draw(
-                &mut rp,
-                &self.gpu.device,
-                &self.gpu.queue,
-                scene.cam,
-                scene.session,
-                &mut img_scratch,
-            );
+            if !scene.preview {
+                self.images.draw(
+                    &mut rp,
+                    &self.gpu.device,
+                    &self.gpu.queue,
+                    scene.cam,
+                    scene.session,
+                    &mut img_scratch,
+                );
+            }
             self.gpu
                 .draw_canvas_range(&mut rp, self.background_end..count);
             self.gpu.draw_overlay(&mut rp);
