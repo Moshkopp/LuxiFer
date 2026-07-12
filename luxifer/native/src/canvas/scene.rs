@@ -186,6 +186,101 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fill_scanlines_folgen_dem_verschieben() {
+        // Reproduktion Nutzerbefund: „Objekt mit Fill verschieben — Füllung
+        // bleibt stehen". Die Szene muss nach der Move-Geste neue Vertices
+        // liefern, deren Fill-Bereich mitgewandert ist.
+        let mut session = EditorSession::default();
+        {
+            let state = session.state_mut_for_migration();
+            state.add_shape(luxifer_core::Geo::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            });
+            state.layers[0].mode = luxifer_core::LayerMode::Fill;
+        }
+        session.selected = vec![0];
+        let rev_before = session.render_rev();
+        let before = base_vertices(&session);
+
+        session.begin_edit();
+        session.translate_edit(50.0, 0.0);
+        session.commit_edit();
+
+        // Die Render-Revision MUSS sich geändert haben, sonst baut der
+        // Renderer den gecachten Puffer nie neu.
+        assert_ne!(session.render_rev(), rev_before);
+
+        let after = base_vertices(&session);
+        // Alle Szenen-Vertices (nach dem Bett) liegen jetzt bei x >= 45 —
+        // Kontur UND Scanlines sind mitgewandert.
+        let scene_after = &after.vertices[after.background_end as usize..];
+        assert!(!scene_after.is_empty());
+        assert!(
+            scene_after.iter().all(|v| v.pos[0] >= 45.0),
+            "Füllung/Kontur muss der Verschiebung folgen"
+        );
+        // Und vorher lagen sie links.
+        let scene_before = &before.vertices[before.background_end as usize..];
+        assert!(scene_before.iter().all(|v| v.pos[0] <= 15.0));
+    }
+
+    #[test]
+    fn fill_folgt_der_echten_move_geste_frame_fuer_frame() {
+        // Stellt den echten App-Ablauf nach: Klick auf ein Fill-Objekt,
+        // Cursor-Moves, pro „Frame" der Renderer-Vergleich über render_rev.
+        use crate::camera::Camera;
+        use crate::canvas::CanvasState;
+
+        let mut session = EditorSession::default();
+        {
+            let state = session.state_mut_for_migration();
+            state.add_shape(luxifer_core::Geo::Rect {
+                x: 10.0,
+                y: 10.0,
+                w: 20.0,
+                h: 20.0,
+            });
+            state.layers[0].mode = luxifer_core::LayerMode::Fill;
+            state.selected.clear();
+        }
+        let mut cam = Camera::new();
+        cam.viewport = [800.0, 600.0];
+        cam.center = [0.0, 0.0];
+        cam.scale = 1.0;
+        let mut canvas = CanvasState::new(cam);
+        canvas.tool = crate::tools::Tool::Select;
+
+        // Klick mitten aufs Rechteck (Weltpunkt (20,20) → Screen).
+        let press = canvas.cam.world_to_screen([20.0, 20.0]);
+        canvas.cursor = press;
+        let mut last_rev = session.render_rev();
+        canvas.on_mouse(&mut session, winit::event::MouseButton::Left, true);
+
+        // Drei Cursor-Moves à +10 Weltpixel; nach jedem prüft der „Renderer".
+        for step in 1..=3 {
+            let target = canvas
+                .cam
+                .world_to_screen([20.0 + step as f64 * 10.0, 20.0]);
+            canvas.on_cursor_move(&mut session, target);
+            let rev = session.render_rev();
+            assert_ne!(rev, last_rev, "Frame {step}: render_rev muss steigen");
+            last_rev = rev;
+            let g = base_vertices(&session);
+            let scene = &g.vertices[g.background_end as usize..];
+            let min_x = scene.iter().map(|v| v.pos[0]).fold(f32::MAX, f32::min);
+            assert!(
+                (min_x - (10.0 + step as f32 * 10.0)).abs() < 1.0,
+                "Frame {step}: Szene (inkl. Fill) muss bei x≈{} beginnen, ist {min_x}",
+                10.0 + step as f32 * 10.0
+            );
+        }
+        canvas.on_mouse(&mut session, winit::event::MouseButton::Left, false);
+    }
+
+    #[test]
     fn bett_und_szenengeometrie_haben_getrennte_renderbereiche() {
         let mut session = EditorSession::default();
         session

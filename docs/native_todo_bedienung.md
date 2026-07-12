@@ -30,6 +30,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 | B1 | ERLEDIGT | P1 | Geschlossene konvexe Linienkonturen behalten beim Offset harte Miter-Ecken statt verrundeter Übergänge. |
 | B2 | ERLEDIGT | P2 | Muster-Füllung mit Parameterdialog (Linien/Kreise/Langlöcher/Waben, Abstände, Winkel, Elementgröße); Füllung landet auf eigenem Layer, ein Undo-Schritt. |
 | B3 | FEHLT | P2 | Haltesteg ist nur Stub. |
+| B4 | ERLEDIGT | P1 | Muster-Füllung blieb beim Verschieben der Quellform stehen (Muster-Konturen sind eigenständige Shapes): Muster und Quellformen gruppieren sich jetzt automatisch — die Gruppenauswahl nimmt die Füllung beim Move mit. Der normale Scanline-Fill folgte nachweislich korrekt (frame-genauer Gesten-Test); falls dort weiter etwas hakt, bitte Schritte notieren. |
 
 ## C. Bilder
 
@@ -96,6 +97,16 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 - A3 (erledigt): Eine bildschirmkonstante 10-px-Fangzone schließt Pfade ab drei
   Knoten. Overlay-Gummiband und Startmarker zeigen das Einrasten; Application
   erzeugt für Klick und Enter echte geschlossene Polyline-/Spline-/Bézier-Pfade.
+- B4 (erledigt): Für den normalen Fill wurde der komplette Pfad geprüft und
+  per Test abgesichert (echte Move-Geste über `CanvasState::on_mouse`/
+  `on_cursor_move`, Render-Revision und Szenen-Vertices pro Frame — die
+  Scanlines folgen). Pattern-Fill war strukturell betroffen: Die Muster-
+  Polylinien sind eigene Shapes auf dem „Muster"-Layer; ohne Verknüpfung
+  bleiben sie beim Verschieben der Quelle stehen. `pattern_fill_selected`
+  vergibt jetzt eine gemeinsame `group_id` für Quellen + Muster (bzw. tritt
+  einer bestehenden Quell-Gruppe bei); `expand_selection_to_groups` nimmt
+  das Muster damit bei jeder Auswahl mit. End-zu-End getestet (Fill →
+  Klick auf Quelle → Move → Muster-BBox wandert mit).
 - B2 (erledigt): `EditorSession::pattern_fill` validiert Abstände/Größe/Winkel
   und macht die stille Core-No-Op (keine geschlossene Kontur in der Auswahl)
   als stabilen Fehler sichtbar. Der Dialog erweitert den bestehenden

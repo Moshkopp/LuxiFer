@@ -734,3 +734,46 @@ fn job_start_marker_liegt_am_anker_der_job_bbox() {
         .job_start_marker(false, StartMode::AktuellePosition, Anchor::Center)
         .is_none());
 }
+
+#[test]
+fn muster_fuellung_wandert_beim_verschieben_der_quelle_mit() {
+    // Nutzerbefund: „Objekt mit Patternfill verschieben — Füllung bleibt
+    // stehen." Muster-Shapes sind eigenständig; seit dem Fix gruppieren sie
+    // sich mit der Quelle, und die Gruppenauswahl nimmt sie beim Move mit.
+    let mut session = session_with_rect(); // Rect (0,0)–(10,10)
+    session.selected = vec![0];
+    session
+        .pattern_fill(&luxifer_core::pattern_fill::FillParams::default())
+        .expect("Füllung");
+    let muster: Vec<usize> = (1..session.state().shapes.len()).collect();
+    assert!(!muster.is_empty());
+
+    // Quelle und Muster teilen eine Gruppe.
+    let gid = session.state().shapes[0]
+        .group_id
+        .expect("Quelle gruppiert");
+    for &i in &muster {
+        assert_eq!(session.state().shapes[i].group_id, Some(gid));
+    }
+
+    // Klick auf die Quelle expandiert zur Gruppe …
+    session.clear_selection();
+    session.select_at(5.0, 5.0, 0.5, false);
+    for &i in &muster {
+        assert!(
+            session.state().selected.contains(&i),
+            "Muster-Shape {i} muss mitselektiert sein"
+        );
+    }
+
+    // … und die Move-Geste verschiebt Muster UND Quelle.
+    let before = session.state().shapes[muster[0]].bbox();
+    session.begin_edit();
+    session.translate_edit(50.0, 0.0);
+    session.commit_edit();
+    let after = session.state().shapes[muster[0]].bbox();
+    assert!(
+        (after.x - before.x - 50.0).abs() < 1e-9,
+        "Muster wandert mit"
+    );
+}

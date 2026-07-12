@@ -473,13 +473,35 @@ impl AppState {
         layer.name = "Muster".into();
         self.layers.push(layer);
 
+        // Muster und Quellformen gruppieren: Beim Verschieben der Form soll
+        // die Füllung mitwandern — ohne Gruppe blieben die Muster-Konturen
+        // (eigenständige Shapes) an Ort und Stelle stehen. Steckt eine Quelle
+        // bereits in einer Gruppe, tritt das Muster ihr bei; sonst entsteht
+        // eine neue Gruppe aus Quellen + Muster.
+        let sources: Vec<usize> = self.selected.clone();
+        let group_id = sources
+            .iter()
+            .find_map(|&i| self.shapes.get(i).and_then(|s| s.group_id))
+            .unwrap_or_else(|| {
+                self.shapes
+                    .iter()
+                    .filter_map(|s| s.group_id)
+                    .max()
+                    .unwrap_or(0)
+                    + 1
+            });
+        for &i in &sources {
+            if let Some(s) = self.shapes.get_mut(i) {
+                s.group_id = Some(group_id);
+            }
+        }
+
         self.selected.clear();
         for (pts, closed) in filled {
             let idx = self.shapes.len();
-            self.shapes.push(crate::model::Shape::new(
-                layer_id,
-                Geo::Polyline { pts, closed },
-            ));
+            let mut shape = crate::model::Shape::new(layer_id, Geo::Polyline { pts, closed });
+            shape.group_id = Some(group_id);
+            self.shapes.push(shape);
             self.selected.push(idx);
         }
         self.dirty = true;
