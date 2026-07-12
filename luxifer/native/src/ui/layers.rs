@@ -1,80 +1,85 @@
 //! Ebenenliste (rechtes Inspector-Panel im Design-Reiter). Farbe = Layer;
 //! Doppelklick auf den Namen öffnet den Parameter-Dialog.
+//!
+//! Über die `UiAction`-Grenze (ADR 0011): Das Panel bekommt eine reine Sicht
+//! (`LayerRow`) statt `&mut App` und liefert Absichten zurück.
 
 use egui::RichText;
 use luxifer_application::LayerToggle;
 
+use super::action::UiAction;
 use super::c32;
-use crate::app::App;
 
-pub(super) fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
+/// Reine Darstellungssicht einer Ebene für die Liste. Vom Root aus der Session
+/// abgeleitet, damit das Panel nicht selbst auf den Zustand zugreift.
+pub(super) struct LayerRow {
+    pub color: [u8; 3],
+    pub name: String,
+    pub visible: bool,
+    pub enabled: bool,
+    pub locked: bool,
+    pub air_assist: bool,
+    /// Anzahl Shapes auf dieser Ebene.
+    pub count: usize,
+}
+
+/// `rows` sind in Layer-Reihenfolge (Index 0 = unterste). Angezeigt wird von
+/// oben (letzte Ebene) nach unten. Gibt die ausgelösten Absichten zurück.
+pub(super) fn layers_panel(ui: &mut egui::Ui, rows: &[LayerRow]) -> Vec<UiAction> {
+    let mut actions = Vec::new();
     ui.label(RichText::new("EBENEN").small().weak());
     ui.add_space(4.0);
-    if app.session.layers.is_empty() {
+    if rows.is_empty() {
         ui.weak("Keine Ebenen — zeichne etwas.");
-        return;
+        return actions;
     }
+    let n = rows.len();
     // Von oben (letzter Layer) nach unten anzeigen.
-    let n = app.session.layers.len();
     for i in (0..n).rev() {
-        let (color, name, visible, enabled, locked, air_assist, count) = {
-            let l = &app.session.layers[i];
-            let cnt = app
-                .session
-                .shapes
-                .iter()
-                .filter(|s| s.layer_id == i)
-                .count();
-            (
-                l.color,
-                l.name.clone(),
-                l.visible,
-                l.enabled,
-                l.locked,
-                l.air_assist,
-                cnt,
-            )
-        };
+        let row = &rows[i];
         ui.horizontal(|ui| {
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
-            ui.painter().rect_filled(rect, 4.0, c32(color));
+            ui.painter().rect_filled(rect, 4.0, c32(row.color));
             if resp.clicked() {
-                app.pick_color(color);
+                actions.push(UiAction::PickColor(row.color));
             }
             if ui
-                .selectable_label(visible, "S")
+                .selectable_label(row.visible, "S")
                 .on_hover_text("Im Canvas sichtbar")
                 .clicked()
             {
-                app.toggle_layer(i, LayerToggle::Visible);
+                actions.push(UiAction::ToggleLayer(i, LayerToggle::Visible));
             }
             if ui
-                .selectable_label(enabled, "J")
+                .selectable_label(row.enabled, "J")
                 .on_hover_text("Im Laserjob aktiviert")
                 .clicked()
             {
-                app.toggle_layer(i, LayerToggle::Enabled);
+                actions.push(UiAction::ToggleLayer(i, LayerToggle::Enabled));
             }
             if ui
-                .selectable_label(locked, "L")
+                .selectable_label(row.locked, "L")
                 .on_hover_text("Bearbeitung sperren")
                 .clicked()
             {
-                app.toggle_layer(i, LayerToggle::Locked);
+                actions.push(UiAction::ToggleLayer(i, LayerToggle::Locked));
             }
             if ui
-                .selectable_label(air_assist, "A")
+                .selectable_label(row.air_assist, "A")
                 .on_hover_text("Luftunterstützung")
                 .clicked()
             {
-                app.toggle_layer(i, LayerToggle::AirAssist);
+                actions.push(UiAction::ToggleLayer(i, LayerToggle::AirAssist));
             }
             if ui
-                .add(egui::Label::new(format!("{name}  ·  {count}")).sense(egui::Sense::click()))
+                .add(
+                    egui::Label::new(format!("{}  ·  {}", row.name, row.count))
+                        .sense(egui::Sense::click()),
+                )
                 .on_hover_text("Doppelklick: Parameter bearbeiten")
                 .double_clicked()
             {
-                app.open_layer_dialog(i);
+                actions.push(UiAction::OpenLayerDialog(i));
             }
             if ui
                 .small_button("↑")
@@ -82,7 +87,7 @@ pub(super) fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
                 .clicked()
                 && i + 1 < n
             {
-                app.move_layer(i, i + 1);
+                actions.push(UiAction::MoveLayer { from: i, to: i + 1 });
             }
             if ui
                 .small_button("↓")
@@ -90,8 +95,9 @@ pub(super) fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
                 .clicked()
                 && i > 0
             {
-                app.move_layer(i, i - 1);
+                actions.push(UiAction::MoveLayer { from: i, to: i - 1 });
             }
         });
     }
+    actions
 }

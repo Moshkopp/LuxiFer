@@ -149,6 +149,13 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             }
 
             let is_laser = app.view == View::Laser;
+            // Ebenen-Sicht vorab aus der Session ableiten (nur Lesezugriff),
+            // damit das Panel keinen App-Zugriff braucht.
+            let layer_rows: Vec<layers::LayerRow> = if is_laser {
+                Vec::new()
+            } else {
+                layer_rows(app)
+            };
             let right = egui::SidePanel::right("inspector")
                 .exact_width(260.0)
                 .resizable(false)
@@ -156,11 +163,15 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                     ui.add_space(6.0);
                     if is_laser {
                         laserpanel::show(ui, app);
+                        Vec::new()
                     } else {
-                        layers::layers_panel(ui, app);
+                        layers::layers_panel(ui, &layer_rows)
                     }
                 });
             app.right_w = right.response.rect.width();
+            for action in right.inner {
+                app.dispatch(action);
+            }
 
             // Farbpalette (+ Form-Wähler beim Polygon-Werkzeug) als Dock am
             // unteren Canvas-Rand (nur Design), zentriert wie in der Tauri-App.
@@ -196,6 +207,24 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     dialogs::laser_settings_window(ctx, app);
     dialogs::text_dialog_window(ctx, app);
     dialogs::layer_dialog_window(ctx, app);
+}
+
+/// Leitet die reine Ebenen-Sicht für `layers_panel` aus der Session ab.
+fn layer_rows(app: &App) -> Vec<layers::LayerRow> {
+    let s = app.session.state();
+    s.layers
+        .iter()
+        .enumerate()
+        .map(|(i, l)| layers::LayerRow {
+            color: l.color,
+            name: l.name.clone(),
+            visible: l.visible,
+            enabled: l.enabled,
+            locked: l.locked,
+            air_assist: l.air_assist,
+            count: s.shapes.iter().filter(|sh| sh.layer_id == i).count(),
+        })
+        .collect()
 }
 
 /// Dunkles Theme, an den Svelte-Look angelehnt (kühles Blau-Grau).

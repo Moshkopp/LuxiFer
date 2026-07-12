@@ -629,6 +629,9 @@ impl App {
             A::MirrorH => self.mirror_h(),
             A::MirrorV => self.mirror_v(),
             A::InsertCoasters(round) => self.insert_coasters(round),
+            A::ToggleLayer(index, toggle) => self.toggle_layer(index, toggle),
+            A::OpenLayerDialog(index) => self.open_layer_dialog(index),
+            A::MoveLayer { from, to } => self.move_layer(from, to),
         }
     }
 

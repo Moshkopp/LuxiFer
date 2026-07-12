@@ -7,6 +7,7 @@
 //! migrierten Panels ab. Panels, die noch `&mut App` erhalten, tragen hier noch
 //! nichts bei.
 
+use luxifer_application::LayerToggle;
 use luxifer_core::{Align, Distribute, PolyShape};
 
 use crate::tools::{Tool, ToolAction};
@@ -42,4 +43,10 @@ pub enum UiAction {
     MirrorV,
     /// Untersetzer einfügen (`round` = rund statt eckig).
     InsertCoasters(bool),
+    /// Einen Layer-Schalter umlegen (Index in Layer-Reihenfolge).
+    ToggleLayer(usize, LayerToggle),
+    /// Layer-Parameter-Dialog für diesen Index öffnen.
+    OpenLayerDialog(usize),
+    /// Einen Layer in der Brenn-Reihenfolge verschieben.
+    MoveLayer { from: usize, to: usize },
 }
