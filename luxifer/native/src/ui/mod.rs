@@ -172,8 +172,36 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
-    dialogs::laser_settings_window(ctx, app);
-    dialogs::text_dialog_window(ctx, app);
+    // Laser-Einstellungen: Entwurf (Profil) als &mut; der Root persistiert bei
+    // Speichern/Löschen und schließt bei Abbrechen.
+    if app.laser_settings.is_some() {
+        let profile = app.laser_settings.as_mut().unwrap();
+        match dialogs::laser_settings_window(ctx, profile) {
+            dialogs::LaserDialogOutcome::None => {}
+            dialogs::LaserDialogOutcome::Save => app.save_laser_settings(),
+            dialogs::LaserDialogOutcome::Delete => {
+                let id = app.laser_settings.as_ref().unwrap().id.clone();
+                app.delete_laser_profile(&id);
+                app.laser_settings = None;
+            }
+            dialogs::LaserDialogOutcome::Cancel => app.laser_settings = None,
+        }
+    }
+
+    // Text-Dialog: Entwurf als &mut, Font-Namen als reine Anzeigeliste.
+    if app.text_dialog.is_some() {
+        let font_names: Vec<String> = app.fonts.iter().map(|f| f.name.clone()).collect();
+        let state = app.text_dialog.as_mut().unwrap();
+        match dialogs::text_dialog_window(ctx, state, &font_names) {
+            dialogs::DialogOutcome::None => {}
+            dialogs::DialogOutcome::Commit => {
+                if app.commit_text() {
+                    app.text_dialog = None;
+                }
+            }
+            dialogs::DialogOutcome::Cancel => app.text_dialog = None,
+        }
+    }
 
     // Layer-Dialog: der Entwurf wird als &mut gereicht, der Root behandelt das
     // Ergebnis (Übernahme über die validierende Session bzw. Verwerfen).

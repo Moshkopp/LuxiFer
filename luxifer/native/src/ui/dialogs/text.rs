@@ -1,23 +1,23 @@
 //! Text-Dialog: Eingabe, Font-Auswahl, Größe → Text als Pfad einfügen.
 
-use crate::app::App;
+use super::DialogOutcome;
+use crate::app::TextDialogState;
 
-/// Text-Dialog: Eingabe, Font-Auswahl, Größe → Text als Pfad einfügen.
-pub(in crate::ui) fn text_dialog_window(ctx: &egui::Context, app: &mut App) {
-    if app.text_dialog.is_none() {
-        return;
-    }
-    let mut close = false;
-    let mut commit = false;
-    // Font-Liste (Name) für die ComboBox vorbereiten.
-    let font_names: Vec<String> = app.fonts.iter().map(|f| f.name.clone()).collect();
+/// Zeichnet das Fenster auf den Entwurf `st`; `font_names` ist die reine
+/// Anzeigeliste der Systemfonts (Index korrespondiert mit `st.font_idx`).
+/// Meldet über `DialogOutcome`, ob der Nutzer einfügen/abbrechen will.
+pub(in crate::ui) fn text_dialog_window(
+    ctx: &egui::Context,
+    st: &mut TextDialogState,
+    font_names: &[String],
+) -> DialogOutcome {
+    let mut outcome = DialogOutcome::None;
     egui::Window::new("Text einfügen")
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
             ui.set_min_width(340.0);
-            let st = app.text_dialog.as_mut().unwrap();
             ui.label("Text");
             ui.add(
                 egui::TextEdit::multiline(&mut st.text)
@@ -56,18 +56,12 @@ pub(in crate::ui) fn text_dialog_window(ctx: &egui::Context, app: &mut App) {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.button("Einfügen").clicked() {
-                    commit = true;
+                    outcome = DialogOutcome::Commit;
                 }
                 if ui.button("Abbrechen").clicked() {
-                    close = true;
+                    outcome = DialogOutcome::Cancel;
                 }
             });
         });
-
-    if commit && app.commit_text() {
-        close = true;
-    }
-    if close {
-        app.text_dialog = None;
-    }
+    outcome
 }

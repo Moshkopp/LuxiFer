@@ -1,14 +1,25 @@
 //! Modaler Laser-Einstellungen-Dialog (Profil anlegen/bearbeiten/löschen).
 
-use crate::app::App;
+use luxifer_core::LaserProfile;
 
-/// Modaler Laser-Einstellungen-Dialog (Profil anlegen/bearbeiten/löschen).
-pub(in crate::ui) fn laser_settings_window(ctx: &egui::Context, app: &mut App) {
+/// Ergebnis des Laser-Dialogs. Eigenes Enum, weil er zusätzlich „Löschen" kennt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(in crate::ui) enum LaserDialogOutcome {
+    #[default]
+    None,
+    Save,
+    Delete,
+    Cancel,
+}
+
+/// Zeichnet das Fenster auf den Entwurf `profile` und meldet die gewählte
+/// Aktion. Keine Mutation außerhalb des Entwurfs; die Persistenz macht der Root.
+pub(in crate::ui) fn laser_settings_window(
+    ctx: &egui::Context,
+    profile: &mut LaserProfile,
+) -> LaserDialogOutcome {
     use luxifer_core::{Connection, DriverKind};
-    let Some(mut profile) = app.laser_settings.take() else {
-        return;
-    };
-    let mut action: Option<&str> = None;
+    let mut outcome = LaserDialogOutcome::None;
     egui::Window::new("Laser-Einstellungen")
         .collapsible(false)
         .resizable(false)
@@ -66,27 +77,15 @@ pub(in crate::ui) fn laser_settings_window(ctx: &egui::Context, app: &mut App) {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.button("Speichern").clicked() {
-                    action = Some("save");
+                    outcome = LaserDialogOutcome::Save;
                 }
                 if !profile.id.is_empty() && ui.button("Löschen").clicked() {
-                    action = Some("delete");
+                    outcome = LaserDialogOutcome::Delete;
                 }
                 if ui.button("Abbrechen").clicked() {
-                    action = Some("cancel");
+                    outcome = LaserDialogOutcome::Cancel;
                 }
             });
         });
-
-    match action {
-        Some("save") => {
-            app.laser_settings = Some(profile);
-            app.save_laser_settings();
-        }
-        Some("delete") => {
-            app.delete_laser_profile(&profile.id.clone());
-        }
-        Some("cancel") => {}
-        // Keine Aktion + Fenster noch offen → Bearbeitungsstand behalten.
-        _ => app.laser_settings = Some(profile),
-    }
+    outcome
 }
