@@ -317,6 +317,25 @@ impl App {
         }
     }
 
+    /// Kopie der aktuell selektierten Shapes (Index + Shape) — als Ausgangspunkt
+    /// für Resize/Rotate, damit vom Startzustand statt inkrementell gerechnet wird.
+    fn snapshot_selection(&self) -> Vec<(usize, luxifer_core::Shape)> {
+        self.state
+            .selected
+            .iter()
+            .filter_map(|&i| self.state.shapes.get(i).map(|s| (i, s.clone())))
+            .collect()
+    }
+
+    /// Stellt die Shapes aus einem Snapshot wieder her (vor jeder Transformation).
+    fn restore_snapshot(&mut self, orig: &[(usize, luxifer_core::Shape)]) {
+        for (i, s) in orig {
+            if let Some(dst) = self.state.shapes.get_mut(*i) {
+                *dst = s.clone();
+            }
+        }
+    }
+
     fn begin_select(&mut self, w: [f64; 2]) {
         // Zuerst: wurde ein Transform-Handle der aktuellen Auswahl getroffen?
         if let Some(b) = self.state.selection_bbox() {
@@ -329,7 +348,8 @@ impl App {
                 let angle = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
                 self.drag = Drag::Rotate {
                     pivot,
-                    last_angle: angle,
+                    start_angle: angle,
+                    orig: self.snapshot_selection(),
                 };
                 return;
             }
@@ -340,6 +360,7 @@ impl App {
                     self.drag = Drag::Resize {
                         handle,
                         start_box: b,
+                        orig: self.snapshot_selection(),
                     };
                     return;
                 }
@@ -362,27 +383,54 @@ impl App {
         let dx = new[0] - self.cursor[0];
         let dy = new[1] - self.cursor[1];
         let w = self.cam.screen_to_world(new);
+        // Erst die reinen Kamera-/Move-Fälle (kein Snapshot nötig).
         match &mut self.drag {
-            Drag::Pan => self.cam.pan_pixels(dx, dy),
+            Drag::Pan => {
+                self.cam.pan_pixels(dx, dy);
+                return;
+            }
             Drag::MoveShapes { last } => {
+                let last = *last;
+                self.drag = Drag::MoveShapes { last: w };
                 self.state
                     .translate_selected(w[0] - last[0], w[1] - last[1]);
-                *last = w;
+                return;
             }
-            Drag::Resize { handle, start_box } => {
-                // Ziel-Box aus dem Handle-Zug: gezogene Kante folgt dem Cursor.
-                let (handle, start_box) = (*handle, *start_box);
+            _ => {}
+        }
+        // Resize/Rotate: immer vom Snapshot (Ausgangszustand) rechnen, damit sich
+        // die Transformation nicht Schritt für Schritt aufschaukelt.
+        match std::mem::replace(&mut self.drag, Drag::None) {
+            Drag::Resize {
+                handle,
+                start_box,
+                orig,
+            } => {
+                self.restore_snapshot(&orig);
                 let target = resize_target(start_box, handle, w);
                 self.state.scale_selection_to(start_box, target);
+                self.drag = Drag::Resize {
+                    handle,
+                    start_box,
+                    orig,
+                };
             }
-            Drag::Rotate { pivot, last_angle } => {
+            Drag::Rotate {
+                pivot,
+                start_angle,
+                orig,
+            } => {
+                self.restore_snapshot(&orig);
                 let a = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
-                let delta_deg = (a - *last_angle).to_degrees();
-                *last_angle = a;
+                let delta_deg = (a - start_angle).to_degrees();
                 self.state.rotate_selection(delta_deg);
+                self.drag = Drag::Rotate {
+                    pivot,
+                    start_angle,
+                    orig,
+                };
             }
-            // Marquee/DrawBox: nur der Endpunkt zählt.
-            _ => {}
+            other => self.drag = other,
         }
     }
 
@@ -1136,5 +1184,43 @@ mod tests {
         let restored = loaded.into_state();
         assert_eq!(restored.shapes.len(), n_shapes);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reproduziert den Resize-Aufschaukel-Bug und beweist den Snapshot-Fix:
+    /// Ohne Snapshot verdoppelt sich die Größe bei jedem scale_selection_to von
+    /// derselben start_box. MIT Restore auf den Snapshot bleibt sie stabil.
+    #[test]
+    fn resize_schaukelt_nicht_auf() {
+        use luxifer_core::{AppState, BBox, Geo, Handle};
+        let mut s = AppState::new();
+        s.add_shape(Geo::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        s.selected = vec![0];
+        let start = BBox::new(0.0, 0.0, 100.0, 100.0);
+
+        // Snapshot der Ausgangsform.
+        let orig: Vec<(usize, _)> = s
+            .selected
+            .iter()
+            .map(|&i| (i, s.shapes[i].clone()))
+            .collect();
+
+        // Cursor bleibt konstant bei (150,100) — SE-Handle. 5 „Frames".
+        let target = resize_target(start, Handle::Se, [150.0, 100.0]);
+        for _ in 0..5 {
+            // Vor jedem Schritt Snapshot wiederherstellen (wie in on_cursor_move).
+            for (i, sh) in &orig {
+                s.shapes[*i] = sh.clone();
+            }
+            s.scale_selection_to(start, target);
+        }
+        // Ergebnis muss 150×100 sein — NICHT aufgeschaukelt.
+        let b = s.shapes[0].geo.bbox();
+        assert!((b.w - 150.0).abs() < 1e-6, "Breite {} statt 150", b.w);
+        assert!((b.h - 100.0).abs() < 1e-6, "Höhe {} statt 100", b.h);
     }
 }

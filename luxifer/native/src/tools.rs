@@ -80,14 +80,20 @@ pub enum Drag {
         start: [f64; 2],
     },
     /// Auswahl über ein Handle skalieren. `handle` = gezogene Ecke/Kante,
-    /// `start_box` = Auswahl-BBox bei Drag-Beginn.
+    /// `start_box` = Auswahl-BBox bei Drag-Beginn, `orig` = Snapshot der
+    /// selektierten Shapes bei Drag-Beginn (Index + Shape). So wird bei jedem
+    /// Maus-Schritt vom Ausgangszustand skaliert statt vom bereits skalierten
+    /// (sonst schaukelt sich die Größe exponentiell auf).
     Resize {
         handle: luxifer_core::Handle,
         start_box: luxifer_core::BBox,
+        orig: Vec<(usize, luxifer_core::Shape)>,
     },
-    /// Auswahl drehen. `pivot` = Mittelpunkt, `last_angle` = letzter Mauswinkel.
+    /// Auswahl drehen. `pivot` = Mittelpunkt, `orig` = Snapshot bei Drag-Beginn,
+    /// `start_angle` = Mauswinkel bei Beginn. Rotation immer vom Ausgangszustand.
     Rotate {
         pivot: [f64; 2],
-        last_angle: f64,
+        start_angle: f64,
+        orig: Vec<(usize, luxifer_core::Shape)>,
     },
 }
