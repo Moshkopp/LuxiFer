@@ -1,0 +1,340 @@
+# Native-only-Migration: Arbeits- und Übergabeliste
+
+Stand: 2026-07-12  
+Architekturentscheidung: [ADR 0011](adr/0011-native-only-anwendungsschicht-und-tauri-abbau.md)
+
+## Zweck und Arbeitsregel
+
+Diese Datei ist die fortsetzbare Quelle der Wahrheit für den Wechsel von
+Svelte/Tauri zu einer ausschließlich nativen LuxiFer-Anwendung. Jeder Agent
+liest vor Änderungen zuerst ADR 0010, ADR 0011, diese Datei und danach nur die
+für den nächsten offenen Schnitt genannten Quelldateien.
+
+Nach jedem stabilen Arbeitspaket:
+
+- Checkboxen und Befunde hier aktualisieren;
+- ausgeführte Prüfungen und bekannte Abweichungen eintragen;
+- `git status --short` prüfen und fremde Änderungen nicht einbeziehen;
+- den Schnitt als eigenen Commit abschließen, sofern Git-Schreibzugriff
+  verfügbar und der Nutzer mit Commit-orientierter Umsetzung fortfährt.
+
+Kein Punkt wird als erledigt markiert, solange nur die UI sichtbar ist. Erledigt
+bedeutet: vollständiger Erfolgs- und Fehlerpfad, Tests, Native-Anbindung und
+entfernte oder ausdrücklich verbliebene Altimplementierung.
+
+## Aktueller Ausgangszustand
+
+- [x] Nativer `winit + wgpu + egui`-Spike rendert performant.
+- [x] `luxifer-core` wird nativ direkt gelinkt.
+- [ ] Native ist funktional gleichwertig zur bisherigen Anwendung.
+- [ ] Tauri-unabhängige Anwendungsschicht existiert.
+- [ ] Tauri/Svelte ist entfernt.
+
+Bekannte Arbeitskopie zu Beginn dieser Liste: uncommittete Änderungen in
+`luxifer/native/src/app.rs`, `main.rs`, `tools.rs`, `ui.rs` sowie die neue Datei
+`icons.rs`. Diese Änderungen gehören dem Nutzer und dürfen bei Architekturarbeit
+nicht überschrieben oder ungeprüft in einen Commit aufgenommen werden.
+
+## Definition of Done der Gesamtmigration
+
+- [ ] Native startet zuverlässig mit leerem und bestehendem Projekt.
+- [ ] Alle als erforderlich klassifizierten Tauri-Funktionen besitzen einen
+      getesteten Native-/Application-Pfad.
+- [ ] Alle nicht übernommenen Funktionen sind bewusst als `entfällt` begründet.
+- [ ] Keine produktive Anwendungslogik liegt mehr unter `frontend/src-tauri`.
+- [ ] Native enthält keine zweite Projekt-, Asset-, Geometrie- oder
+      Laser-Fachimplementierung.
+- [ ] Fehler werden ohne Panic über ein gemeinsames `AppError` angezeigt.
+- [ ] Speichern, Schließen und Projektwechsel schützen ungespeicherte Änderungen.
+- [ ] Große Referenzdatei lädt und bleibt beim Pan/Zoom flüssig.
+- [ ] Core-, Application-, Native- und Treibertests sind grün.
+- [ ] Release-Build der nativen Anwendung ist grün.
+- [ ] Svelte, Tauri, WebView und zugehörige Buildkonfiguration sind gelöscht.
+- [ ] README, ADR-Index, Roadmap und Startanweisungen beschreiben nur Native.
+
+## Phase 0 — Bestand sichern und Wahrheit herstellen
+
+Ziel: Keine weitere scheinbare Funktionsbreite; belastbare Migrationsmatrix.
+
+- [ ] Aktuelle Native-Änderungen prüfen und als eigenen Spike-Checkpoint sichern.
+- [ ] Native-Demodaten aus `App::new` entfernen oder klar hinter einen
+      Entwicklungsmodus stellen.
+- [ ] Alle sichtbaren Native-Aktionen inventarisieren.
+- [ ] Nicht implementierte Aktionen deaktivieren und mit Tooltip
+      „Noch nicht migriert“ kennzeichnen.
+- [ ] Fehlerhafte Aktionen entweder reparieren oder bis zu ihrem Schnitt
+      deaktivieren.
+- [ ] Tauri-Commands vollständig inventarisieren:
+  - [ ] `frontend/src-tauri/src/lib.rs`
+  - [ ] `commands/shapes.rs`
+  - [ ] `commands/edit.rs`
+  - [ ] `commands/image.rs`
+  - [ ] `commands/project.rs`
+  - [ ] `commands/laser.rs`
+- [ ] Für jeden Command eine Zeile in der Funktionsmatrix ergänzen:
+
+| Bereich | Funktion | Quelle heute | Ziel | Status | Entscheidung/Abnahme |
+|---|---|---|---|---|---|
+| Editor | Auswahl/Hit-Test | Core + Tauri + Native | Core/Application | prüfen | ThorBurn-Regeln, additiv, leerer Klick |
+| Editor | Undo/Redo | Core + beide UIs | Application | prüfen | Zustand und Dirty-Flag korrekt |
+| Projekt | Öffnen/Speichern/Version | Tauri + Native-Duplikat | Application | prüfen | Assets/Metadaten/Fehler vollständig |
+| Import | SVG/DXF | Core + Adapter | Application | prüfen | Dateifehler und große Datei |
+| Import | Bild | Core + Adapter | Application | prüfen | Asset-Lebenszyklus und Parameter |
+| Text | Font/Text→Pfad | Core + Adapter | Application | prüfen | Fontfehler, Metadaten, Editieren |
+| Laser | Profile/Aktionen/Job | Tauri + Native-Duplikat | Application | prüfen | kein Hardwarezugriff im UI |
+
+Abnahme Phase 0:
+
+- [ ] Jeder sichtbare Native-Button ist `funktioniert`, `deaktiviert` oder
+      `bewusst entfällt`; es gibt keine Attrappen.
+- [ ] Jeder Tauri-Command ist einer Zielverantwortung zugeordnet.
+
+## Phase 1 — `luxifer-application` als Grenze einführen
+
+Ziel: Testbare Sitzung und konsistenter Aufrufpfad vor weiterer Migration.
+
+- [ ] Workspace-Crate `luxifer/application` anlegen und in `Cargo.toml`
+      aufnehmen.
+- [ ] Abhängigkeiten nur in zulässiger Richtung aufbauen:
+      `native -> application -> core/drivers`; niemals zurück.
+- [ ] `Application` beziehungsweise fachlich geschnittene Services definieren.
+- [ ] `EditorSession` mit eindeutigem Besitz des laufenden `AppState` einführen.
+- [ ] Einheitliches `AppError` definieren:
+  - [ ] stabiler Fehlercode;
+  - [ ] nutzerlesbare Meldung;
+  - [ ] optionale technische Ursache/Quelle;
+  - [ ] Konvertierungen für I/O, Projektformat, Import und Treiberfehler.
+- [ ] Ergebnis-/Statusmodelle UI-unabhängig halten; keine `egui`, `winit`,
+      `wgpu` oder Tauri-Typen.
+- [ ] Native besitzt genau eine zentrale Fehleranzeige und loggt technische
+      Details.
+- [ ] Erste Application-Tests für Sitzung, Fehler und Dirty-Status ergänzen.
+
+Abnahme Phase 1:
+
+- [ ] Eine triviale Operation (empfohlen: Undo/Redo oder Löschen) läuft aus
+      Native ausschließlich über Application.
+- [ ] Application-Tests laufen ohne Fenster/GPU.
+- [ ] `cargo test --workspace` ist grün.
+
+## Phase 2 — Editor-Grundworkflow vollständig migrieren
+
+Ziel: Ein kleiner, ehrlicher Editor, der zuverlässig benutzt werden kann.
+
+- [ ] Szene lesen und Render-Invalidierung aus Application-Zustand ableiten.
+- [ ] Auswahl: Klick, additiv, Rechteckauswahl, Auswahl löschen.
+- [ ] Zeichnen: Rechteck, Ellipse, Linie, Polygon einschließlich Abbruch und
+      Abschluss.
+- [ ] Transformieren: Verschieben, Skalieren, proportional Skalieren, Rotieren,
+      Spiegeln.
+- [ ] Transform-Handles und BBox ausschließlich aus kanonischer Core-Geometrie.
+- [ ] Layer/Farbe: aktivieren, Parameter, Sichtbarkeit, Sperre, Reihenfolge.
+- [ ] Löschen, Gruppieren, Aufheben, Undo und Redo.
+- [ ] Tastaturkürzel einschließlich Fokusregeln für Textfelder/Dialoge.
+- [ ] Jede Geste erzeugt genau einen sinnvollen Undo-Schritt.
+- [ ] Abbruch einer Geste stellt den Ausgangszustand wieder her.
+- [ ] Native-spezifische Geometrie-/Snapshot-Duplikate aus `app.rs` entfernen,
+      sobald der Core/Application-Pfad sie ersetzt.
+
+Abnahme Phase 2:
+
+- [ ] Automatisierte Tests für Auswahl- und Transformregeln.
+- [ ] Manueller Smoke-Test: zeichnen, mehrfach auswählen, bewegen, skalieren,
+      rotieren, Farbe ändern, sperren, Undo/Redo, löschen.
+- [ ] Keine bekannten Panics oder inkonsistenten Dirty-/Undo-Zustände.
+
+## Phase 3 — Projekt, Versionen und Assets
+
+Ziel: Verlustfreies Arbeiten und vollständiger Datei-/Asset-Lebenszyklus.
+
+- [ ] Tauri-Projektcommands und `native/src/project.rs` gegeneinander prüfen.
+- [ ] Eine kanonische `ProjectService`-Implementierung in Application/Core
+      herstellen; Duplikat entfernen.
+- [ ] Neues Projekt, Liste, Öffnen, Speichern und „Neue Version“.
+- [ ] Details, Umbenennen, Löschen, Import/Export von Projekten.
+- [ ] Versionsliste, Version öffnen/löschen und Thumbnails.
+- [ ] Asset-Verzeichnis und `asset_id`-Referenzen unverändert erhalten; keine
+      Base64-Dauerablage.
+- [ ] Autosave nur übernehmen, wenn der Workflow ausdrücklich festgelegt ist;
+      sonst bewusst manuell speichern.
+- [ ] Dirty-Guard bei Neu, Öffnen, Schließen und Programmende.
+- [ ] Atomisches Speichern beziehungsweise sichere Fehlerbehandlung bei
+      Teilfehlern prüfen.
+
+Abnahme Phase 3:
+
+- [ ] Roundtrip-Test mit Vektoren, Text und Bild-Asset.
+- [ ] Versionswechsel verliert keine Assets oder Metadaten.
+- [ ] Schreibfehler lässt den bisherigen Projektstand verwendbar.
+- [ ] `native/src/project.rs` enthält keine konkurrierende Fachlogik mehr.
+
+## Phase 4 — Import, Text und Bildbearbeitung
+
+Ziel: Vollständige Erzeugungs- und Bearbeitungsworkflows statt Import-Demos.
+
+- [ ] Nativen Dateidialog nur als Pfadlieferant behandeln.
+- [ ] SVG- und DXF-Import inklusive Warnungen/Fehlern migrieren.
+- [ ] Bildimport mit Asset-Anlage und Textur-Invalidierung migrieren.
+- [ ] Bildparameter: Modus, Schwelle, Helligkeit, Kontrast, Gamma und Invert.
+- [ ] Bildvorschau/Dithering ohne dauerhafte UI-Kopie des Assetzustands.
+- [ ] Systemfonts auflisten, Textvorschau, Text anlegen und Text editieren.
+- [ ] Fehlende/ungültige Fonts und nicht unterstützte Dateien verständlich
+      behandeln.
+- [ ] Trace-Workflow vollständig migrieren.
+
+Abnahme Phase 4:
+
+- [ ] Referenz-SVG/DXF/Bild/Text lassen sich importieren, speichern, erneut
+      öffnen und bearbeiten.
+- [ ] Abbruch im Dateidialog verändert das Projekt nicht.
+- [ ] Fehler erzeugen keine leeren Layer, verwaisten Assets oder Undo-Leichen.
+
+## Phase 5 — Geometrie- und Arrange-Werkzeuge
+
+Ziel: Alle produktiv benötigten Operationen mit expliziten Voraussetzungen.
+
+- [ ] Ausrichten und Verteilen inklusive Gruppen.
+- [ ] Gruppieren/Aufheben und Spiegeln.
+- [ ] Boolean: Vereinigung, Schnitt und Differenz.
+- [ ] Offset und Fillet.
+- [ ] Bridge und Ecken-Fillet.
+- [ ] Nesting und Nest-Fill.
+- [ ] Pattern Fill und Coaster-Einfügen.
+- [ ] Bézier/Spline: Anlegen, Segment-Hit-Test, Knoten teilen/löschen,
+      glatt/eckig und Handles ziehen.
+- [ ] Aktionen bei ungeeigneter Auswahl deaktivieren; Grund per Tooltip oder
+      Statusmeldung erklären.
+
+Abnahme Phase 5:
+
+- [ ] Ergebnis- und Regressionstests liegen überwiegend im Core.
+- [ ] Native prüft nicht selbst geometrische Voraussetzungen nach.
+- [ ] Jede mutierende Operation ist Undo/Redo-fähig.
+
+## Phase 6 — Vorschau, Job und Laser
+
+Ziel: Sicherer durchgängiger Weg vom Design zur Maschine.
+
+- [ ] Jobparameter und Jobvorschau vollständig aus Core/Application beziehen.
+- [ ] Native GPU-Vorschau für Cut/Fill/Raster/Image implementieren.
+- [ ] Vorschau-Simulation und Monitorzustand festlegen und umsetzen.
+- [ ] Tauri-Lasercommands und `native/src/laser.rs` inventarisieren.
+- [ ] Ein kanonischer `LaserService` in Application:
+  - [ ] Registry laden/speichern;
+  - [ ] Profile anlegen/bearbeiten/löschen/aktivieren;
+  - [ ] verfügbare Aktionen abfragen;
+  - [ ] Ping/Verbindung/Position;
+  - [ ] Start, Pause, Fortsetzen, Stopp, Frame und Export;
+  - [ ] Jog und Home;
+  - [ ] Fehler und Verbindungsabbruch.
+- [ ] UI darf niemals direkt einen Ruida-/GRBL-Treiber erzeugen.
+- [ ] Gefährliche Aktionen benötigen klare Zustände, Sperren und Rückmeldung.
+- [ ] Hardwarelose Tests mit Fake-/Testtreiber ergänzen.
+
+Abnahme Phase 6:
+
+- [ ] Export ist deterministisch gegen Referenzdaten getestet.
+- [ ] Start/Stop/Fehlerpfade funktionieren mit Fake-Treiber.
+- [ ] Manuelle Hardwaretests sind separat protokolliert; sie blockieren keine
+      hardwarelosen Testläufe.
+- [ ] `native/src/laser.rs` enthält keine konkurrierende Service-Logik mehr.
+
+## Phase 7 — Native-Struktur und Bedienqualität
+
+Ziel: Spike-Struktur in wartbare Produktstruktur überführen.
+
+- [ ] `native/src/app.rs` nach Verantwortung zerlegen, erst nachdem die
+      Application-Grenze stabil ist:
+  - [ ] Event-/Inputübersetzung;
+  - [ ] Tool-/Gestenzustand;
+  - [ ] Renderer und Cache-Invalidierung;
+  - [ ] UI-Komposition;
+  - [ ] Dialog-Präsentationszustand.
+- [ ] UI-Größen, DPI-Skalierung und Ultrawide-/kleine Fenster testen.
+- [ ] Tooltips, deaktivierte Zustände, Fokus und Tastaturnavigation.
+- [ ] Rechte Panels sinnvoll skalierbar/resizable machen.
+- [ ] Leere, Lade-, Fehler- und Fortschrittszustände gestalten.
+- [ ] Ungespeichert-/Projektstatus deutlich sichtbar machen.
+- [ ] Performancebudgets dokumentieren und messen:
+  - [ ] Startzeit;
+  - [ ] große SVG öffnen;
+  - [ ] Pan/Zoom/Drag;
+  - [ ] Speicherverbrauch;
+  - [ ] Cache-Neuaufbau nur bei relevanter Zustandsänderung.
+
+Abnahme Phase 7:
+
+- [ ] Keine einzelne Native-Datei wird zum neuen fachlichen Sammelmodul.
+- [ ] UI bleibt bei Referenzprojekt reaktionsschnell.
+- [ ] Wesentliche Workflows sind ohne versteckte Tastenkürzel auffindbar.
+
+## Phase 8 — Tauri/Svelte endgültig entfernen
+
+Voraussetzung: Phasen 0–7 und Gesamt-Definition-of-Done sind erfüllt oder jede
+bewusste Ausnahme ist hier dokumentiert.
+
+- [ ] Letzte Funktionsmatrix prüfen: keine ungeklärten Commands.
+- [ ] Noch relevante Tests aus `frontend/src-tauri` nach Core/Application
+      verschieben.
+- [ ] `luxifer/frontend/src-tauri/` löschen.
+- [ ] `luxifer/frontend/src/` und WebGL-/Canvas-Helfer löschen.
+- [ ] Node-/Svelte-/Vite-/Tauri-Konfiguration und Lockfiles löschen, sofern sie
+      keinem anderen Workspace-Teil dienen.
+- [ ] Tauri-spezifische Buildskripte, `dev.sh`-Workarounds und CI-Schritte
+      entfernen.
+- [ ] IPC-/JavaScript-DTOs entfernen; Rust-Domänentypen nicht künstlich an alte
+      Serialisierungsformen binden.
+- [ ] Workspace-Kommentare und `exclude` für `frontend/src-tauri` bereinigen.
+- [ ] tote Dependencies und Feature-Flags entfernen (`cargo machete` nur falls
+      bereits verfügbar; sonst manuell und per Build prüfen).
+- [ ] README, Entwicklerdokumentation, Roadmap und ADR-Verweise aktualisieren.
+- [ ] ADR 0008/0009 als historisch abgelöst markieren; ADR 0010/0011 bleiben
+      aktive Entscheidung.
+
+Endprüfung:
+
+```bash
+cargo fmt --check
+cargo check --workspace --all-targets
+cargo test --workspace
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo build -p luxifer-native --release
+```
+
+- [ ] Native Release manuell starten.
+- [ ] Projekt-Roundtrip und Referenzdatei prüfen.
+- [ ] Hardwareloser Laser-Smoke-Test.
+- [ ] `rg -n "tauri|svelte|WebView|invoke\(" .` prüfen und verbleibende Treffer
+      entweder entfernen oder als historische ADR-Inhalte bestätigen.
+- [ ] Abschließenden Tauri-Abbau als eigenen Commit dokumentieren.
+
+## Offene Architekturfragen
+
+Diese Fragen müssen vor dem jeweils betroffenen Schnitt entschieden und hier
+eingetragen werden; sie blockieren nicht Phase 0/1:
+
+- [ ] Soll `luxifer-application` ein Crate oder zunächst ein Modul in Native
+      sein? Vorgabe aus ADR 0011: eigenes Crate bevorzugt, weil es GPU-/UI-frei
+      testbar und die Abhängigkeitsrichtung sichtbar bleibt.
+- [ ] Synchroner oder asynchroner Geräte-/Dateiablauf? UI darf in keinem Fall
+      während langer I/O- oder Treiberoperationen blockieren.
+- [ ] Manueller Save oder Autosave? Kein stilles Übernehmen des bisherigen
+      Verhaltens ohne festgelegten Projektworkflow.
+- [ ] Welche Tauri-Funktionen werden bewusst nicht übernommen? Jede Streichung
+      benötigt eine kurze Begründung in der Funktionsmatrix.
+- [ ] Welche Plattformen sind Release-Ziele und welche nativen Dateidialoge/
+      Pfadregeln gelten dort?
+
+## Übergabenotiz für den nächsten Agenten
+
+Nächster sinnvoller Schritt ist **Phase 0**, nicht weitere UI-Implementierung:
+
+1. `git status --short` lesen und die vorhandenen Native-Änderungen schützen.
+2. Tauri-Commands per `rg "#\[tauri::command\]"` vollständig erfassen.
+3. Funktionsmatrix in dieser Datei vervollständigen.
+4. Native-Buttons den Funktionen zuordnen und Attrappen deaktivieren.
+5. Erst danach den minimalen `luxifer-application`-Schnitt entwerfen.
+
+Bei Unsicherheit gilt die Grenze aus ADR 0011: Core besitzt Fachregeln,
+Application besitzt Abläufe und Ressourcenkoordination, Native besitzt nur
+Interaktion und Darstellung.

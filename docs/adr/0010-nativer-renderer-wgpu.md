@@ -81,6 +81,12 @@ diesen Wechsel bezahlbar: migriert wird nur die dünne Zeichenschicht.
 - `main` bleibt lauffähig (Tauri), bis der Branch trägt — kein Big-Bang.
 
 ## Offen (Reihenfolge im Branch)
+
+Die funktionale Migration und der vollständige Tauri-Abbau werden durch
+[ADR 0011](0011-native-only-anwendungsschicht-und-tauri-abbau.md) präzisiert.
+Die operative Reihenfolge und Abnahmekriterien stehen in
+[`docs/native_only_migration_tasks.md`](../native_only_migration_tasks.md).
+
 1. Fenster + wgpu-Canvas mit Core-Geometrie (Design-Canvas: Shapes, Pan/Zoom,
    Auswahl, Hit-Test über den Core).
 2. egui-Panels: Werkzeuge, Layer, Palette, Laserpanel.
