@@ -144,8 +144,9 @@ Ziel: Ein kleiner, ehrlicher Editor, der zuverlässig benutzt werden kann.
 - [x] Transformieren: Verschieben, Skalieren, proportional Skalieren, Rotieren
       und Spiegeln laufen über `EditorSession`.
 - [ ] Transform-Handles und BBox ausschließlich aus kanonischer Core-Geometrie.
-- [ ] Layer/Farbe: Aktivieren läuft über `EditorSession`; Parameter,
-      Sichtbarkeit, Sperre und Reihenfolge folgen im Layer-Schnitt.
+- [ ] Layer/Farbe: Aktivieren, Sichtbarkeit, Job-Aktivierung, Sperre, Air Assist
+      und Reihenfolge laufen über `EditorSession`; Parameterdialog und
+      numerische Layerwerte folgen im nächsten Layer-Teilschnitt.
 - [x] Löschen, Gruppieren, Aufheben, Undo und Redo laufen über
       `EditorSession`.
 - [ ] Tastaturkürzel einschließlich Fokusregeln für Textfelder/Dialoge.
@@ -185,6 +186,13 @@ Laser-Statuskanals. Dabei wurde doppeltes Undo entfernt: Native setzte zuvor
 zusätzliche Undo-Punkte vor Core-Operationen, die selbst bereits atomare Undo-
 Punkte erzeugen. Validierung: 247 Workspace-Tests und Clippy mit `-D warnings`
 grün.
+
+Layer-Basisschnitt 2026-07-12: Die Native-Layerliste mutiert keine Layerfelder
+mehr direkt. Sichtbarkeit, Job-Aktivierung, Sperre, Air Assist und Reihenfolge
+laufen über validierte `EditorSession`-Methoden und sind Dirty-/Undo-fähig.
+Reihenfolge nutzt weiterhin die kanonische Core-Remap-Operation für
+`shape.layer_id`. Validierung: 250 Workspace-Tests und Clippy mit `-D warnings`
+grün. Offen bleiben Layer-Parameterdialog und Wertevalidierung.
 
 ## Phase 3 — Projekt, Versionen und Assets
 

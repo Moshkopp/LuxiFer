@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use egui_wgpu::ScreenDescriptor;
-use luxifer_application::{AppError, BoxShape, EditorSession, PointPath};
+use luxifer_application::{AppError, BoxShape, EditorSession, LayerToggle, PointPath};
 use luxifer_core::geometry::Geo;
 use luxifer_core::state::AppState;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -663,6 +663,16 @@ impl App {
     }
     pub fn selection_count(&self) -> usize {
         self.session.selected.len()
+    }
+
+    pub fn toggle_layer(&mut self, index: usize, toggle: LayerToggle) {
+        let result = self.session.toggle_layer(index, toggle);
+        self.report(result);
+    }
+
+    pub fn move_layer(&mut self, from: usize, to: usize) {
+        let result = self.session.move_layer(from, to);
+        self.report(result);
     }
 
     /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset laufen mit

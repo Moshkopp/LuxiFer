@@ -17,6 +17,14 @@ pub enum PointPath {
     Bezier,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerToggle {
+    Visible,
+    Enabled,
+    Locked,
+    AirAssist,
+}
+
 /// Laufende, UI-unabhängige Editor-Sitzung.
 ///
 /// `Deref`/`DerefMut` sind eine bewusst vorübergehende Migrationsbrücke für
@@ -281,6 +289,41 @@ impl EditorSession {
         Ok(())
     }
 
+    pub fn toggle_layer(&mut self, index: usize, toggle: LayerToggle) -> Result<(), AppError> {
+        if index >= self.state.layers.len() {
+            return Err(Self::invalid_layer(index));
+        }
+        self.state.push_undo();
+        let layer = &mut self.state.layers[index];
+        match toggle {
+            LayerToggle::Visible => layer.visible = !layer.visible,
+            LayerToggle::Enabled => layer.enabled = !layer.enabled,
+            LayerToggle::Locked => layer.locked = !layer.locked,
+            LayerToggle::AirAssist => layer.air_assist = !layer.air_assist,
+        }
+        self.state.dirty = true;
+        Ok(())
+    }
+
+    pub fn move_layer(&mut self, from: usize, to: usize) -> Result<(), AppError> {
+        let count = self.state.layers.len();
+        if from >= count {
+            return Err(Self::invalid_layer(from));
+        }
+        if to >= count {
+            return Err(Self::invalid_layer(to));
+        }
+        self.state.move_layer(from, to);
+        Ok(())
+    }
+
+    fn invalid_layer(index: usize) -> AppError {
+        AppError::new(
+            "layer_not_found",
+            format!("Ebene mit Index {index} wurde nicht gefunden."),
+        )
+    }
+
     fn require_selection(&self, action: &str) -> Result<(), AppError> {
         if self.state.selected.is_empty() {
             Err(AppError::new(
@@ -513,5 +556,45 @@ mod tests {
         assert_eq!(session.shapes[0].bbox(), original);
         assert!(session.redo());
         assert_ne!(session.shapes[0].bbox(), original);
+    }
+
+    #[test]
+    fn layer_schalter_ist_dirty_und_undo_faehig() {
+        let mut session = session_with_rect();
+        let original = session.layers[0].visible;
+
+        session.toggle_layer(0, LayerToggle::Visible).unwrap();
+        assert_eq!(session.layers[0].visible, !original);
+        assert!(session.dirty);
+
+        assert!(session.undo());
+        assert_eq!(session.layers[0].visible, original);
+    }
+
+    #[test]
+    fn ungueltiger_layerindex_liefert_fehler_ohne_mutation() {
+        let mut session = session_with_rect();
+
+        let error = session.toggle_layer(4, LayerToggle::Locked).unwrap_err();
+
+        assert_eq!(error.code(), "layer_not_found");
+        assert_eq!(session.layers.len(), 1);
+    }
+
+    #[test]
+    fn layer_verschieben_behaelt_shape_zuordnung_und_ist_undo_faehig() {
+        let mut session = session_with_rect();
+        session.clear_selection();
+        session.activate_color([0x10, 0xB9, 0x81]);
+        session.add_box_shape(BoxShape::Rect, [20.0, 0.0], [30.0, 10.0]);
+        let second_color = session.layers[1].color;
+
+        session.move_layer(1, 0).unwrap();
+        assert_eq!(session.layers[0].color, second_color);
+        assert_eq!(session.shapes[1].layer_id, 0);
+
+        assert!(session.undo());
+        assert_eq!(session.layers[1].color, second_color);
+        assert_eq!(session.shapes[1].layer_id, 1);
     }
 }

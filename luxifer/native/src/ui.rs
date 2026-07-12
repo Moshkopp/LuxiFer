@@ -4,6 +4,7 @@
 //! Zustand.
 
 use egui::{Color32, RichText};
+use luxifer_application::LayerToggle;
 use luxifer_core::model::SWATCH_COLORS;
 
 use crate::app::App;
@@ -611,7 +612,7 @@ fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
     // Von oben (letzter Layer) nach unten anzeigen.
     let n = app.session.layers.len();
     for i in (0..n).rev() {
-        let (color, name, mut visible, count) = {
+        let (color, name, visible, enabled, locked, air_assist, count) = {
             let l = &app.session.layers[i];
             let cnt = app
                 .session
@@ -619,7 +620,15 @@ fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
                 .iter()
                 .filter(|s| s.layer_id == i)
                 .count();
-            (l.color, l.name.clone(), l.visible, cnt)
+            (
+                l.color,
+                l.name.clone(),
+                l.visible,
+                l.enabled,
+                l.locked,
+                l.air_assist,
+                cnt,
+            )
         };
         ui.horizontal(|ui| {
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
@@ -627,10 +636,51 @@ fn layers_panel(ui: &mut egui::Ui, app: &mut App) {
             if resp.clicked() {
                 app.pick_color(color);
             }
-            if ui.checkbox(&mut visible, "").changed() {
-                app.session.layers[i].visible = visible;
+            if ui
+                .selectable_label(visible, "S")
+                .on_hover_text("Im Canvas sichtbar")
+                .clicked()
+            {
+                app.toggle_layer(i, LayerToggle::Visible);
+            }
+            if ui
+                .selectable_label(enabled, "J")
+                .on_hover_text("Im Laserjob aktiviert")
+                .clicked()
+            {
+                app.toggle_layer(i, LayerToggle::Enabled);
+            }
+            if ui
+                .selectable_label(locked, "L")
+                .on_hover_text("Bearbeitung sperren")
+                .clicked()
+            {
+                app.toggle_layer(i, LayerToggle::Locked);
+            }
+            if ui
+                .selectable_label(air_assist, "A")
+                .on_hover_text("Luftunterstützung")
+                .clicked()
+            {
+                app.toggle_layer(i, LayerToggle::AirAssist);
             }
             ui.label(format!("{name}  ·  {count}"));
+            if ui
+                .small_button("↑")
+                .on_hover_text("Ebene nach oben")
+                .clicked()
+                && i + 1 < n
+            {
+                app.move_layer(i, i + 1);
+            }
+            if ui
+                .small_button("↓")
+                .on_hover_text("Ebene nach unten")
+                .clicked()
+                && i > 0
+            {
+                app.move_layer(i, i - 1);
+            }
         });
     }
 }
