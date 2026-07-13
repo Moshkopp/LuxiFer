@@ -15,8 +15,8 @@ mod sync_outbox;
 mod test_env;
 
 pub use charon::{
-    connect_charon, sync_project_revisions, upload_pending_revisions, CharonConnection,
-    CharonHandshake, CharonSyncReport, CharonWorkplace,
+    connect_charon, sync_project_revisions, upload_pending_revisions, wait_for_project_event,
+    CharonConnection, CharonHandshake, CharonProjectEvent, CharonSyncReport, CharonWorkplace,
 };
 pub use error::AppError;
 pub use laser::LaserService;

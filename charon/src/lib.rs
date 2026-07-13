@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -49,7 +50,13 @@ struct Handshake {
     server_version: &'static str,
     protocol_version: u32,
     instance_id: String,
-    capabilities: [&'static str; 4],
+    capabilities: [&'static str; 5],
+}
+
+#[derive(Serialize)]
+struct ProjectEvent {
+    cursor: u64,
+    changed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +143,7 @@ struct ReceiptAck {
 struct ServerState {
     workplaces: BTreeMap<String, WorkplaceEntry>,
     data_dir: PathBuf,
+    revision_cursor: u64,
 }
 
 impl ServerState {
@@ -143,19 +151,31 @@ impl ServerState {
         Self {
             workplaces: BTreeMap::new(),
             data_dir,
+            revision_cursor: 0,
         }
     }
 }
 
+struct SharedState {
+    state: Mutex<ServerState>,
+    revision_changed: Condvar,
+}
+
 pub fn serve(config: ServerConfig) -> std::io::Result<()> {
     let listener = TcpListener::bind(config.bind)?;
-    let mut state = ServerState::new(charon_data_dir());
+    let state = Arc::new(SharedState {
+        state: Mutex::new(ServerState::new(charon_data_dir())),
+        revision_changed: Condvar::new(),
+    });
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                if let Err(error) = serve_connection(&mut stream, &mut state) {
-                    eprintln!("Charon-Verbindungsfehler: {error}");
-                }
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    if let Err(error) = serve_connection(&mut stream, &state) {
+                        eprintln!("Charon-Verbindungsfehler: {error}");
+                    }
+                });
             }
             Err(error) => eprintln!("Charon-Accept-Fehler: {error}"),
         }
@@ -163,7 +183,7 @@ pub fn serve(config: ServerConfig) -> std::io::Result<()> {
     Ok(())
 }
 
-fn serve_connection(stream: &mut TcpStream, state: &mut ServerState) -> std::io::Result<()> {
+fn serve_connection(stream: &mut TcpStream, shared: &SharedState) -> std::io::Result<()> {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
     let request = read_http_request(stream)?;
     let first_line = request.lines().next().unwrap_or_default().to_string();
@@ -172,7 +192,44 @@ fn serve_connection(stream: &mut TcpStream, state: &mut ServerState) -> std::io:
     let path = parts.next().unwrap_or_default();
     let body = request.split_once("\r\n\r\n").map_or("", |(_, body)| body);
 
-    let (status, body) = route(method, path, body, state)?;
+    let (status, body) = if method == "GET" && path.starts_with("/api/v1/events/projects?") {
+        let query = path.split_once('?').map_or("", |(_, query)| query);
+        let workplace_id = query_value(query, "workplace_id").unwrap_or_default();
+        let after = query_value(query, "after").and_then(|value| value.parse::<u64>().ok());
+        if !valid_id(workplace_id) || after.is_none() {
+            (
+                "400 Bad Request",
+                r#"{"error":"invalid_event_cursor"}"#.into(),
+            )
+        } else {
+            let after = after.unwrap_or_default();
+            let state = shared
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let (state, _) = shared
+                .revision_changed
+                .wait_timeout_while(state, std::time::Duration::from_secs(4), |state| {
+                    state.revision_cursor <= after
+                })
+                .unwrap_or_else(|poison| poison.into_inner());
+            json_body(&ProjectEvent {
+                cursor: state.revision_cursor,
+                changed: state.revision_cursor > after,
+            })?
+        }
+    } else {
+        let mut state = shared
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let result = route(method, path, body, &mut state)?;
+        if method == "POST" && path == "/api/v1/projects/revisions" && result.0.starts_with("200") {
+            state.revision_cursor = state.revision_cursor.saturating_add(1);
+            shared.revision_changed.notify_all();
+        }
+        result
+    };
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -194,7 +251,13 @@ fn route(
             server_version: env!("CARGO_PKG_VERSION"),
             protocol_version: PROTOCOL_VERSION,
             instance_id: format!("local-{}", std::process::id()),
-            capabilities: ["health", "handshake", "workplaces", "project_revisions"],
+            capabilities: [
+                "health",
+                "handshake",
+                "workplaces",
+                "project_revisions",
+                "project_events",
+            ],
         })?,
         ("GET", "/api/v1/workplaces") => json_body(&workplace_list(state, now_unix()))?,
         ("POST", "/api/v1/workplaces/heartbeat") => {
@@ -568,7 +631,13 @@ mod tests {
             server_version: "test",
             protocol_version: PROTOCOL_VERSION,
             instance_id: "local-test".into(),
-            capabilities: ["health", "handshake", "workplaces", "project_revisions"],
+            capabilities: [
+                "health",
+                "handshake",
+                "workplaces",
+                "project_revisions",
+                "project_events",
+            ],
         })
         .unwrap()
         .1;

@@ -129,10 +129,20 @@ Der erste Meilenstein ist umgesetzt:
   `workplace_id`; der sichtbare Arbeitsplatzname bleibt frei änderbar;
 - der Verbindungstest registriert den Arbeitsplatz und zeigt Charons bekannten
   Anwesenheits-Snapshot;
-- bei aktivierter Charon-Koordination meldet sich LuxiFer alle fünf Sekunden
-  aus einem Hintergrundthread. Netzwerkfehler blockieren den UI-Thread nicht
+- bei aktivierter Charon-Koordination meldet sich LuxiFer regelmäßig aus einem
+  Hintergrundthread. Netzwerkfehler blockieren den UI-Thread nicht
   und werden als getrennter Zustand sichtbar; nach 15 Sekunden ohne Meldung
   gilt ein Arbeitsplatz als offline;
+- Charon bietet zusätzlich `GET /api/v1/events/projects` als cursorbasierten
+  Long-Poll-Kanal an. Der Server bearbeitet Verbindungen parallel und weckt
+  wartende Clients unmittelbar nach einem erfolgreichen Revisionsupload;
+  nach vier Sekunden endet ein unverändertes Warten regulär. LuxiFer führt den
+  Kanal ausschließlich im bestehenden Hintergrundthread und niemals im
+  UI-Thread aus;
+- der Long-Poll ersetzt nicht Heartbeat, Outbox oder Inbox: Er verkürzt nur die
+  Zeit bis zum nächsten bereits idempotenten Sync. Nach Verbindungsabbruch oder
+  Charon-Neustart erkennt LuxiFer die neue Server-Instanz-ID und startet den
+  Cursor gefahrlos erneut bei null;
 - Charon hält die Registrierung vorerst nur im Arbeitsspeicher. Ein Neustart
   leert die Anwesenheitsliste, die laufenden Clients melden sich selbstständig
   wieder an;
@@ -181,8 +191,7 @@ Der erste Meilenstein ist umgesetzt:
   lokal noch nicht existiert. Bereits vorhandene Projekte bleiben bis zum
   Vergleichs-/Konfliktablauf unangetastet in der Inbox;
 - da Assets noch nicht übertragen werden, wird die Übernahme von Projekten mit
-  `asset_refs` verständlich abgelehnt. Der deaktivierte Knopf `Änderungen
-  anzeigen` macht die nächste Ausbaustufe sichtbar, ohne Funktion vorzutäuschen;
+  `asset_refs` verständlich abgelehnt;
 - nach erfolgreichem Import erscheint das Projekt in `Meine Projekte`; der
   Canvas und ein eventuell geöffnetes, ungespeichertes Projekt werden nicht
   automatisch ersetzt.
@@ -198,8 +207,8 @@ Der erste Meilenstein ist umgesetzt:
   ungespeichert, greift vorher der Dirty-Guard. Projekte mit noch nicht
   übertragenen Bild-Assets bleiben gesperrt.
 
-Noch offen sind späterer Objekt-Merge, Asset- und Settings-Transfer, Push-Kanal,
-Konfliktbenachrichtigung sowie Ruida-Leases.
+Noch offen sind späterer Objekt-Merge, Asset- und Settings-Transfer sowie
+Ruida-Leases.
 Charon darf Versionen verteilen und
 Verbindungen koordinieren, aber keine Projektinhalte selbst bearbeiten oder
 laufende Jobs unterbrechen.

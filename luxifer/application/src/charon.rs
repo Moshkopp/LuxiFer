@@ -11,6 +11,7 @@ use crate::AppError;
 const PROTOCOL_VERSION: u32 = 1;
 const TIMEOUT: Duration = Duration::from_millis(800);
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10);
+const EVENT_TIMEOUT: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct CharonHandshake {
@@ -98,6 +99,12 @@ struct ReceiptAck {
     accepted: bool,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct CharonProjectEvent {
+    pub cursor: u64,
+    pub changed: bool,
+}
+
 pub fn connect_charon(
     base_url: &str,
     workplace_id: &str,
@@ -134,6 +141,24 @@ pub fn connect_charon(
         handshake,
         workplaces,
     })
+}
+
+/// Wartet serverseitig auf eine neue Projektrevision und kehrt spätestens nach
+/// Charons Long-Poll-Timeout zurück. Das UI wird dabei nicht blockiert, weil
+/// der Aufruf ausschließlich im Charon-Hintergrundthread läuft.
+pub fn wait_for_project_event(
+    base_url: &str,
+    workplace_id: &str,
+    after: u64,
+) -> Result<CharonProjectEvent, AppError> {
+    let endpoint = HttpEndpoint::parse(base_url)?;
+    parse_json_response(&send_request(
+        &endpoint,
+        "GET",
+        &format!("/api/v1/events/projects?workplace_id={workplace_id}&after={after}"),
+        "",
+        EVENT_TIMEOUT,
+    )?)
 }
 
 pub fn upload_pending_revisions(base_url: &str) -> Result<CharonSyncReport, AppError> {
@@ -410,5 +435,13 @@ mod tests {
                 .authority,
             "localhost:3737"
         );
+    }
+
+    #[test]
+    fn projekt_event_traegt_monotonen_cursor() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"cursor\":7,\"changed\":true}";
+        let event: CharonProjectEvent = parse_json_response(response).unwrap();
+        assert_eq!(event.cursor, 7);
+        assert!(event.changed);
     }
 }

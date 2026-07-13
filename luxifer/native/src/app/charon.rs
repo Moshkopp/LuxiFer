@@ -1,6 +1,6 @@
 //! Hintergrundverbindung zum optionalen Charon-Dienst (ADR 0012).
 
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
 use luxifer_application::CharonConnection;
@@ -64,35 +64,79 @@ impl CharonRuntime {
 
 fn worker(command_rx: Receiver<WorkerCommand>, result_tx: Sender<CharonWorkerResult>) {
     let mut config: Option<CharonConfig> = None;
+    let mut event_cursor = 0_u64;
+    let mut server_instance: Option<String> = None;
     loop {
         match config.as_ref() {
             Some(current) => {
-                let result = luxifer_application::connect_charon(
+                let connection = luxifer_application::connect_charon(
                     &current.url,
                     &current.workplace_id,
                     &current.workplace_name,
-                )
-                .map(|connection| {
-                    let sync = luxifer_application::sync_project_revisions(
-                        &current.url,
-                        &current.workplace_id,
-                    )
-                    .map_err(|error| error.message().to_owned());
-                    CharonWorkerResult::Connected(connection, sync)
-                })
-                .unwrap_or_else(|error| CharonWorkerResult::Failed(error.message().to_owned()));
+                );
+                let connected = connection.is_ok();
+                let result = connection
+                    .map(|connection| {
+                        if server_instance.as_deref()
+                            != Some(connection.handshake.instance_id.as_str())
+                        {
+                            event_cursor = 0;
+                            server_instance = Some(connection.handshake.instance_id.clone());
+                        }
+                        let sync = luxifer_application::sync_project_revisions(
+                            &current.url,
+                            &current.workplace_id,
+                        )
+                        .map_err(|error| error.message().to_owned());
+                        CharonWorkerResult::Connected(connection, sync)
+                    })
+                    .unwrap_or_else(|error| CharonWorkerResult::Failed(error.message().to_owned()));
                 if result_tx.send(result).is_err() {
                     return;
                 }
-                match command_rx.recv_timeout(HEARTBEAT_INTERVAL) {
-                    Ok(WorkerCommand::Configure(next)) => config = next,
-                    Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => return,
+                if connected {
+                    match luxifer_application::wait_for_project_event(
+                        &current.url,
+                        &current.workplace_id,
+                        event_cursor,
+                    ) {
+                        Ok(event) => event_cursor = event.cursor,
+                        Err(_) => match command_rx.recv_timeout(HEARTBEAT_INTERVAL) {
+                            Ok(WorkerCommand::Configure(next)) => {
+                                config = next;
+                                event_cursor = 0;
+                                server_instance = None;
+                            }
+                            Err(RecvTimeoutError::Timeout) => {}
+                            Err(RecvTimeoutError::Disconnected) => return,
+                        },
+                    }
+                } else {
+                    match command_rx.recv_timeout(HEARTBEAT_INTERVAL) {
+                        Ok(WorkerCommand::Configure(next)) => {
+                            config = next;
+                            event_cursor = 0;
+                            server_instance = None;
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                match command_rx.try_recv() {
+                    Ok(WorkerCommand::Configure(next)) => {
+                        config = next;
+                        event_cursor = 0;
+                        server_instance = None;
+                    }
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => return,
                 }
             }
             None => match command_rx.recv() {
                 Ok(WorkerCommand::Configure(next)) => {
                     config = next;
+                    event_cursor = 0;
+                    server_instance = None;
                     if config.is_none() && result_tx.send(CharonWorkerResult::Disabled).is_err() {
                         return;
                     }
