@@ -282,29 +282,42 @@ fn assets_pane(
         return;
     }
 
+    let card_width = 190.0;
+    let columns = ((ui.available_width() + 8.0) / (card_width + 8.0))
+        .floor()
+        .max(1.0) as usize;
+    let row_count = reusable.len().div_ceil(columns);
     egui::ScrollArea::vertical()
-        .id_salt("asset_catalog")
-        .show_rows(ui, 86.0, reusable.len(), |ui, rows| {
-            for asset in &reusable[rows] {
-                let response = egui::Frame::group(ui.style())
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            if let Some(texture) = thumbnails.get(&asset.id) {
-                                ui.add(
-                                    egui::Image::new(texture)
-                                        .fit_to_exact_size(egui::vec2(96.0, 72.0)),
-                                );
-                            } else {
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(96.0, 72.0),
-                                    egui::Sense::hover(),
-                                );
-                                ui.painter()
-                                    .rect_filled(rect, 6.0, ui.visuals().faint_bg_color);
-                                actions.push(UiAction::RequestAssetThumbnail(asset.id.clone()));
-                            }
-                            ui.vertical(|ui| {
+        .id_salt("asset_catalog_cards")
+        .show_rows(ui, 220.0, row_count, |ui, rows| {
+            for row in rows {
+                ui.horizontal(|ui| {
+                    for column in 0..columns {
+                        let index = row * columns + column;
+                        let Some(asset) = reusable.get(index) else {
+                            break;
+                        };
+                        let response = egui::Frame::group(ui.style())
+                            .show(ui, |ui| {
+                                ui.set_width(card_width);
+                                ui.set_height(202.0);
+                                if let Some(texture) = thumbnails.get(&asset.id) {
+                                    ui.add(
+                                        egui::Image::new(texture)
+                                            .fit_to_exact_size(egui::vec2(174.0, 112.0)),
+                                    );
+                                } else {
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(174.0, 112.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        6.0,
+                                        ui.visuals().faint_bg_color,
+                                    );
+                                    actions.push(UiAction::RequestAssetThumbnail(asset.id.clone()));
+                                }
                                 ui.strong(if asset.original_name.is_empty() {
                                     &asset.id
                                 } else {
@@ -317,36 +330,43 @@ fn assets_pane(
                                     luxifer_core::AssetKind::Font => "Font",
                                 });
                                 if !asset.tags.is_empty() {
-                                    ui.weak(asset.tags.join(" · "));
+                                    ui.weak(egui::RichText::new(asset.tags.join(" · ")).small());
                                 }
-                            });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
+                                ui.horizontal(|ui| {
                                     if ui
-                                        .add_enabled(
-                                            !import_pending,
-                                            egui::Button::new(if import_pending {
-                                                "Importiere …"
-                                            } else {
-                                                "Einfügen"
-                                            }),
-                                        )
+                                        .add_enabled(!import_pending, egui::Button::new("Einfügen"))
                                         .clicked()
                                     {
                                         actions
                                             .push(UiAction::ImportCatalogAsset(asset.id.clone()));
                                     }
-                                },
-                            );
-                        });
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if response.double_clicked() && !import_pending {
-                    actions.push(UiAction::ImportCatalogAsset(asset.id.clone()));
-                }
-                ui.add_space(6.0);
+                                    if browser.confirm_delete_asset.as_deref()
+                                        == Some(asset.id.as_str())
+                                    {
+                                        if ui.button("Ja").clicked() {
+                                            browser.confirm_delete_asset = None;
+                                            actions.push(UiAction::DeleteCatalogAsset(
+                                                asset.id.clone(),
+                                            ));
+                                        }
+                                        if ui.button("Nein").clicked() {
+                                            browser.confirm_delete_asset = None;
+                                        }
+                                    } else if ui
+                                        .add_enabled(!import_pending, egui::Button::new("Löschen"))
+                                        .clicked()
+                                    {
+                                        browser.confirm_delete_asset = Some(asset.id.clone());
+                                    }
+                                });
+                            })
+                            .response
+                            .interact(egui::Sense::click());
+                        if response.double_clicked() && !import_pending {
+                            actions.push(UiAction::ImportCatalogAsset(asset.id.clone()));
+                        }
+                    }
+                });
             }
         });
 }

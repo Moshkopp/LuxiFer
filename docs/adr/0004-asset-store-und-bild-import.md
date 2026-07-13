@@ -240,6 +240,10 @@ Teil dieses ADR — hier entstehen nur Datenmodell, Import, Bearbeitung und Laye
 - `LayerMode` bekommt `Image`; `Layer` bekommt `bidirectional`.
 - Projekt-Versionen (ADR 0003): Ein Bild-Shape referenziert nur die Asset-ID —
   Versions-Snapshots bleiben schlank, das Bild liegt einmal im Store.
+- Die spätere Asset-Bibliothek entfernt unbenutzte Assets ausdrücklich. Wird
+  eine ID noch von einem lokalen Projekt referenziert, bleibt ihr Inhalt
+  erhalten und nur die Bibliothekskarte wird lokal ausgeblendet. Damit kann
+  kein Bibliotheks-Löschvorgang ein gespeichertes Projekt beschädigen.
 
 ## Nicht Teil dieser Entscheidung
 
@@ -251,4 +255,3 @@ Teil dieses ADR — hier entstehen nur Datenmodell, Import, Bearbeitung und Laye
 - **SVG/DXF/PDF-Import** — nur der gemeinsame Button/Dispatch wird vorbereitet.
 - **Job-/Raster-Kompilierung** (Bild → Laserzeilen) — eigener Job-Teil.
 - **Schärfung (Unsharp Mask)** — vorgemerkt, nicht jetzt.
-- **Aufräumen verwaister Assets** — vorgemerkt, nicht jetzt.

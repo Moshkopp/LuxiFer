@@ -102,6 +102,8 @@ pub enum UiAction {
     Import,
     /// Ein bereits katalogisiertes Bild bzw. eine Vektorquelle wiederverwenden.
     ImportCatalogAsset(String),
+    /// Asset sicher aus der lokalen Bibliothek entfernen oder ausblenden.
+    DeleteCatalogAsset(String),
     /// Fehlendes Thumbnail für ein sichtbares Asset im Hintergrund anfordern.
     RequestAssetThumbnail(String),
     /// Die aktuelle Fehleranzeige schließen.

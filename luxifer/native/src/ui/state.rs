@@ -133,6 +133,7 @@ pub struct ProjectBrowserState {
     pub confirm_delete: bool,
     /// Zweistufiges Löschen einer Version (Versions-ID der ersten Stufe).
     pub confirm_delete_version: Option<String>,
+    pub confirm_delete_asset: Option<String>,
     /// Gecachte Detailsicht + Vektor-Miniatur des markierten Projekts.
     /// `cache_key` macht den Cache gegen Umbenennen/Speichern/Editieren stabil.
     pub cached: Option<CachedProjectDetail>,

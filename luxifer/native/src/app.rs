@@ -152,8 +152,12 @@ impl App {
         let project = luxifer_application::ProjectService::new();
         let project_catalog = project.list();
         image::enrich_asset_tags_from_projects();
-        let asset_catalog =
-            luxifer_core::list_assets(&luxifer_core::assets_dir()).unwrap_or_default();
+        let asset_store = luxifer_core::assets_dir();
+        let asset_catalog = luxifer_core::list_assets(&asset_store)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|asset| !luxifer_core::asset_hidden(&asset_store, &asset.id))
+            .collect();
         let asset_thumbnails = Default::default();
         let thumbnail_runtime = image::ThumbnailRuntime::new();
         let asset_import_runtime = image::AssetImportRuntime::new();
@@ -459,6 +463,7 @@ impl App {
             A::Redo => self.redo(),
             A::Import => self.import_dialog(),
             A::ImportCatalogAsset(id) => self.import_catalog_asset(&id),
+            A::DeleteCatalogAsset(id) => self.delete_catalog_asset(&id),
             A::RequestAssetThumbnail(id) => self.request_asset_thumbnail(&id),
             A::DismissError => self.app_error = None,
             A::LaserSelect(id) => self.laser_select(&id),

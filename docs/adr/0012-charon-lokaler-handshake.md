@@ -311,7 +311,14 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
 - auch der erstmalige Bildimport liest, dekodiert, normalisiert und schreibt
   das Asset im Asset-Worker. Dieser bereitet zugleich die RGBA-Pixel für die
   GPU vor; der UI-Thread übernimmt nur das fertige Asset, lädt den vorbereiteten
-  Texturpuffer hoch und fügt anschließend das `Geo::Image` ein.
+  Texturpuffer hoch und fügt anschließend das `Geo::Image` ein;
+- die Asset-Bibliothek zeigt ihre virtualisierten Treffer als Kartenraster.
+  Automatische Tags entfernen häufige deutsche Füllwörter. Das Löschen prüft
+  Projektverweise im Asset-Worker: verwendete Assets bleiben technisch
+  erhalten und werden nur arbeitsplatzlokal ausgeblendet; unbenutzte Bytes,
+  Metadaten und Thumbnails werden entfernt. Eine lokale Tombstone-Markierung
+  verhindert den unmittelbaren erneuten Download durch Charon, wird aber bei
+  einem bewussten Reimport desselben Inhalts aufgehoben.
 
 Damit ist der lokale Funktionsumfang dieses ADR abgeschlossen. Noch offen sind
 die ausdrücklich nachgelagerten Betriebs- und Ausbaupunkte:

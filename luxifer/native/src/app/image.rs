@@ -16,7 +16,7 @@ struct PreparedImage {
     width: u32,
     height: u32,
 }
-type AssetImportResult = Result<
+type PreparedAssetResult = Result<
     (
         luxifer_core::AssetMeta,
         Option<ImportedContours>,
@@ -25,14 +25,23 @@ type AssetImportResult = Result<
     String,
 >;
 
+enum AssetWorkerResult {
+    Prepared(PreparedAssetResult),
+    Deleted(Result<(String, bool), String>),
+}
+
 pub(super) struct AssetImportRuntime {
     request_tx: std::sync::mpsc::Sender<AssetImportRequest>,
-    result_rx: std::sync::mpsc::Receiver<AssetImportResult>,
+    result_rx: std::sync::mpsc::Receiver<AssetWorkerResult>,
 }
 
 enum AssetImportRequest {
     Catalog(String),
     ImagePath(std::path::PathBuf),
+    Delete {
+        id: String,
+        referenced_in_session: bool,
+    },
 }
 
 impl AssetImportRuntime {
@@ -44,6 +53,20 @@ impl AssetImportRuntime {
             .spawn(move || {
                 let store = luxifer_core::assets_dir();
                 while let Ok(request) = request_rx.recv() {
+                    let request = match request {
+                        AssetImportRequest::Delete {
+                            id,
+                            referenced_in_session,
+                        } => {
+                            let result = delete_or_hide_asset(&store, &id, referenced_in_session)
+                                .map(|hidden| (id, hidden));
+                            if result_tx.send(AssetWorkerResult::Deleted(result)).is_err() {
+                                return;
+                            }
+                            continue;
+                        }
+                        request => request,
+                    };
                     let result = (|| {
                         let meta = match request {
                             AssetImportRequest::Catalog(id) => {
@@ -60,6 +83,7 @@ impl AssetImportRuntime {
                                 luxifer_core::import_image(&store, &bytes, name)
                                     .map_err(|error| error.to_string())?
                             }
+                            AssetImportRequest::Delete { .. } => unreachable!(),
                         };
                         let contours = match meta.kind {
                             luxifer_core::AssetKind::SvgSource
@@ -91,7 +115,7 @@ impl AssetImportRuntime {
                         };
                         Ok((meta, contours, prepared_image))
                     })();
-                    if result_tx.send(result).is_err() {
+                    if result_tx.send(AssetWorkerResult::Prepared(result)).is_err() {
                         return;
                     }
                 }
@@ -102,6 +126,28 @@ impl AssetImportRuntime {
             result_rx,
         }
     }
+}
+
+fn delete_or_hide_asset(
+    store: &Path,
+    id: &str,
+    referenced_in_session: bool,
+) -> Result<bool, String> {
+    let projects = luxifer_core::projects_dir();
+    let referenced = referenced_in_session
+        || luxifer_core::list_projects(&projects)
+            .into_iter()
+            .any(|info| {
+                luxifer_core::ProjectFile::load_by_name(&projects, &info.name)
+                    .map(|project| project.asset_refs.iter().any(|asset| asset == id))
+                    .unwrap_or(false)
+            });
+    if referenced {
+        luxifer_core::hide_asset(store, &id.to_owned()).map_err(|error| error.to_string())?;
+    } else {
+        luxifer_core::delete_asset(store, &id.to_owned()).map_err(|error| error.to_string())?;
+    }
+    Ok(referenced)
 }
 
 impl ThumbnailRuntime {
@@ -147,8 +193,13 @@ pub(super) fn enrich_asset_tags_from_projects() {
 
 impl App {
     pub(crate) fn refresh_asset_catalog(&mut self) {
-        match luxifer_core::list_assets(&luxifer_core::assets_dir()) {
+        let store = luxifer_core::assets_dir();
+        match luxifer_core::list_assets(&store) {
             Ok(assets) => {
+                let assets: Vec<_> = assets
+                    .into_iter()
+                    .filter(|asset| !luxifer_core::asset_hidden(&store, &asset.id))
+                    .collect();
                 self.asset_thumbnails
                     .retain(|id, _| assets.iter().any(|asset| asset.id == *id));
                 self.thumbnail_failed
@@ -237,6 +288,26 @@ impl App {
             return false;
         };
         self.asset_import_pending = false;
+        if let AssetWorkerResult::Deleted(result) = result {
+            match result {
+                Ok((id, hidden)) => {
+                    self.asset_catalog.retain(|asset| asset.id != id);
+                    self.asset_thumbnails.remove(&id);
+                    self.thumbnail_pending.remove(&id);
+                    self.thumbnail_failed.remove(&id);
+                    self.toasts.success(if hidden {
+                        "Asset wird von einem Projekt verwendet und wurde ausgeblendet."
+                    } else {
+                        "Asset wurde gelöscht."
+                    });
+                }
+                Err(error) => self.toasts.error(format!("Asset löschen: {error}")),
+            }
+            return true;
+        }
+        let AssetWorkerResult::Prepared(result) = result else {
+            unreachable!()
+        };
         let (meta, contours, prepared_image) = match result {
             Ok(result) => result,
             Err(error) => {
@@ -275,6 +346,29 @@ impl App {
         self.tag_asset_for_current_project(&meta.id);
         self.refresh_asset_catalog();
         true
+    }
+
+    pub fn delete_catalog_asset(&mut self, id: &str) {
+        if self.asset_import_pending {
+            return;
+        }
+        let referenced_in_session = self
+            .session
+            .shapes
+            .iter()
+            .any(|shape| matches!(&shape.geo, Geo::Image { asset, .. } if asset == id));
+        if self
+            .asset_import_runtime
+            .request_tx
+            .send(AssetImportRequest::Delete {
+                id: id.to_owned(),
+                referenced_in_session,
+            })
+            .is_ok()
+        {
+            self.asset_import_pending = true;
+            self.toasts.success("Asset-Verwendung wird geprüft …");
+        }
     }
 
     /// Öffnet den Bildparameter-Dialog mit den aktuellen Werten des Bild-Shapes.

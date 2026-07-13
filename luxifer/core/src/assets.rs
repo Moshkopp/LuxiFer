@@ -143,6 +143,7 @@ pub fn import_image(
     let (png, width, height, source_format) = to_grayscale_png(source_bytes)?;
     let id = content_hash(&png);
     std::fs::create_dir_all(store_dir)?;
+    let _ = std::fs::remove_file(hidden_path(store_dir, &id));
 
     let bytes_path = store_dir.join(format!("{id}.png"));
     // Nur schreiben, wenn noch nicht vorhanden (idempotent, spart I/O).
@@ -188,6 +189,7 @@ pub fn import_source(
     }
     let id = content_hash(source_bytes);
     std::fs::create_dir_all(store_dir)?;
+    let _ = std::fs::remove_file(hidden_path(store_dir, &id));
     let bytes_path = store_dir.join(format!("{id}.{ext}"));
     if !bytes_path.exists() {
         std::fs::write(&bytes_path, source_bytes)?;
@@ -226,7 +228,10 @@ pub fn list_assets(store_dir: &Path) -> Result<Vec<AssetMeta>, AssetError> {
             continue;
         }
         let bytes = std::fs::read(path)?;
-        assets.push(serde_json::from_slice(&bytes).map_err(|e| AssetError(e.to_string()))?);
+        let mut meta: AssetMeta =
+            serde_json::from_slice(&bytes).map_err(|e| AssetError(e.to_string()))?;
+        meta.tags.retain(|tag| !is_stopword(tag));
+        assets.push(meta);
     }
     assets.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(assets)
@@ -285,7 +290,9 @@ pub fn add_asset_tags<'a>(
     sources: impl IntoIterator<Item = &'a str>,
 ) -> Result<AssetMeta, AssetError> {
     let mut meta = asset_meta(store_dir, id)?;
-    let mut changed = false;
+    let before = meta.tags.len();
+    meta.tags.retain(|tag| !is_stopword(tag));
+    let mut changed = meta.tags.len() != before;
     for tag in derive_tags(sources) {
         if !meta.tags.contains(&tag) {
             meta.tags.push(tag);
@@ -312,30 +319,7 @@ pub fn derive_tags<'a>(sources: impl IntoIterator<Item = &'a str>) -> Vec<String
             .split(|ch: char| !ch.is_alphanumeric())
             .map(str::to_lowercase)
             .filter(|word| word.chars().count() >= 2)
-            .filter(|word| {
-                !matches!(
-                    word.as_str(),
-                    "der"
-                        | "die"
-                        | "das"
-                        | "den"
-                        | "dem"
-                        | "des"
-                        | "ein"
-                        | "eine"
-                        | "einer"
-                        | "einem"
-                        | "einen"
-                        | "und"
-                        | "oder"
-                        | "für"
-                        | "von"
-                        | "mit"
-                        | "sein"
-                        | "seine"
-                        | "seinen"
-                )
-            })
+            .filter(|word| !is_stopword(word))
         {
             if !tags.contains(&word) {
                 tags.push(word);
@@ -344,6 +328,74 @@ pub fn derive_tags<'a>(sources: impl IntoIterator<Item = &'a str>) -> Vec<String
     }
     tags.sort();
     tags
+}
+
+fn is_stopword(word: &str) -> bool {
+    matches!(
+        word,
+        "der"
+            | "die"
+            | "das"
+            | "den"
+            | "dem"
+            | "des"
+            | "ein"
+            | "eine"
+            | "einer"
+            | "einem"
+            | "einen"
+            | "und"
+            | "oder"
+            | "für"
+            | "von"
+            | "mit"
+            | "aus"
+            | "bei"
+            | "nach"
+            | "auf"
+            | "im"
+            | "in"
+            | "am"
+            | "an"
+            | "zum"
+            | "zur"
+            | "sein"
+            | "seine"
+            | "seinen"
+    )
+}
+
+fn hidden_path(store_dir: &Path, id: &AssetId) -> std::path::PathBuf {
+    store_dir.join(format!("{id}.hidden"))
+}
+
+/// Lokale Bibliotheksentscheidung; wird bewusst nicht mit Charon synchronisiert.
+pub fn asset_hidden(store_dir: &Path, id: &AssetId) -> bool {
+    hidden_path(store_dir, id).exists()
+}
+
+pub fn hide_asset(store_dir: &Path, id: &AssetId) -> Result<(), AssetError> {
+    std::fs::create_dir_all(store_dir)?;
+    std::fs::write(hidden_path(store_dir, id), [])?;
+    Ok(())
+}
+
+/// Entfernt lokale Bytes und Metadaten, behält aber eine Tombstone-Markierung,
+/// damit ein entfernter Charon-Stand nicht sofort wieder heruntergeladen wird.
+pub fn delete_asset(store_dir: &Path, id: &AssetId) -> Result<(), AssetError> {
+    let meta = asset_meta(store_dir, id)?;
+    for path in [
+        store_dir.join(format!("{id}.{}", meta.ext)),
+        store_dir.join(format!("{id}.meta.json")),
+        store_dir.join(format!("{id}.thumb.png")),
+    ] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(AssetError(error.to_string())),
+        }
+    }
+    hide_asset(store_dir, id)
 }
 
 /// Erzeugt bzw. lädt ein lokales 160×120-Thumbnail. Es ist ein vollständig
@@ -716,6 +768,31 @@ mod tests {
             ]),
             vec!["geburtstag", "heinz", "svg", "untersetzer", "v2"]
         );
+    }
+
+    #[test]
+    fn deutsche_fuellwoerter_werden_nicht_zu_tags() {
+        assert_eq!(
+            derive_tags(["Schild mit Motiv von Heinz für Tanja aus Eiche"]),
+            vec!["eiche", "heinz", "motiv", "schild", "tanja"]
+        );
+    }
+
+    #[test]
+    fn asset_kann_lokal_versteckt_oder_physisch_geloescht_werden() {
+        let dir = std::env::temp_dir().join(format!("luxifer_delete_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let meta =
+            import_source(&dir, b"source", "quelle.svg", "svg", AssetKind::SvgSource).unwrap();
+        hide_asset(&dir, &meta.id).unwrap();
+        assert!(asset_hidden(&dir, &meta.id));
+        assert!(load_asset(&dir, &meta.id).is_ok());
+
+        delete_asset(&dir, &meta.id).unwrap();
+        assert!(asset_hidden(&dir, &meta.id));
+        assert!(load_asset(&dir, &meta.id).is_err());
+        assert!(asset_meta(&dir, &meta.id).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

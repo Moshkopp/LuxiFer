@@ -483,6 +483,9 @@ pub fn sync_assets(base_url: &str) -> Result<CharonSyncReport, AppError> {
         report.assets_uploaded += 1;
     }
     for meta in remote {
+        if luxifer_core::asset_hidden(&store, &meta.id) {
+            continue;
+        }
         if local
             .iter()
             .any(|item| item.id == meta.id && meta.tags.iter().all(|tag| item.tags.contains(tag)))

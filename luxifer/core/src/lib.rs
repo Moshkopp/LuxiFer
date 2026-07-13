@@ -38,9 +38,9 @@ pub mod ui_settings;
 
 pub use arrange::{Align, Distribute};
 pub use assets::{
-    add_asset_tags, apply_params, asset_meta, asset_path, asset_thumbnail, assets_dir, derive_tags,
-    import_image, import_source, list_assets, load_asset, load_asset_luma, rendered_png,
-    store_asset, AssetId, AssetKind, AssetMeta,
+    add_asset_tags, apply_params, asset_hidden, asset_meta, asset_path, asset_thumbnail,
+    assets_dir, delete_asset, derive_tags, hide_asset, import_image, import_source, list_assets,
+    load_asset, load_asset_luma, rendered_png, store_asset, AssetId, AssetKind, AssetMeta,
 };
 pub use geo_ops::BoolOp;
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
