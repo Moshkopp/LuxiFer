@@ -192,15 +192,29 @@ fn charon_section(
         CharonTestStatus::Idle => {
             ui.weak("Noch nicht getestet.");
         }
-        CharonTestStatus::Connected(handshake) => {
+        CharonTestStatus::Connected(connection) => {
             ui.colored_label(
                 egui::Color32::from_rgb(0x34, 0xd3, 0x99),
                 format!(
                     "Verbunden: Charon {} · Protokoll {}",
-                    handshake.server_version, handshake.protocol_version
+                    connection.handshake.server_version, connection.handshake.protocol_version
                 ),
             );
-            ui.weak(format!("Instanz: {}", handshake.instance_id));
+            ui.weak(format!("Instanz: {}", connection.handshake.instance_id));
+            ui.add_space(8.0);
+            ui.label("Arbeitsplätze");
+            for workplace in &connection.workplaces {
+                let (color, status) = if workplace.online {
+                    (egui::Color32::from_rgb(0x34, 0xd3, 0x99), "online")
+                } else {
+                    (ui.visuals().weak_text_color(), "offline")
+                };
+                ui.horizontal(|ui| {
+                    ui.colored_label(color, "●");
+                    ui.label(&workplace.name);
+                    ui.weak(status);
+                });
+            }
         }
         CharonTestStatus::Failed(message) => {
             ui.colored_label(ui.visuals().error_fg_color, message);

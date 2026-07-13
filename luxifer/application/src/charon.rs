@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::AppError;
 
@@ -20,8 +20,63 @@ pub struct CharonHandshake {
     pub capabilities: Vec<String>,
 }
 
-pub fn test_charon_connection(base_url: &str) -> Result<CharonHandshake, AppError> {
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CharonWorkplace {
+    pub id: String,
+    pub name: String,
+    pub last_seen_unix: u64,
+    pub online: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CharonConnection {
+    pub handshake: CharonHandshake,
+    pub workplaces: Vec<CharonWorkplace>,
+}
+
+#[derive(Serialize)]
+struct WorkplaceHeartbeat<'a> {
+    workplace_id: &'a str,
+    workplace_name: &'a str,
+}
+
+pub fn connect_charon(
+    base_url: &str,
+    workplace_id: &str,
+    workplace_name: &str,
+) -> Result<CharonConnection, AppError> {
     let endpoint = HttpEndpoint::parse(base_url)?;
+    let handshake = parse_json_response(&send_request(&endpoint, "GET", "/api/v1/handshake", "")?)?;
+    validate_handshake(&handshake)?;
+    let body = serde_json::to_string(&WorkplaceHeartbeat {
+        workplace_id,
+        workplace_name,
+    })
+    .map_err(|error| {
+        AppError::wrap(
+            "charon_json",
+            "Arbeitsplatzdaten sind ungültig.",
+            error.to_string(),
+        )
+    })?;
+    let workplaces = parse_json_response(&send_request(
+        &endpoint,
+        "POST",
+        "/api/v1/workplaces/heartbeat",
+        &body,
+    )?)?;
+    Ok(CharonConnection {
+        handshake,
+        workplaces,
+    })
+}
+
+fn send_request(
+    endpoint: &HttpEndpoint,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> Result<Vec<u8>, AppError> {
     let address = endpoint
         .authority
         .to_socket_addrs()
@@ -44,8 +99,9 @@ pub fn test_charon_connection(base_url: &str) -> Result<CharonHandshake, AppErro
     stream.set_read_timeout(Some(TIMEOUT)).ok();
     stream.set_write_timeout(Some(TIMEOUT)).ok();
     let request = format!(
-        "GET /api/v1/handshake HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        endpoint.authority
+        "{method} {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        endpoint.authority,
+        body.len()
     );
     stream.write_all(request.as_bytes()).map_err(|error| {
         AppError::wrap(
@@ -62,7 +118,7 @@ pub fn test_charon_connection(base_url: &str) -> Result<CharonHandshake, AppErro
             error.to_string(),
         )
     })?;
-    parse_handshake(&response)
+    Ok(response)
 }
 
 struct HttpEndpoint {
@@ -90,7 +146,7 @@ impl HttpEndpoint {
     }
 }
 
-fn parse_handshake(response: &[u8]) -> Result<CharonHandshake, AppError> {
+fn parse_json_response<T: for<'de> Deserialize<'de>>(response: &[u8]) -> Result<T, AppError> {
     let text = std::str::from_utf8(response).map_err(|error| {
         AppError::wrap(
             "charon_response",
@@ -111,13 +167,16 @@ fn parse_handshake(response: &[u8]) -> Result<CharonHandshake, AppError> {
             format!("Charon antwortet mit {status}."),
         ));
     }
-    let handshake: CharonHandshake = serde_json::from_str(body).map_err(|error| {
+    serde_json::from_str(body).map_err(|error| {
         AppError::wrap(
             "charon_json",
-            "Charon-Handshake ist ungültig.",
+            "Charon-Antwort ist ungültig.",
             error.to_string(),
         )
-    })?;
+    })
+}
+
+fn validate_handshake(handshake: &CharonHandshake) -> Result<(), AppError> {
     if handshake.server != "charon" || handshake.protocol_version != PROTOCOL_VERSION {
         return Err(AppError::new(
             "charon_protocol",
@@ -127,7 +186,7 @@ fn parse_handshake(response: &[u8]) -> Result<CharonHandshake, AppError> {
             ),
         ));
     }
-    Ok(handshake)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -137,7 +196,8 @@ mod tests {
     #[test]
     fn parser_akzeptiert_gueltigen_handshake() {
         let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"server\":\"charon\",\"server_version\":\"0.1.0\",\"protocol_version\":1,\"instance_id\":\"local-test\",\"capabilities\":[\"health\",\"handshake\"]}";
-        let handshake = parse_handshake(response).unwrap();
+        let handshake: CharonHandshake = parse_json_response(response).unwrap();
+        validate_handshake(&handshake).unwrap();
         assert_eq!(handshake.server_version, "0.1.0");
         assert!(handshake.capabilities.contains(&"handshake".into()));
     }

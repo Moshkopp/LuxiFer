@@ -20,11 +20,14 @@ impl App {
         let Some(state) = self.settings_dialog.as_mut() else {
             return;
         };
-        state.charon_status =
-            match luxifer_application::test_charon_connection(&state.draft.charon_url) {
-                Ok(handshake) => CharonTestStatus::Connected(handshake),
-                Err(error) => CharonTestStatus::Failed(error.message().to_string()),
-            };
+        state.charon_status = match luxifer_application::connect_charon(
+            &state.draft.charon_url,
+            &state.draft.workplace_id,
+            &state.draft.workplace,
+        ) {
+            Ok(connection) => CharonTestStatus::Connected(connection),
+            Err(error) => CharonTestStatus::Failed(error.message().to_string()),
+        };
     }
 
     /// Übernimmt den GUI-Entwurf: klemmen, speichern, anwenden. Bei Erfolg true

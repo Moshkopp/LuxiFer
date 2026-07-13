@@ -138,7 +138,7 @@ pub enum SettingsSection {
 pub enum CharonTestStatus {
     #[default]
     Idle,
-    Connected(luxifer_application::CharonHandshake),
+    Connected(luxifer_application::CharonConnection),
     Failed(String),
 }
 

@@ -79,8 +79,10 @@ impl Theme {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UiSettings {
     pub version: u32,
-    /// Arbeitsplatzname (z. B. „Werkstatt-PC"). Später von Charon als Schlüssel
-    /// zum Synchronisieren genutzt.
+    /// Stabile, nicht vom sichtbaren Namen abhängige Arbeitsplatz-ID.
+    #[serde(default = "default_workplace_id")]
+    pub workplace_id: String,
+    /// Sichtbarer Arbeitsplatzname (z. B. „Werkstatt-PC").
     pub workplace: String,
     pub theme: Theme,
     /// Zuletzt geöffnetes Projekt (Ordnername) für den Start-Toast (ADR 0003).
@@ -122,6 +124,10 @@ fn default_charon_url() -> String {
     "http://127.0.0.1:3737".into()
 }
 
+fn default_workplace_id() -> String {
+    crate::datetime::gen_id()
+}
+
 /// Default-Rasterweite (mm), wenn eine alte Settings-Datei das Feld nicht hat.
 /// Die Rasterweite ist der Abstand der FEINEN Gitterlinien; der native Canvas
 /// zeichnet Hauptlinien alle 5 Schritte (10 → gewohntes 10/50-Bild).
@@ -145,6 +151,7 @@ impl Default for UiSettings {
     fn default() -> Self {
         UiSettings {
             version: UI_FORMAT_VERSION,
+            workplace_id: default_workplace_id(),
             workplace: "Arbeitsplatz".into(),
             theme: Theme::default(),
             last_project: String::new(),
@@ -204,7 +211,22 @@ impl UiSettings {
     pub fn load_from(dir: &Path) -> Self {
         let path = dir.join(UI_SETTINGS_FILE);
         match std::fs::read_to_string(&path) {
-            Ok(json) => Self::from_json(&json).unwrap_or_default(),
+            Ok(json) => {
+                let had_workplace_id = serde_json::from_str::<serde_json::Value>(&json)
+                    .ok()
+                    .and_then(|value| value.get("workplace_id").cloned())
+                    .is_some();
+                let settings = Self::from_json(&json).unwrap_or_default();
+                if !had_workplace_id {
+                    let _ = settings.save_to(dir);
+                }
+                settings
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let settings = Self::default();
+                let _ = settings.save_to(dir);
+                settings
+            }
             Err(_) => Self::default(),
         }
     }
@@ -312,6 +334,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("luxifer_ui_none_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let loaded = UiSettings::load_from(&dir);
-        assert_eq!(loaded, UiSettings::default());
+        assert_eq!(loaded.workplace, "Arbeitsplatz");
+        assert!(!loaded.workplace_id.is_empty());
+        assert_eq!(
+            UiSettings::load_from(&dir).workplace_id,
+            loaded.workplace_id
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -20,12 +20,16 @@ Deployment, Authentifizierung oder ein Proxmox-Betrieb hinzukommen.
 ## Entscheidung
 
 Charon beginnt als **optional aktivierter lokaler HTTP-Dienst**. Der erste
-Meilenstein enthält ausschließlich Erreichbarkeit und Protokollaushandlung:
+Meilenstein enthält Erreichbarkeit, Protokollaushandlung und die kleinste
+Mehrinstanz-Basis:
 
 - Standardbindung: `127.0.0.1:3737`; keine Freigabe ins LAN;
 - `GET /health` bestätigt nur die Prozessbereitschaft;
 - `GET /api/v1/handshake` liefert JSON mit Serverversion, Protokollversion,
   Instanzkennung und expliziten Fähigkeiten;
+- `POST /api/v1/workplaces/heartbeat` registriert die stabile Arbeitsplatz-ID
+  mit ihrem sichtbaren Namen; `GET /api/v1/workplaces` liefert den aktuellen
+  Anwesenheits-Snapshot;
 - die native Anwendung erhält eine globale Charon-Einstellung mit Aktivierung,
   Basis-URL, Verbindungstest und verständlichem Status;
 - die Application-Schicht besitzt Netzwerkzugriff und Fehlerübersetzung; egui
@@ -34,7 +38,8 @@ Meilenstein enthält ausschließlich Erreichbarkeit und Protokollaushandlung:
   Editor, Projekte noch Laserbetrieb.
 
 Die erste Protokollversion ist `1`. Fähigkeiten werden als stabile String-IDs
-gemeldet. Der erste Server meldet nur `health` und `handshake`; unbekannte
+gemeldet. Der erste Server meldet `health`, `handshake` und `workplaces`;
+unbekannte
 Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Invarianten
@@ -90,7 +95,7 @@ Fähigkeiten müssen von Clients ignoriert werden.
 ## Nicht Teil dieses Meilensteins
 
 - Projekt-Outbox/Inbox, Versionstransfer und Push-Kanal;
-- Arbeitsplatzidentität sowie Settings-/Laserprofil-Sicherung;
+- Settings-/Laserprofil-Sicherung;
 - Assetübertragung und Deduplizierung;
 - Benutzerkonten, Tokens, TLS, Discovery oder Fernzugriff;
 - Ruida-Lease-Protokoll, Queueing oder Jobübertragung;
@@ -98,7 +103,7 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nächste Schritte
 
-1. Arbeitsplatzidentität und persistente lokale Outbox/Inbox modellieren.
+1. Persistente lokale Projekt-Outbox/Inbox modellieren.
 2. Unveränderte Projektversionen übertragen, bestätigen und erneut zustellen.
 3. Push-Kanal und Konfliktbenachrichtigung ergänzen; zunächst ganze Version
    übernehmen oder zurückstellen. Stabil identifizierbare Shapes/Layer sind
@@ -119,6 +124,14 @@ Der erste Meilenstein ist umgesetzt:
   Serverkennung und Protokollversion und übersetzt Fehler in `AppError`;
 - Aktivierung, URL und Verbindungstest liegen in der globalen
   Charon-Einstellungssektion; alte Settings erhalten sichere Defaults.
+- jeder Datenbereich erhält beim ersten Start eine persistierte
+  `workplace_id`; der sichtbare Arbeitsplatzname bleibt frei änderbar;
+- der Verbindungstest registriert den Arbeitsplatz und zeigt Charons bekannten
+  Anwesenheits-Snapshot. Der Server hält diese Registrierung vorerst nur im
+  Arbeitsspeicher; ein automatischer periodischer Heartbeat folgt zusammen mit
+  dem dauerhaften Verbindungszustand;
+- `scripts/run-local-charon-demo.sh` startet Charon, Office und Workshop mit
+  voneinander isolierten Datenverzeichnissen in drei Terminals.
 
 Noch offen sind Outbox/Inbox, Projekt- und Settings-Transfer, Push-Kanal,
 Konfliktvergleich sowie Ruida-Leases. Charon darf Versionen verteilen und
