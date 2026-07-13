@@ -96,7 +96,7 @@ pub(super) fn project_browser(
     inbox: &[InboxEntry],
     asset_library: (
         &[luxifer_core::AssetMeta],
-        &std::collections::BTreeMap<String, Vec<u8>>,
+        &std::collections::BTreeMap<String, egui::TextureHandle>,
     ),
     open_name: Option<&str>,
     dirty: bool,
@@ -187,7 +187,7 @@ fn assets_pane(
     ui: &mut egui::Ui,
     browser: &mut ProjectBrowserState,
     assets: &[luxifer_core::AssetMeta],
-    thumbnails: &std::collections::BTreeMap<String, Vec<u8>>,
+    thumbnails: &std::collections::BTreeMap<String, egui::TextureHandle>,
     actions: &mut Vec<UiAction>,
 ) {
     ui.add_space(10.0);
@@ -238,11 +238,8 @@ fn assets_pane(
                         ui.horizontal(|ui| {
                             if let Some(bytes) = thumbnails.get(&asset.id) {
                                 ui.add(
-                                    egui::Image::from_bytes(
-                                        format!("bytes://asset-thumbnail/{}.png", asset.id),
-                                        bytes.clone(),
-                                    )
-                                    .fit_to_exact_size(egui::vec2(96.0, 72.0)),
+                                    egui::Image::new(bytes)
+                                        .fit_to_exact_size(egui::vec2(96.0, 72.0)),
                                 );
                             }
                             ui.vertical(|ui| {

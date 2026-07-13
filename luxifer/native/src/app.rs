@@ -43,7 +43,7 @@ pub struct App {
     /// Gecachter Asset-Katalog; Metadaten werden nicht pro UI-Frame gelesen.
     pub asset_catalog: Vec<luxifer_core::AssetMeta>,
     /// Einmal geladene, abgeleitete Thumbnail-PNGs; kein Datei-I/O im Framepfad.
-    pub asset_thumbnails: std::collections::BTreeMap<String, Vec<u8>>,
+    pub asset_thumbnails: std::collections::BTreeMap<String, egui::TextureHandle>,
     /// Seit dem letzten Projektwechsel importierte Quellen, damit auch
     /// vektorisierte Assets nach dem später vergebenen Projektnamen taggbar sind.
     pub session_asset_context: std::collections::BTreeSet<String>,
@@ -144,7 +144,7 @@ impl App {
         image::enrich_asset_tags_from_projects();
         let asset_catalog =
             luxifer_core::list_assets(&luxifer_core::assets_dir()).unwrap_or_default();
-        let asset_thumbnails = image::load_asset_thumbnails(&asset_catalog);
+        let asset_thumbnails = image::load_asset_thumbnails(&egui_ctx, &asset_catalog);
         let mut app = Self {
             splash: ui_settings.show_splash.then(crate::ui::Splash::new),
             window,

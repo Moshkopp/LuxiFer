@@ -6,16 +6,24 @@ use super::App;
 use crate::ui::ImageDialogState;
 
 pub(super) fn load_asset_thumbnails(
+    ctx: &egui::Context,
     assets: &[luxifer_core::AssetMeta],
-) -> std::collections::BTreeMap<String, Vec<u8>> {
+) -> std::collections::BTreeMap<String, egui::TextureHandle> {
     let store = luxifer_core::assets_dir();
     assets
         .iter()
         .filter(|asset| asset.kind != luxifer_core::AssetKind::Font)
         .filter_map(|asset| {
-            luxifer_core::asset_thumbnail(&store, &asset.id)
-                .ok()
-                .map(|thumbnail| (asset.id.clone(), thumbnail))
+            let thumbnail = luxifer_core::asset_thumbnail(&store, &asset.id).ok()?;
+            let decoded = image::load_from_memory(&thumbnail).ok()?.to_rgba8();
+            let size = [decoded.width() as usize, decoded.height() as usize];
+            let color = egui::ColorImage::from_rgba_unmultiplied(size, decoded.as_raw());
+            let texture = ctx.load_texture(
+                format!("asset-thumbnail-{}", asset.id),
+                color,
+                egui::TextureOptions::LINEAR,
+            );
+            Some((asset.id.clone(), texture))
         })
         .collect()
 }
@@ -41,7 +49,7 @@ impl App {
     pub(crate) fn refresh_asset_catalog(&mut self) {
         match luxifer_core::list_assets(&luxifer_core::assets_dir()) {
             Ok(assets) => {
-                self.asset_thumbnails = load_asset_thumbnails(&assets);
+                self.asset_thumbnails = load_asset_thumbnails(&self.egui_ctx, &assets);
                 self.asset_catalog = assets;
             }
             Err(error) => log::error!("Asset-Katalog aktualisieren: {error}"),
