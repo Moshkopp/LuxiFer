@@ -100,6 +100,8 @@ pub enum UiAction {
     Import,
     /// Ein bereits katalogisiertes Bild bzw. eine Vektorquelle wiederverwenden.
     ImportCatalogAsset(String),
+    /// Fehlendes Thumbnail für ein sichtbares Asset im Hintergrund anfordern.
+    RequestAssetThumbnail(String),
     /// Die aktuelle Fehleranzeige schließen.
     DismissError,
     /// Laser-Profil aktivieren.

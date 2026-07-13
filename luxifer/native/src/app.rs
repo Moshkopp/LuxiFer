@@ -44,6 +44,9 @@ pub struct App {
     pub asset_catalog: Vec<luxifer_core::AssetMeta>,
     /// Einmal geladene, abgeleitete Thumbnail-PNGs; kein Datei-I/O im Framepfad.
     pub asset_thumbnails: std::collections::BTreeMap<String, egui::TextureHandle>,
+    thumbnail_runtime: image::ThumbnailRuntime,
+    thumbnail_pending: std::collections::BTreeSet<String>,
+    thumbnail_failed: std::collections::BTreeSet<String>,
     /// Seit dem letzten Projektwechsel importierte Quellen, damit auch
     /// vektorisierte Assets nach dem später vergebenen Projektnamen taggbar sind.
     pub session_asset_context: std::collections::BTreeSet<String>,
@@ -144,7 +147,8 @@ impl App {
         image::enrich_asset_tags_from_projects();
         let asset_catalog =
             luxifer_core::list_assets(&luxifer_core::assets_dir()).unwrap_or_default();
-        let asset_thumbnails = image::load_asset_thumbnails(&egui_ctx, &asset_catalog);
+        let asset_thumbnails = Default::default();
+        let thumbnail_runtime = image::ThumbnailRuntime::new();
         let mut app = Self {
             splash: ui_settings.show_splash.then(crate::ui::Splash::new),
             window,
@@ -161,6 +165,9 @@ impl App {
             project_catalog,
             asset_catalog,
             asset_thumbnails,
+            thumbnail_runtime,
+            thumbnail_pending: Default::default(),
+            thumbnail_failed: Default::default(),
             session_asset_context: Default::default(),
             toasts: Default::default(),
             project_save_dialog: None,
@@ -436,6 +443,7 @@ impl App {
             A::Redo => self.redo(),
             A::Import => self.import_dialog(),
             A::ImportCatalogAsset(id) => self.import_catalog_asset(&id),
+            A::RequestAssetThumbnail(id) => self.request_asset_thumbnail(&id),
             A::DismissError => self.app_error = None,
             A::LaserSelect(id) => self.laser_select(&id),
             A::LaserConnect => self.laser_connect(),

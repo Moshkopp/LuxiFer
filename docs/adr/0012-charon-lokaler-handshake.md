@@ -212,6 +212,11 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
   nicht über Charon übertragen. Tag-Metadaten werden beim Asset-Sync als
   Mengenvereinigung zusammengeführt, damit Projektkontext verschiedener
   Arbeitsplätze erhalten bleibt;
+- der Programmstart lädt ausschließlich den Asset-Metadatenkatalog. Die
+  virtualisierte Trefferliste fordert Thumbnails nur für gerade sichtbare
+  Karten an; ein deduplizierender Hintergrundthread liest oder erzeugt sie und
+  der UI-Thread übernimmt lediglich fertige Pixel als egui-Texturen. Dadurch
+  blockieren auch mehrere tausend neue Assets weder Start noch Suche;
 - Charon bietet den Katalog über `GET /api/v1/assets`,
   `GET /api/v1/assets/<id>` und `POST /api/v1/assets` an. Der Hintergrunddienst
   gleicht Assets vor den Projektrevisionen bidirektional ab und überprüft beim

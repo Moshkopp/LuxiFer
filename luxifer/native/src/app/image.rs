@@ -5,27 +5,33 @@ use luxifer_core::Geo;
 use super::App;
 use crate::ui::ImageDialogState;
 
-pub(super) fn load_asset_thumbnails(
-    ctx: &egui::Context,
-    assets: &[luxifer_core::AssetMeta],
-) -> std::collections::BTreeMap<String, egui::TextureHandle> {
-    let store = luxifer_core::assets_dir();
-    assets
-        .iter()
-        .filter(|asset| asset.kind != luxifer_core::AssetKind::Font)
-        .filter_map(|asset| {
-            let thumbnail = luxifer_core::asset_thumbnail(&store, &asset.id).ok()?;
-            let decoded = image::load_from_memory(&thumbnail).ok()?.to_rgba8();
-            let size = [decoded.width() as usize, decoded.height() as usize];
-            let color = egui::ColorImage::from_rgba_unmultiplied(size, decoded.as_raw());
-            let texture = ctx.load_texture(
-                format!("asset-thumbnail-{}", asset.id),
-                color,
-                egui::TextureOptions::LINEAR,
-            );
-            Some((asset.id.clone(), texture))
-        })
-        .collect()
+pub(super) struct ThumbnailRuntime {
+    request_tx: std::sync::mpsc::Sender<String>,
+    result_rx: std::sync::mpsc::Receiver<(String, Result<Vec<u8>, String>)>,
+}
+
+impl ThumbnailRuntime {
+    pub fn new() -> Self {
+        let (request_tx, request_rx) = std::sync::mpsc::channel::<String>();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("asset-thumbnails".into())
+            .spawn(move || {
+                let store = luxifer_core::assets_dir();
+                while let Ok(id) = request_rx.recv() {
+                    let result = luxifer_core::asset_thumbnail(&store, &id)
+                        .map_err(|error| error.to_string());
+                    if result_tx.send((id, result)).is_err() {
+                        return;
+                    }
+                }
+            })
+            .expect("Thumbnail-Hintergrundthread konnte nicht gestartet werden");
+        Self {
+            request_tx,
+            result_rx,
+        }
+    }
 }
 
 pub(super) fn enrich_asset_tags_from_projects() {
@@ -49,11 +55,70 @@ impl App {
     pub(crate) fn refresh_asset_catalog(&mut self) {
         match luxifer_core::list_assets(&luxifer_core::assets_dir()) {
             Ok(assets) => {
-                self.asset_thumbnails = load_asset_thumbnails(&self.egui_ctx, &assets);
+                self.asset_thumbnails
+                    .retain(|id, _| assets.iter().any(|asset| asset.id == *id));
+                self.thumbnail_failed
+                    .retain(|id| assets.iter().any(|asset| asset.id == *id));
+                self.thumbnail_pending
+                    .retain(|id| assets.iter().any(|asset| asset.id == *id));
                 self.asset_catalog = assets;
             }
             Err(error) => log::error!("Asset-Katalog aktualisieren: {error}"),
         }
+    }
+
+    pub fn request_asset_thumbnail(&mut self, id: &str) {
+        if self.asset_thumbnails.contains_key(id)
+            || self.thumbnail_pending.contains(id)
+            || self.thumbnail_failed.contains(id)
+        {
+            return;
+        }
+        if self
+            .thumbnail_runtime
+            .request_tx
+            .send(id.to_owned())
+            .is_ok()
+        {
+            self.thumbnail_pending.insert(id.to_owned());
+        }
+    }
+
+    pub fn poll_asset_thumbnails(&mut self) -> bool {
+        let results: Vec<_> = self.thumbnail_runtime.result_rx.try_iter().collect();
+        if results.is_empty() {
+            return false;
+        }
+        for (id, result) in results {
+            self.thumbnail_pending.remove(&id);
+            if !self.asset_catalog.iter().any(|asset| asset.id == id) {
+                continue;
+            }
+            match result {
+                Ok(png) => match image::load_from_memory(&png) {
+                    Ok(image) => {
+                        let rgba = image.to_rgba8();
+                        let size = [rgba.width() as usize, rgba.height() as usize];
+                        let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                        let texture = self.egui_ctx.load_texture(
+                            format!("asset-thumbnail-{id}"),
+                            color,
+                            egui::TextureOptions::LINEAR,
+                        );
+                        self.asset_thumbnails.insert(id, texture);
+                    }
+                    Err(error) => {
+                        log::error!("Thumbnail dekodieren: {error}");
+                        self.thumbnail_failed.insert(id);
+                    }
+                },
+                Err(error) => {
+                    log::error!("Thumbnail erzeugen: {error}");
+                    self.thumbnail_failed.insert(id);
+                }
+            }
+        }
+        true
     }
 
     /// Fügt ein bereits im globalen Katalog vorhandenes Asset erneut ein.

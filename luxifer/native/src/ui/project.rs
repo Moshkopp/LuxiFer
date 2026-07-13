@@ -230,17 +230,25 @@ fn assets_pane(
 
     egui::ScrollArea::vertical()
         .id_salt("asset_catalog")
-        .show(ui, |ui| {
-            for asset in reusable {
+        .show_rows(ui, 86.0, reusable.len(), |ui, rows| {
+            for asset in &reusable[rows] {
                 let response = egui::Frame::group(ui.style())
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
-                            if let Some(bytes) = thumbnails.get(&asset.id) {
+                            if let Some(texture) = thumbnails.get(&asset.id) {
                                 ui.add(
-                                    egui::Image::new(bytes)
+                                    egui::Image::new(texture)
                                         .fit_to_exact_size(egui::vec2(96.0, 72.0)),
                                 );
+                            } else {
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(96.0, 72.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter()
+                                    .rect_filled(rect, 6.0, ui.visuals().faint_bg_color);
+                                actions.push(UiAction::RequestAssetThumbnail(asset.id.clone()));
                             }
                             ui.vertical(|ui| {
                                 ui.strong(if asset.original_name.is_empty() {
