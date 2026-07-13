@@ -101,6 +101,8 @@ pub enum PendingProjectAction {
     Blank,
     /// Empfangene Charon-Version nach Dirty-Bestätigung übernehmen.
     AcceptInbox(String),
+    /// Alle offenen Charon-Versionen nach Dirty-Bestätigung übernehmen.
+    AcceptAllInbox(Vec<String>),
     /// Neues Projekt aus dem Maskenentwurf anlegen.
     New { name: String, description: String },
     /// Projekt mit diesem Namen öffnen.

@@ -415,6 +415,7 @@ impl App {
             A::DeferInboxRevision(id) => self.defer_inbox_revision(&id),
             A::ReconsiderInboxRevision(id) => self.reconsider_inbox_revision(&id),
             A::ApplyInboxRevision(id) => self.apply_inbox_revision(&id),
+            A::ApplyAllInboxRevisions => self.apply_all_inbox_revisions(),
             A::ShowInboxComparison(id) => self.show_inbox_comparison(&id),
             A::SelectView(view) => {
                 self.view = view;

@@ -82,6 +82,8 @@ pub enum UiAction {
     ReconsiderInboxRevision(String),
     /// Neues empfangenes Projekt sicher in die lokale Ablage übernehmen.
     ApplyInboxRevision(String),
+    /// Alle offenen Charon-Revisionen in Empfangsreihenfolge übernehmen.
+    ApplyAllInboxRevisions,
     /// Empfangene und lokale Projektversion read-only vergleichen.
     ShowInboxComparison(String),
     /// Haupt-Ansicht (Reiter) wechseln.

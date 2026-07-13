@@ -58,6 +58,93 @@ impl App {
         }
     }
 
+    pub fn apply_all_inbox_revisions(&mut self) {
+        let revision_ids: Vec<_> = self
+            .project_inbox
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.status,
+                    luxifer_application::InboxStatus::PendingReview
+                        | luxifer_application::InboxStatus::Deferred
+                )
+            })
+            .map(|entry| entry.revision_id.clone())
+            .collect();
+        if revision_ids.is_empty() {
+            return;
+        }
+        let open_name = self.project.open_name();
+        let touches_open_project = revision_ids.iter().any(|revision_id| {
+            luxifer_application::compare_inbox_revision(revision_id)
+                .ok()
+                .and_then(|comparison| comparison.local_project_name)
+                .is_some_and(|name| Some(name.as_str()) == open_name)
+        });
+        if touches_open_project && self.session.is_dirty() {
+            self.pending_project = Some(PendingProjectAction::AcceptAllInbox(revision_ids));
+        } else {
+            self.do_apply_all_inbox_revisions(&revision_ids);
+        }
+    }
+
+    fn do_apply_all_inbox_revisions(&mut self, revision_ids: &[String]) {
+        let mut accepted = 0_usize;
+        let mut last_name = None;
+        let open_name = self.project.open_name().map(str::to_owned);
+        let mut updated_open_project = false;
+        for revision_id in revision_ids {
+            let comparison = match luxifer_application::compare_inbox_revision(revision_id) {
+                Ok(comparison) => comparison,
+                Err(error) => {
+                    self.app_error = Some(error);
+                    break;
+                }
+            };
+            updated_open_project |= comparison
+                .local_project_name
+                .as_ref()
+                .is_some_and(|name| Some(name) == open_name.as_ref());
+            let result = if comparison.local_project_name.is_some() {
+                luxifer_application::accept_inbox_revision(revision_id)
+            } else {
+                luxifer_application::apply_inbox_revision(revision_id)
+            };
+            match result {
+                Ok(name) => {
+                    accepted += 1;
+                    last_name = Some(name);
+                }
+                Err(error) => {
+                    self.app_error = Some(error);
+                    break;
+                }
+            }
+        }
+        self.refresh_project_catalog();
+        self.refresh_project_inbox();
+        self.project_browser.cached = None;
+        if let Some(name) = last_name {
+            self.project_browser.selected = Some(name);
+        }
+        if updated_open_project {
+            let Some(open_name) = open_name else {
+                return;
+            };
+            match self.project.open(&open_name) {
+                Ok(state) => self.replace_editor_state(state),
+                Err(error) => {
+                    self.app_error = Some(error);
+                    return;
+                }
+            }
+        }
+        if accepted > 0 {
+            self.toasts
+                .success(format!("{accepted} Charon-Revision(en) übernommen."));
+        }
+    }
+
     pub fn show_inbox_comparison(&mut self, revision_id: &str) {
         match luxifer_application::compare_inbox_revision(revision_id) {
             Ok(comparison) => {
@@ -170,6 +257,9 @@ impl App {
             Some(PendingProjectAction::Blank) => self.do_project_new_blank(),
             Some(PendingProjectAction::AcceptInbox(revision_id)) => {
                 self.do_accept_inbox_revision(&revision_id);
+            }
+            Some(PendingProjectAction::AcceptAllInbox(revision_ids)) => {
+                self.do_apply_all_inbox_revisions(&revision_ids);
             }
             Some(PendingProjectAction::New { name, description }) => {
                 self.do_project_new(&name, &description);

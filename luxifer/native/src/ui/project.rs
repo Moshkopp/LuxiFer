@@ -307,6 +307,14 @@ fn inbox_pane(ui: &mut egui::Ui, inbox: &[InboxEntry], actions: &mut Vec<UiActio
         return;
     }
 
+    ui.horizontal(|ui| {
+        ui.weak(format!("{} offene Revision(en)", visible.len()));
+        if ui.button("Alle übernehmen").clicked() {
+            actions.push(UiAction::ApplyAllInboxRevisions);
+        }
+    });
+    ui.add_space(8.0);
+
     egui::ScrollArea::vertical()
         .id_salt("charon_inbox")
         .show(ui, |ui| {

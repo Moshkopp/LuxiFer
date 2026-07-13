@@ -295,6 +295,10 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
   empfangene Projekte oder Assets verdrängen, weil sonst die Daten bereits auf
   dem Datenträger liegen, aber Inbox und Asset-Katalog sichtbar veraltet
   bleiben.
+- Der Bereich `Von Charon` kann alle offenen und zurückgestellten Revisionen
+  gesammelt in Empfangsreihenfolge übernehmen. Die Sammelaktion verwendet
+  dieselben Asset-Prüfungen und denselben Dirty-Guard wie die Einzelübernahme;
+  beim ersten Fehler stoppt sie, ohne bereits übernommene Stände zurückzurollen.
 
 Damit ist der lokale Funktionsumfang dieses ADR abgeschlossen. Noch offen sind
 die ausdrücklich nachgelagerten Betriebs- und Ausbaupunkte:

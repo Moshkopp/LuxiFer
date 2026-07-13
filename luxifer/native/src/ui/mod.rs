@@ -513,6 +513,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         let label = match pending {
             PendingProjectAction::Blank => "Neue Arbeitsfläche",
             PendingProjectAction::AcceptInbox(_) => "Charon-Version übernehmen",
+            PendingProjectAction::AcceptAllInbox(_) => "Alle Charon-Versionen übernehmen",
             PendingProjectAction::New { .. } => "Neues Projekt anlegen",
             PendingProjectAction::Open(_) => "Projekt öffnen",
             PendingProjectAction::OpenVersion(_) => "Version laden",
