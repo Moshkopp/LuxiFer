@@ -82,6 +82,9 @@ impl App {
                             ));
                         }
                         if report.assets_uploaded > 0 || report.assets_downloaded > 0 {
+                            if report.assets_downloaded > 0 {
+                                self.refresh_asset_catalog();
+                            }
                             self.image_dirty = true;
                             self.toasts.success(format!(
                                 "Assets synchronisiert: {} hochgeladen, {} empfangen.",

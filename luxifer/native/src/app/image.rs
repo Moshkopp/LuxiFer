@@ -6,6 +6,13 @@ use super::App;
 use crate::ui::ImageDialogState;
 
 impl App {
+    pub(crate) fn refresh_asset_catalog(&mut self) {
+        match luxifer_core::list_assets(&luxifer_core::assets_dir()) {
+            Ok(assets) => self.asset_catalog = assets,
+            Err(error) => log::error!("Asset-Katalog aktualisieren: {error}"),
+        }
+    }
+
     /// Fügt ein bereits im globalen Katalog vorhandenes Asset erneut ein.
     pub fn import_catalog_asset(&mut self, id: &str) {
         let store = luxifer_core::assets_dir();
@@ -119,6 +126,8 @@ impl App {
                     kind,
                 ) {
                     log::error!("Quelldatei katalogisieren: {error}");
+                } else {
+                    self.refresh_asset_catalog();
                 }
                 let started = std::time::Instant::now();
                 self.session.add_polylines(contours);
@@ -151,6 +160,7 @@ impl App {
             .to_string();
         match luxifer_core::import_image(&luxifer_core::assets_dir(), &bytes, &name) {
             Ok(meta) => {
+                self.refresh_asset_catalog();
                 // Pixel → mm bei 254 DPI (10 px/mm), wie der Core-Default.
                 let width_mm = meta.width as f64 / 10.0;
                 let height_mm = meta.height as f64 / 10.0;

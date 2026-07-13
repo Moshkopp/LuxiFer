@@ -38,6 +38,10 @@ pub struct App {
     pub view: crate::tools::View,
     /// Projekt-/Versions-/Asset-Lebenszyklus (Application-Dienst).
     pub project: luxifer_application::ProjectService,
+    /// Gecachte Projektliste; Dateisystemzugriff nur nach Projektänderungen.
+    pub project_catalog: Vec<luxifer_core::ProjectInfo>,
+    /// Gecachter Asset-Katalog; Metadaten werden nicht pro UI-Frame gelesen.
+    pub asset_catalog: Vec<luxifer_core::AssetMeta>,
     /// Kurze Erfolgs-/Statusmeldungen als Toasts oben rechts (Fehler laufen
     /// über `app_error` und bleiben stehen).
     pub toasts: crate::ui::Toasts,
@@ -127,6 +131,10 @@ impl App {
         let ui_settings = luxifer_core::UiSettings::load();
         let charon_runtime = charon::CharonRuntime::new(&ui_settings);
         let project_inbox = luxifer_application::list_inbox().unwrap_or_default();
+        let project = luxifer_application::ProjectService::new();
+        let project_catalog = project.list();
+        let asset_catalog =
+            luxifer_core::list_assets(&luxifer_core::assets_dir()).unwrap_or_default();
         let mut app = Self {
             splash: ui_settings.show_splash.then(crate::ui::Splash::new),
             window,
@@ -139,7 +147,9 @@ impl App {
                 Ok("preview") => crate::tools::View::Preview,
                 _ => crate::tools::View::Design,
             },
-            project: luxifer_application::ProjectService::new(),
+            project,
+            project_catalog,
+            asset_catalog,
             toasts: Default::default(),
             project_save_dialog: None,
             ui_settings,

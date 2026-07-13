@@ -87,6 +87,7 @@ impl App {
                 return false;
             }
         };
+        self.refresh_asset_catalog();
         match luxifer_core::text::text_to_contours(&font_data, &text, size) {
             Ok(contours) if !contours.is_empty() => {
                 let meta = luxifer_core::TextMeta {

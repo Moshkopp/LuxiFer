@@ -115,19 +115,21 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         View::Projekt => {
             app.left_w = 0.0;
             app.right_w = 0.0;
-            let projects = app.project.list();
-            let assets = luxifer_core::list_assets(&luxifer_core::assets_dir()).unwrap_or_default();
             let open_name = app.project.open_name().map(|s| s.to_string());
-            sync_project_browser(app, &projects, open_name.as_deref());
+            sync_project_browser(app, open_name.as_deref());
             let dirty = app.session.is_dirty();
+            let projects = &app.project_catalog;
+            let assets = &app.asset_catalog;
+            let inbox = &app.project_inbox;
+            let browser = &mut app.project_browser;
             let actions = egui::CentralPanel::default()
                 .show(ctx, |ui| {
                     project::project_browser(
                         ui,
-                        &mut app.project_browser,
-                        &projects,
-                        &app.project_inbox,
-                        &assets,
+                        browser,
+                        projects,
+                        inbox,
+                        assets,
                         open_name.as_deref(),
                         dirty,
                     )
@@ -487,14 +489,10 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
 /// ist `name:modified_at` (beim offenen Projekt `name:rev<render_rev>`), so
 /// verfallen Details nach Speichern/Umbenennen/Editieren von selbst. Läuft im
 /// Root, weil nur er den `ProjectService` kennt; das Panel liest nur den Cache.
-fn sync_project_browser(
-    app: &mut App,
-    projects: &[luxifer_core::ProjectInfo],
-    open_name: Option<&str>,
-) {
+fn sync_project_browser(app: &mut App, open_name: Option<&str>) {
     // Auswahl validieren: gelöschte/umbenannte Projekte abwählen.
     if let Some(sel) = app.project_browser.selected.clone() {
-        if !projects.iter().any(|p| p.name == sel) {
+        if !app.project_catalog.iter().any(|p| p.name == sel) {
             app.project_browser.selected = None;
         }
     }
@@ -506,7 +504,8 @@ fn sync_project_browser(
     let cache_key = if is_open {
         format!("{sel}:rev{}", app.session.state().render_rev())
     } else {
-        let modified = projects
+        let modified = app
+            .project_catalog
             .iter()
             .find(|p| p.name == sel)
             .map(|p| p.modified_at.as_str())

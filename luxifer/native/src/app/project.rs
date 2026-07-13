@@ -4,6 +4,10 @@ use super::App;
 use crate::ui::PendingProjectAction;
 
 impl App {
+    fn refresh_project_catalog(&mut self) {
+        self.project_catalog = self.project.list();
+    }
+
     pub fn defer_inbox_revision(&mut self, revision_id: &str) {
         match luxifer_application::defer_inbox_revision(revision_id) {
             Ok(()) => {
@@ -43,6 +47,7 @@ impl App {
         }
         match luxifer_application::apply_inbox_revision(revision_id) {
             Ok(name) => {
+                self.refresh_project_catalog();
                 self.refresh_project_inbox();
                 self.project_browser.show_inbox = false;
                 self.project_browser.selected = Some(name.clone());
@@ -113,6 +118,7 @@ impl App {
                     }
                 }
                 self.project_browser.cached = None;
+                self.refresh_project_catalog();
                 self.refresh_project_inbox();
                 self.toasts
                     .success(format!("Charon-Version übernommen: {name}"));
@@ -244,11 +250,15 @@ impl App {
     fn do_project_delete_version(&mut self, id: &str) {
         match self.project.delete_version(id) {
             Ok(Some(state)) => {
+                self.refresh_project_catalog();
                 self.replace_editor_state(state);
                 self.toasts
                     .success("Version gelöscht — vorherige Version geladen.");
             }
-            Ok(None) => self.toasts.success("Version gelöscht."),
+            Ok(None) => {
+                self.refresh_project_catalog();
+                self.toasts.success("Version gelöscht.");
+            }
             Err(error) => self.app_error = Some(error),
         }
     }
@@ -256,6 +266,7 @@ impl App {
     pub fn project_rename(&mut self, from: &str, to: &str) {
         match self.project.rename(from, to) {
             Ok(()) => {
+                self.refresh_project_catalog();
                 let to = to.trim();
                 if self.project_browser.selected.as_deref() == Some(from) {
                     self.project_browser.selected = Some(to.to_string());
@@ -277,6 +288,7 @@ impl App {
         {
             Ok(()) => {
                 self.session.mark_saved();
+                self.refresh_project_catalog();
                 self.queue_project_for_charon();
                 self.toasts
                     .success(format!("Neues Projekt: {}", name.trim()));
@@ -291,7 +303,10 @@ impl App {
 
     pub fn project_delete(&mut self, name: &str) {
         match self.project.delete(name) {
-            Ok(()) => self.toasts.success(format!("Gelöscht: {name}")),
+            Ok(()) => {
+                self.refresh_project_catalog();
+                self.toasts.success(format!("Gelöscht: {name}"));
+            }
             Err(error) => self.app_error = Some(error),
         }
     }
@@ -323,6 +338,7 @@ impl App {
         match self.project.save(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
+                self.refresh_project_catalog();
                 self.queue_project_for_charon();
                 self.toasts
                     .success(format!("Gespeichert ({})", version.label));
@@ -341,6 +357,7 @@ impl App {
         match self.project.save_version(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
+                self.refresh_project_catalog();
                 self.queue_project_for_charon();
                 self.toasts
                     .success(format!("Neue Version {}", version.label));
