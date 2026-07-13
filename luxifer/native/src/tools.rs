@@ -122,7 +122,7 @@ pub enum Shortcut {
 }
 
 /// Gedrückte Taste, die für die Zuordnung relevant ist. Entkoppelt die reine
-/// Shortcut-Logik von `winit::keyboard::KeyCode`.
+/// Shortcut-Logik von `winit::keyboard::Key` (logische Taste, Systemlayout).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Key {
     S,

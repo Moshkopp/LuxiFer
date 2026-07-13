@@ -7,7 +7,6 @@ use std::sync::Arc;
 use luxifer_application::{AppError, EditorSession};
 use luxifer_core::state::AppState;
 use winit::event::{ElementState, WindowEvent};
-use winit::keyboard::PhysicalKey;
 use winit::window::Window;
 
 use crate::camera::Camera;
@@ -211,23 +210,23 @@ impl App {
                     return true;
                 }
                 let pressed = event.state == ElementState::Pressed;
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if let Some(key) = crate::canvas::input::map_keycode(code) {
-                        let mods = crate::tools::Mods {
-                            ctrl: self.canvas.ctrl_down,
-                            shift: self.canvas.shift_down,
-                        };
-                        let blocked = self.input_blocked();
-                        if let Some(shortcut) =
-                            crate::tools::resolve_shortcut(key, mods, pressed, blocked)
+                // Logische Taste (Systemlayout), nicht die physische Position —
+                // sonst sind Z/Y auf QWERTZ vertauscht (Strg+Z wäre Redo).
+                if let Some(key) = crate::canvas::input::map_key(&event.logical_key) {
+                    let mods = crate::tools::Mods {
+                        ctrl: self.canvas.ctrl_down,
+                        shift: self.canvas.shift_down,
+                    };
+                    let blocked = self.input_blocked();
+                    if let Some(shortcut) =
+                        crate::tools::resolve_shortcut(key, mods, pressed, blocked)
+                    {
+                        if self.view == crate::tools::View::Laser
+                            && !matches!(shortcut, crate::tools::Shortcut::PanModifier(_))
                         {
-                            if self.view == crate::tools::View::Laser
-                                && !matches!(shortcut, crate::tools::Shortcut::PanModifier(_))
-                            {
-                                return true;
-                            }
-                            self.apply_shortcut(shortcut);
+                            return true;
                         }
+                        self.apply_shortcut(shortcut);
                     }
                 }
             }

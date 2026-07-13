@@ -1,4 +1,4 @@
-//! Eingabe-Übersetzung für den Canvas: physische Tasten → typisierte `Key` und
+//! Eingabe-Übersetzung für den Canvas: logische Tasten → typisierte `Key` und
 //! die reinen Zeiger-Events (Bewegen/Klicken/Scrollen) auf `CanvasState`-Gesten.
 //!
 //! Fenster-/GPU-Ereignisse (Resize) und die Tastatur-Koordination
@@ -6,28 +6,35 @@
 
 use luxifer_application::EditorSession;
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
-use winit::keyboard::KeyCode;
+use winit::keyboard::{Key as WinitKey, NamedKey};
 
 use crate::tools::Drag;
 use crate::tools::Key;
 
 use super::state::CanvasState;
 
-/// Übersetzt die für Shortcuts relevanten physischen Tasten in das
-/// UI-unabhängige `tools::Key`. Alles andere ignoriert die Shortcut-Ebene.
-pub fn map_keycode(code: KeyCode) -> Option<Key> {
-    Some(match code {
-        KeyCode::KeyS => Key::S,
-        KeyCode::Delete | KeyCode::Backspace => Key::Delete,
-        KeyCode::Escape => Key::Escape,
-        KeyCode::Enter => Key::Enter,
-        KeyCode::Space => Key::Space,
-        KeyCode::KeyV => Key::V,
-        KeyCode::KeyR => Key::R,
-        KeyCode::KeyE => Key::E,
-        KeyCode::KeyP => Key::P,
-        KeyCode::KeyZ => Key::Z,
-        KeyCode::KeyY => Key::Y,
+/// Übersetzt die für Shortcuts relevanten Tasten in das UI-unabhängige
+/// `tools::Key`. Bewusst die **logische** Taste (layout-abhängig), nicht die
+/// physische Position: Auf QWERTZ sind Z/Y gegenüber US vertauscht — mit
+/// `physical_key` wäre Strg+Z sonst Redo. Buchstaben case-insensitiv, weil
+/// Shift (Strg+Shift+Z) den Großbuchstaben liefert.
+pub fn map_key(key: &WinitKey) -> Option<Key> {
+    Some(match key {
+        WinitKey::Named(NamedKey::Delete) | WinitKey::Named(NamedKey::Backspace) => Key::Delete,
+        WinitKey::Named(NamedKey::Escape) => Key::Escape,
+        WinitKey::Named(NamedKey::Enter) => Key::Enter,
+        WinitKey::Named(NamedKey::Space) => Key::Space,
+        WinitKey::Character(c) => match c.to_ascii_lowercase().as_str() {
+            " " => Key::Space,
+            "s" => Key::S,
+            "v" => Key::V,
+            "r" => Key::R,
+            "e" => Key::E,
+            "p" => Key::P,
+            "z" => Key::Z,
+            "y" => Key::Y,
+            _ => return None,
+        },
         _ => return None,
     })
 }
@@ -95,5 +102,35 @@ impl CanvasState {
             }
             _ => Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// QWERTZ-Regression: Die logische Taste „z" muss `Key::Z` liefern —
+    /// unabhängig davon, auf welcher physischen Position sie liegt. Mit Shift
+    /// (Strg+Shift+Z = Redo) kommt der Großbuchstabe an.
+    #[test]
+    fn buchstaben_folgen_dem_layout_nicht_der_position() {
+        assert_eq!(map_key(&WinitKey::Character("z".into())), Some(Key::Z));
+        assert_eq!(map_key(&WinitKey::Character("Z".into())), Some(Key::Z));
+        assert_eq!(map_key(&WinitKey::Character("y".into())), Some(Key::Y));
+        assert_eq!(map_key(&WinitKey::Character("x".into())), None);
+    }
+
+    #[test]
+    fn benannte_tasten_werden_erkannt() {
+        assert_eq!(
+            map_key(&WinitKey::Named(NamedKey::Escape)),
+            Some(Key::Escape)
+        );
+        assert_eq!(
+            map_key(&WinitKey::Named(NamedKey::Backspace)),
+            Some(Key::Delete)
+        );
+        assert_eq!(map_key(&WinitKey::Named(NamedKey::Space)), Some(Key::Space));
+        assert_eq!(map_key(&WinitKey::Named(NamedKey::Tab)), None);
     }
 }
