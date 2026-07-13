@@ -4,6 +4,7 @@
 use egui::Color32;
 
 use super::action::UiAction;
+use super::ICON_BUTTON_SIDE;
 use crate::tools::Tool;
 
 /// Quadratischer Icon-Button (Werkzeugleiste). `on` = aktiv (Akzent),
@@ -70,21 +71,23 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, cur: Tool) -> Vec<UiAction> {
     use crate::tools::ToolAction as A;
     let mut actions = Vec::new();
     ui.add_space(4.0);
-    let full = ui.available_width();
     let gap = 4.0;
-    let side = ((full - gap) / 2.0).clamp(24.0, 42.0);
+    let side = ICON_BUTTON_SIDE;
 
-    // Gruppe 1: Auswahl (breit über beide Spalten).
-    if icon_button(
-        ui,
-        full.min(side * 2.0 + gap),
-        "select",
-        "Auswahl / Verschieben",
-        cur == Tool::Select,
-        false,
-    ) {
-        actions.push(UiAction::SelectTool(Tool::Select));
-    }
+    // Gruppe 1: Auswahl. Gleiche Kantenlänge wie alle anderen Werkzeuge;
+    // die frühere volle Panelbreite machte diesen Knopf unverhältnismäßig groß.
+    ui.horizontal(|ui| {
+        if icon_button(
+            ui,
+            side,
+            "select",
+            "Auswahl / Verschieben",
+            cur == Tool::Select,
+            false,
+        ) {
+            actions.push(UiAction::SelectTool(Tool::Select));
+        }
+    });
     divider(ui);
     // Gruppe 2: Zeichnen & Formen.
     if let Some(t) = tool_grid(

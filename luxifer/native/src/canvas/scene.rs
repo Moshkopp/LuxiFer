@@ -15,8 +15,8 @@ pub struct BaseGeometry {
 /// Baut die gecachten Zeichendaten (Tisch-Fläche, Shapes-Füllung/Kontur).
 /// Das Gitter ist kamera-abhängig und liegt im eigenen Grid-Puffer
 /// (`scene_geo::viewport_grid`), nicht in diesem Cache.
-pub fn base_vertices(session: &EditorSession) -> BaseGeometry {
-    let mut v = scene_geo::bed_base(session.bed_w_mm as f32, session.bed_h_mm as f32);
+pub fn base_vertices(session: &EditorSession, origin: luxifer_core::BedOrigin) -> BaseGeometry {
+    let mut v = scene_geo::bed_base(session.bed_w_mm as f32, session.bed_h_mm as f32, origin);
     let background_end = v.len() as u32;
     // Füllung zuerst (liegt unter den Konturen), dann die Umrisse.
     v.extend(scene_geo::fill_lines(session));
@@ -205,7 +205,7 @@ mod tests {
         }
         session.selected = vec![0];
         let rev_before = session.render_rev();
-        let before = base_vertices(&session);
+        let before = base_vertices(&session, Default::default());
 
         session.begin_edit();
         session.translate_edit(50.0, 0.0);
@@ -215,7 +215,7 @@ mod tests {
         // Renderer den gecachten Puffer nie neu.
         assert_ne!(session.render_rev(), rev_before);
 
-        let after = base_vertices(&session);
+        let after = base_vertices(&session, Default::default());
         // Alle Szenen-Vertices (nach dem Bett) liegen jetzt bei x >= 45 —
         // Kontur UND Scanlines sind mitgewandert.
         let scene_after = &after.vertices[after.background_end as usize..];
@@ -270,7 +270,7 @@ mod tests {
             let rev = session.render_rev();
             assert_ne!(rev, last_rev, "Frame {step}: render_rev muss steigen");
             last_rev = rev;
-            let g = base_vertices(&session);
+            let g = base_vertices(&session, Default::default());
             let scene = &g.vertices[g.background_end as usize..];
             let min_x = scene.iter().map(|v| v.pos[0]).fold(f32::MAX, f32::min);
             assert!(
@@ -289,7 +289,7 @@ mod tests {
             .state_mut_for_migration()
             .add_image("asset".into(), 0.0, 0.0, 20.0, 10.0);
 
-        let geometry = base_vertices(&session);
+        let geometry = base_vertices(&session, Default::default());
 
         assert!(geometry.background_end > 0);
         assert!((geometry.background_end as usize) < geometry.vertices.len());

@@ -1,6 +1,22 @@
 use super::App;
 
 impl App {
+    /// Übernimmt den Arbeitsbereich des aktiven Maschinenprofils in Canvas und
+    /// Kamera. Das Profil ist damit die Quelle für Laser-Bett und Job-Grenzen.
+    pub(super) fn apply_active_laser_workspace(&mut self) {
+        let Some(profile) = self.laser_backend.active_profile() else {
+            return;
+        };
+        let bed = profile.bed_mm;
+        if !bed.0.is_finite() || !bed.1.is_finite() || bed.0 <= 0.0 || bed.1 <= 0.0 {
+            return;
+        }
+        self.session.bed_w_mm = bed.0;
+        self.session.bed_h_mm = bed.1;
+        self.canvas.cam.fit_bbox([0.0, 0.0, bed.0, bed.1], 0.85);
+        self.renderer.invalidate_scene();
+    }
+
     /// Liefert die vollständige oder auf die Auswahl beschränkte Job-Eingabe.
     fn laser_shapes(&self) -> (Vec<luxifer_core::Shape>, Vec<luxifer_core::Layer>) {
         let shapes = if self.laser.selection_only {
@@ -17,6 +33,7 @@ impl App {
 
     pub fn laser_select(&mut self, id: &str) {
         self.laser_backend.set_active(id);
+        self.apply_active_laser_workspace();
     }
 
     pub fn laser_run(&mut self, action: luxifer_core::JobAction) {

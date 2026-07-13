@@ -82,6 +82,7 @@ impl App {
                 self.laser_backend.set_active(&id);
             }
         }
+        self.apply_active_laser_workspace();
         self.toasts.success("Laser-Profil gespeichert.");
     }
 

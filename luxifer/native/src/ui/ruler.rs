@@ -9,8 +9,10 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke};
 
 use crate::camera::Camera;
 
-/// Lineal-Dicke in egui-Punkten.
-const THICKNESS: f32 = 22.0;
+/// Lineal-Dicken in egui-Punkten. Links braucht eine normale horizontale
+/// Zahlenbeschriftung mehr Platz als das obere Lineal.
+const TOP_THICKNESS: f32 = 26.0;
+const LEFT_THICKNESS: f32 = 42.0;
 /// Mindestabstand beschrifteter Haupt-Ticks in Punkten.
 const MIN_LABEL_PT: f32 = 60.0;
 
@@ -34,9 +36,16 @@ fn tick_interval_mm(pt_per_mm: f32) -> f64 {
 
 /// Zeichnet beide Lineale in den Canvas-Bereich `rect` (Punkte).
 /// `cursor_px` = Mausposition in physischen Pixeln (Canvas-Koordinaten).
-pub(super) fn rulers(ctx: &egui::Context, cam: &Camera, cursor_px: [f32; 2], accent: [u8; 3]) {
+pub(super) fn rulers(
+    ctx: &egui::Context,
+    cam: &Camera,
+    cursor_px: [f32; 2],
+    accent: [u8; 3],
+    origin: luxifer_core::BedOrigin,
+    bed: (f64, f64),
+) {
     let rect = ctx.available_rect();
-    if rect.width() < 2.0 * THICKNESS || rect.height() < 2.0 * THICKNESS {
+    if rect.width() < 2.0 * LEFT_THICKNESS || rect.height() < 2.0 * TOP_THICKNESS {
         return;
     }
     let painter = ctx.layer_painter(egui::LayerId::new(
@@ -51,10 +60,10 @@ pub(super) fn rulers(ctx: &egui::Context, cam: &Camera, cursor_px: [f32; 2], acc
     let tick_col = Color32::from_rgb(0x6b, 0x71, 0x7b);
     let text_col = Color32::from_rgb(0x9a, 0xa0, 0xa9);
     let accent = Color32::from_rgb(accent[0], accent[1], accent[2]);
-    let font = FontId::monospace(9.0);
+    let font = FontId::monospace(11.0);
 
-    let top = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + THICKNESS));
-    let left = Rect::from_min_max(rect.min, Pos2::new(rect.min.x + THICKNESS, rect.max.y));
+    let top = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + TOP_THICKNESS));
+    let left = Rect::from_min_max(rect.min, Pos2::new(rect.min.x + LEFT_THICKNESS, rect.max.y));
     painter.rect_filled(top, 0.0, bg);
     painter.rect_filled(left, 0.0, bg);
     painter.line_segment(
@@ -78,9 +87,9 @@ pub(super) fn rulers(ctx: &egui::Context, cam: &Camera, cursor_px: [f32; 2], acc
     // Ein Durchlauf pro Achse: Welt-mm → Bildschirm-Punkt, Ticks + Labels.
     let axis = |horizontal: bool| {
         let (p0, p1) = if horizontal {
-            (rect.min.x + THICKNESS, rect.max.x)
+            (rect.min.x + LEFT_THICKNESS, rect.max.x)
         } else {
-            (rect.min.y + THICKNESS, rect.max.y)
+            (rect.min.y + TOP_THICKNESS, rect.max.y)
         };
         let world_at = |p: f32| {
             let px = p * ppp;
@@ -109,6 +118,11 @@ pub(super) fn rulers(ctx: &egui::Context, cam: &Camera, cursor_px: [f32; 2], acc
                 continue;
             }
             let major = i.rem_euclid(per_major) == 0;
+            let label_value = if horizontal {
+                origin.transform(w, 0.0, bed).0
+            } else {
+                origin.transform(0.0, w, bed).1
+            };
             let len = if major { 9.0 } else { 4.0 };
             if horizontal {
                 let y1 = top.max.y;
@@ -120,7 +134,7 @@ pub(super) fn rulers(ctx: &egui::Context, cam: &Camera, cursor_px: [f32; 2], acc
                     painter.text(
                         Pos2::new(p + 3.0, top.min.y + 1.0),
                         Align2::LEFT_TOP,
-                        format!("{}", w.round() as i64),
+                        format!("{}", label_value.round() as i64),
                         font.clone(),
                         text_col,
                     );
@@ -132,20 +146,13 @@ pub(super) fn rulers(ctx: &egui::Context, cam: &Camera, cursor_px: [f32; 2], acc
                     Stroke::new(1.0, tick_col),
                 );
                 if major {
-                    // Ziffern einzeln untereinander — lesbar ohne Rotation
-                    // (egui-Painter kann Text nicht drehen).
-                    let label = format!("{}", w.round() as i64);
-                    let mut y = p + 2.0;
-                    for ch in label.chars() {
-                        painter.text(
-                            Pos2::new(left.min.x + 2.0, y),
-                            Align2::LEFT_TOP,
-                            ch,
-                            font.clone(),
-                            text_col,
-                        );
-                        y += 9.0;
-                    }
+                    painter.text(
+                        Pos2::new(left.max.x - 11.0, p),
+                        Align2::RIGHT_CENTER,
+                        format!("{}", label_value.round() as i64),
+                        font.clone(),
+                        text_col,
+                    );
                 }
             }
         }
@@ -173,7 +180,7 @@ pub(super) fn rulers(ctx: &egui::Context, cam: &Camera, cursor_px: [f32; 2], acc
     axis(false);
 
     // Eckfeld mit Einheit.
-    let corner = Rect::from_min_size(rect.min, egui::vec2(THICKNESS, THICKNESS));
+    let corner = Rect::from_min_size(rect.min, egui::vec2(LEFT_THICKNESS, TOP_THICKNESS));
     painter.rect_filled(corner, 0.0, bg);
     painter.line_segment(
         [corner.right_top(), corner.right_bottom()],

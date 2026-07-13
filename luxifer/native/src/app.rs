@@ -88,6 +88,9 @@ pub struct App {
 impl App {
     pub fn new(window: Arc<Window>, gpu: Gpu) -> Self {
         let egui_ctx = egui::Context::default();
+        // Moderate, vom Monitor-DPI unabhängige Vergrößerung für lesbare
+        // Beschriftungen und ausreichend große Trefferflächen.
+        egui_ctx.set_zoom_factor(1.15);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -150,6 +153,7 @@ impl App {
         if app.view == crate::tools::View::Laser {
             app.canvas.tool = crate::tools::Tool::Select;
             app.canvas.laser_editable_layers = Some(Default::default());
+            app.apply_active_laser_workspace();
         }
         if let Some(path) = auto_import {
             app.import_path(std::path::Path::new(&path));
@@ -354,6 +358,7 @@ impl App {
                 if view == crate::tools::View::Laser {
                     self.canvas.tool = crate::tools::Tool::Select;
                     self.canvas.laser_editable_layers = Some(Default::default());
+                    self.apply_active_laser_workspace();
                 } else {
                     self.canvas.laser_editable_layers = None;
                 }
@@ -464,6 +469,11 @@ impl App {
         let image_dirty = std::mem::take(&mut self.image_dirty);
         let scene = crate::render::FrameScene {
             session: &self.session,
+            bed_origin: self
+                .laser_backend
+                .active_profile()
+                .map(|profile| profile.origin)
+                .unwrap_or_default(),
             cam: &self.canvas.cam,
             overlay: crate::canvas::overlay::OverlayInput {
                 session: &self.session,

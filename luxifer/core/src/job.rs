@@ -106,6 +106,44 @@ pub struct JobPlan {
 }
 
 impl JobPlan {
+    /// Spiegelt einen im links-obigen Editor-Koordinatensystem aufgebauten Plan
+    /// in das Koordinatensystem des Maschinenprofils.
+    pub fn transformed_for_bed(&self, origin: crate::BedOrigin, bed: (f64, f64)) -> Self {
+        let mut plan = self.clone();
+        for layer in &mut plan.layers {
+            match &mut layer.work {
+                LayerWork::Cut { paths } => {
+                    for path in paths {
+                        for point in &mut path.points {
+                            *point = origin.transform(point.0, point.1, bed);
+                        }
+                    }
+                }
+                LayerWork::Fill { segments } => {
+                    for segment in segments {
+                        let a = origin.transform(segment.x0, segment.y, bed);
+                        let b = origin.transform(segment.x1, segment.y, bed);
+                        segment.x0 = a.0.min(b.0);
+                        segment.x1 = a.0.max(b.0);
+                        segment.y = a.1;
+                    }
+                }
+                LayerWork::Raster { rows, .. } => {
+                    for row in rows {
+                        row.y = origin.transform(0.0, row.y, bed).1;
+                        for run in &mut row.runs {
+                            let a = origin.transform(run.0, 0.0, bed).0;
+                            let b = origin.transform(run.1, 0.0, bed).0;
+                            *run = (a.min(b), a.max(b));
+                        }
+                    }
+                }
+            }
+        }
+        plan.bbox = bounding_box(&plan.layers);
+        plan
+    }
+
     /// Konvexe Hülle aller tatsächlich geplanten Arbeitspunkte (Monotone Chain).
     /// Dient geräteneutral für konturfolgende Rahmenfahrten (Gummiband).
     pub fn convex_hull(&self) -> Vec<Pt> {
@@ -650,6 +688,20 @@ mod tests {
         let s = state_one_rect();
         let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
         assert_eq!(plan.bbox, Some((10.0, 20.0, 40.0, 60.0)));
+    }
+
+    #[test]
+    fn plan_wird_in_rechts_unten_nullpunkt_transformiert() {
+        let mut state = AppState::new();
+        state.add_shape(Geo::Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        });
+        let plan = JobPlan::from_shapes(&state.shapes, &state.layers)
+            .transformed_for_bed(crate::BedOrigin::BottomRight, (600.0, 400.0));
+        assert_eq!(plan.bbox, Some((560.0, 340.0, 590.0, 380.0)));
     }
 
     #[test]

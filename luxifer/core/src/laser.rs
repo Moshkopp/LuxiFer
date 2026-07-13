@@ -22,6 +22,54 @@ pub enum DriverKind {
     MiniGrbl,
 }
 
+/// Lage des Maschinen-Nullpunkts am Arbeitsbett. Die Editor-Geometrie bleibt
+/// immer links-oben orientiert; vor dem Treiber wird in dieses Koordinatensystem
+/// transformiert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BedOrigin {
+    #[default]
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl BedOrigin {
+    pub fn transform(self, x: f64, y: f64, bed: (f64, f64)) -> (f64, f64) {
+        let x = if matches!(self, Self::TopRight | Self::BottomRight) {
+            bed.0 - x
+        } else {
+            x
+        };
+        let y = if matches!(self, Self::BottomLeft | Self::BottomRight) {
+            bed.1 - y
+        } else {
+            y
+        };
+        (x, y)
+    }
+
+    /// Hält den im Canvas gewählten 3×3-Jobanker beim Spiegeln an derselben
+    /// sichtbaren Ecke/Kante der Geometrie.
+    pub fn transform_anchor(self, anchor: crate::Anchor) -> crate::Anchor {
+        use crate::Anchor::*;
+        let horizontal = matches!(self, Self::TopRight | Self::BottomRight);
+        let vertical = matches!(self, Self::BottomLeft | Self::BottomRight);
+        match (anchor, horizontal, vertical) {
+            (NW, false, false) | (NE, true, false) | (SW, false, true) | (SE, true, true) => NW,
+            (N, _, false) | (S, _, true) => N,
+            (NE, false, false) | (NW, true, false) | (SE, false, true) | (SW, true, true) => NE,
+            (W, false, _) | (E, true, _) => W,
+            (Center, _, _) => Center,
+            (E, false, _) | (W, true, _) => E,
+            (SW, false, false) | (SE, true, false) | (NW, false, true) | (NE, true, true) => SW,
+            (S, _, false) | (N, _, true) => S,
+            (SE, false, false) | (SW, true, false) | (NE, false, true) | (NW, true, true) => SE,
+        }
+    }
+}
+
 /// Verbindungsparameter eines Lasers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "art", rename_all = "lowercase")]
@@ -68,6 +116,9 @@ pub struct LaserProfile {
     pub connection: Connection,
     /// Arbeitsbereich B×H in mm.
     pub bed_mm: (f64, f64),
+    /// Maschinen-Nullpunkt an einer der vier Bettecken.
+    #[serde(default)]
+    pub origin: BedOrigin,
     /// Reversal-Kalibrierung (nur für Treiber relevant, die sie nutzen).
     #[serde(default)]
     pub scan_offset: ScanOffsetCal,
@@ -81,6 +132,7 @@ impl Default for LaserProfile {
             kind: DriverKind::Ruida,
             connection: Connection::default(),
             bed_mm: (600.0, 400.0),
+            origin: BedOrigin::default(),
             scan_offset: ScanOffsetCal::default(),
         }
     }
@@ -262,6 +314,29 @@ mod tests {
         assert!(!r.set_active("x"));
         assert!(r.set_active("a"));
         assert_eq!(r.active().unwrap().id, "a");
+    }
+
+    #[test]
+    fn altes_profil_ohne_nullpunkt_bleibt_oben_links() {
+        let json = r#"{
+            "id":"alt","name":"Alt","kind":"Ruida",
+            "connection":{"art":"netz","ip":"127.0.0.1","port":null},
+            "bed_mm":[300.0,200.0]
+        }"#;
+        let profile: LaserProfile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.origin, BedOrigin::TopLeft);
+    }
+
+    #[test]
+    fn nullpunkt_spiegelt_punkt_und_jobanker() {
+        assert_eq!(
+            BedOrigin::BottomRight.transform(25.0, 40.0, (300.0, 200.0)),
+            (275.0, 160.0)
+        );
+        assert_eq!(
+            BedOrigin::BottomRight.transform_anchor(crate::Anchor::NW),
+            crate::Anchor::SE
+        );
     }
 
     #[test]

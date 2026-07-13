@@ -41,6 +41,8 @@ pub struct FrameScene<'a> {
     pub preview_show_travel: bool,
     /// Feinraster-Abstand des Tisch-Gitters in mm (GUI-Settings).
     pub grid_mm: f32,
+    /// Maschinen-Nullpunkt des aktiven Laserprofils.
+    pub bed_origin: luxifer_core::BedOrigin,
 }
 
 pub struct Renderer {
@@ -239,7 +241,7 @@ impl Renderer {
         }
         if scene_changed {
             self.last_render_rev = rev;
-            let geometry = base_vertices(scene.session);
+            let geometry = base_vertices(scene.session, scene.bed_origin);
             self.background_end = geometry.background_end;
             self.verts = geometry.vertices;
             self.preview_legend = None;
@@ -323,9 +325,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.05,
-                            g: 0.06,
-                            b: 0.08,
+                            r: 0.025,
+                            g: 0.03,
+                            b: 0.04,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -335,8 +337,8 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            // Opake Bett-Fläche zuerst, darüber das viewportfüllende Gitter.
-            // Danach Bildtexturen — im Preview die verarbeiteten
+            // Bettrahmen zuerst, darüber das viewportfüllende Gitter. Danach
+            // Bildtexturen — im Preview die verarbeiteten
             // Job-Rasterungen, sonst die Design-Originale —, anschließend
             // Vektor-Fills und Konturen; Handles bleiben ganz oben.
             self.gpu.draw_canvas_range(&mut rp, 0..self.background_end);

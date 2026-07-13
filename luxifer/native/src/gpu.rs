@@ -237,7 +237,7 @@ impl Gpu {
         self.gcount = verts.len() as u32;
     }
 
-    /// Zeichnet das Gitter (nach der Bett-Fläche, vor den Inhalten).
+    /// Zeichnet das Gitter (nach dem Bettrahmen, vor den Inhalten).
     pub fn draw_grid<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>) {
         if self.gcount == 0 {
             return;
@@ -309,7 +309,7 @@ struct U { center: vec2<f32>, scale: f32, _p: f32, viewport: vec2<f32>, _p2: vec
 struct VOut { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32> };
 
 // Halbe Linienbreite in Pixeln (bildschirm-konstant).
-const HALF_W: f32 = 0.9;
+const HALF_W: f32 = 1.1;
 
 @vertex
 fn vs(@location(0) p: vec2<f32>, @location(1) dir: vec2<f32>,

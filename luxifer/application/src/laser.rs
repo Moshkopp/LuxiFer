@@ -141,14 +141,21 @@ impl LaserService {
     /// Dieselbe Quelle wie die Vorschau (`EditorSession::job_preview`), damit
     /// die Vorschau nie etwas zeigt, das der echte Job nicht tut (und der Job
     /// nichts auslässt, was die Vorschau zeigt).
-    fn plan(shapes: &[Shape], layers: &[Layer]) -> JobPlan {
-        JobPlan::from_shapes_with_assets(shapes, layers, crate::assets::resolve_luma)
+    fn plan(&self, shapes: &[Shape], layers: &[Layer]) -> JobPlan {
+        let plan = JobPlan::from_shapes_with_assets(shapes, layers, crate::assets::resolve_luma);
+        self.active_profile().map_or(plan.clone(), |profile| {
+            plan.transformed_for_bed(profile.origin, profile.bed_mm)
+        })
     }
 
-    fn job_params(start_mode: StartMode, anchor_idx: usize) -> JobParams {
+    fn job_params(&self, start_mode: StartMode, anchor_idx: usize) -> JobParams {
+        let anchor = Anchor::from_index(anchor_idx);
         JobParams {
             start_mode,
-            anchor: Anchor::from_index(anchor_idx),
+            anchor: self
+                .active_profile()
+                .map(|profile| profile.origin.transform_anchor(anchor))
+                .unwrap_or(anchor),
         }
     }
 
@@ -161,8 +168,8 @@ impl LaserService {
         start_mode: StartMode,
         anchor_idx: usize,
     ) -> Result<String, AppError> {
-        let plan = Self::plan(shapes, layers);
-        let jp = Self::job_params(start_mode, anchor_idx);
+        let plan = self.plan(shapes, layers);
+        let jp = self.job_params(start_mode, anchor_idx);
         self.with_driver(needs_connection(action), |d| {
             d.run_action(action, &plan, layers, &jp).map_err(|e| {
                 AppError::wrap(
@@ -183,8 +190,8 @@ impl LaserService {
         start_mode: StartMode,
         anchor_idx: usize,
     ) -> Result<(), AppError> {
-        let plan = Self::plan(shapes, layers);
-        let jp = Self::job_params(start_mode, anchor_idx);
+        let plan = self.plan(shapes, layers);
+        let jp = self.job_params(start_mode, anchor_idx);
         // Export kompiliert nur — dafür braucht es kein erreichbares Gerät.
         let bytes = self.with_driver(false, |d| {
             d.compile_with(&plan, layers, &jp)

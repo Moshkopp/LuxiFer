@@ -7,10 +7,11 @@
 use egui::Color32;
 
 use super::action::UiAction;
+use super::ICON_BUTTON_SIDE;
 
 /// Kleiner horizontaler Icon-Knopf (Anordnen-Leiste). `dim` = deaktiviert.
 fn bar_icon(ui: &mut egui::Ui, icon: &str, tip: &str, enabled: bool) -> bool {
-    let side = 28.0;
+    let side = ICON_BUTTON_SIDE;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::click());
     let hov = resp.hovered() && enabled;
     let bg = if hov {

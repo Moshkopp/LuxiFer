@@ -222,21 +222,54 @@ pub fn fill_rect(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex>
     ]
 }
 
-/// Arbeitsbereich als Bühne: dezent hellere Fläche + kräftiger Rahmen +
-/// Nullpunkt-Kreuz. Das Gitter liegt NICHT mehr hier (zoom-unabhängig
-/// gecacht), sondern im kamera-abhängigen [`viewport_grid`].
-pub fn bed_base(w: f32, h: f32) -> Vec<Vertex> {
-    // Bett-Fläche zuunterst, etwas heller als der Fenster-Hintergrund.
-    let mut v = fill_rect(0.0, 0.0, w, h, [0.10, 0.11, 0.13, 1.0]);
-    // Bett-Rahmen kräftiger.
-    for seg in rect_outline(0.0, 0.0, w, h, BED_COLOR) {
-        v.push(seg);
-    }
-    // Nullpunkt-Kreuz (links oben = Maschinen-0) in Akzentfarbe.
-    let o = 14.0;
-    push_seg(&mut v, [0.0, 0.0], [o, 0.0], ORIGIN_COLOR);
-    push_seg(&mut v, [0.0, 0.0], [0.0, o], ORIGIN_COLOR);
+/// Arbeitsbereich als Rahmen + Nullpunkt-Kreuz. Die Fläche bleibt transparent,
+/// damit das viewportfüllende Gitter innen und außen gleichmäßig lesbar ist.
+pub fn bed_base(w: f32, h: f32, origin: luxifer_core::BedOrigin) -> Vec<Vertex> {
+    let mut v = bed_outline(w, h);
+    push_origin_marker(&mut v, origin, (w as f64, h as f64));
     v
+}
+
+/// Klarer Maschinen-Nullmarker bei (0,0): verlängertes L innerhalb des Betts,
+/// Kreuz über beide Achsen und eine kleine Raute im Schnittpunkt. Der Marker
+/// bezeichnet bewusst nicht den controllerseitigen Benutzerursprung.
+fn push_origin_marker(v: &mut Vec<Vertex>, origin: luxifer_core::BedOrigin, bed: (f64, f64)) {
+    let first = v.len();
+    let arm = 24.0;
+    let cross = 8.0;
+    let diamond = 4.0_f64;
+    let point = |x: f64, y: f64| {
+        let p = origin.transform(x, y, bed);
+        [p.0 as f32, p.1 as f32]
+    };
+    push_seg(v, point(0.0, 0.0), point(arm, 0.0), ORIGIN_COLOR);
+    push_seg(v, point(0.0, 0.0), point(0.0, arm), ORIGIN_COLOR);
+    push_seg(v, point(-cross, 0.0), point(cross, 0.0), ORIGIN_COLOR);
+    push_seg(v, point(0.0, -cross), point(0.0, cross), ORIGIN_COLOR);
+    let diamond_points: Vec<_> = [
+        (0.0, -diamond),
+        (diamond, 0.0),
+        (0.0, diamond),
+        (-diamond, 0.0),
+    ]
+    .into_iter()
+    .map(|(x, y)| origin.transform(x, y, bed))
+    .collect();
+    push_polyline(v, &diamond_points, true, ORIGIN_COLOR);
+    for vertex in &mut v[first..] {
+        vertex.side *= 1.8;
+    }
+}
+
+/// Deutlich hervorgehobener Bett-Rahmen. `side` ist im Shader der
+/// Multiplikator der bildschirmkonstanten Linienbreite; der Rahmen kann damit
+/// kräftiger sein, ohne alle Objektkonturen ebenfalls zu verbreitern.
+fn bed_outline(w: f32, h: f32) -> Vec<Vertex> {
+    let mut frame = rect_outline(0.0, 0.0, w, h, BED_COLOR);
+    for vertex in &mut frame {
+        vertex.side *= 1.8;
+    }
+    frame
 }
 
 /// Unterhalb dieses Bildschirm-Abstands (px pro Rasterschritt) ist eine
@@ -268,8 +301,8 @@ pub fn viewport_grid(cam: &crate::camera::Camera, grid_mm: f32) -> Vec<Vertex> {
     let step = grid_step_mm(grid_mm, cam.scale);
     let t = ((step * cam.scale - GRID_FADE_LO_PX) / (GRID_FADE_HI_PX - GRID_FADE_LO_PX))
         .clamp(0.0, 1.0);
-    const FINE_A: f32 = 0.05;
-    const COARSE_A: f32 = 0.12;
+    const FINE_A: f32 = 0.035;
+    const COARSE_A: f32 = 0.09;
     let fine = [1.0, 1.0, 1.0, FINE_A * t];
     let coarse = [1.0, 1.0, 1.0, FINE_A + (COARSE_A - FINE_A) * t];
 
@@ -300,6 +333,11 @@ pub fn viewport_grid(cam: &crate::camera::Camera, grid_mm: f32) -> Vec<Vertex> {
     };
     axis(x0, x1, true);
     axis(y0, y1, false);
+    // Das Raster ist Orientierung, nicht Inhalt: schmaler als Objektkonturen
+    // zeichnen, obwohl beide denselben bildschirmkonstanten Shader verwenden.
+    for vertex in &mut v {
+        vertex.side *= 0.55;
+    }
     v
 }
 
@@ -308,20 +346,20 @@ pub fn viewport_grid(cam: &crate::camera::Camera, grid_mm: f32) -> Vec<Vertex> {
 /// Bühne, nicht der Messtisch.
 pub fn bed_material(w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
     let mut v = fill_rect(0.0, 0.0, w, h, color);
-    for seg in rect_outline(0.0, 0.0, w, h, BED_COLOR) {
+    for seg in bed_outline(w, h) {
         v.push(seg);
     }
     v
 }
 
-/// Farbwert für den Tisch-Rahmen (dezentes Grau).
-pub const BED_COLOR: [f32; 4] = [0.42, 0.46, 0.52, 0.9];
+/// Farbwert für den deutlich sichtbaren Tisch-Rahmen.
+pub const BED_COLOR: [f32; 4] = [0.76, 0.80, 0.88, 1.0];
 /// Auswahl-BBox-Rahmen (heller Akzentton).
 pub const SEL_BOX_COLOR: [f32; 4] = [0.4, 0.7, 1.0, 0.9];
 /// Transform-Handles (weiß).
 pub const HANDLE_COLOR: [f32; 4] = [0.95, 0.97, 1.0, 1.0];
-/// Nullpunkt-Kreuz (Akzentgrün).
-pub const ORIGIN_COLOR: [f32; 4] = [0.25, 0.72, 0.5, 1.0];
+/// Maschinen-Nullmarker (leuchtendes Akzentgrün).
+pub const ORIGIN_COLOR: [f32; 4] = [0.2, 0.95, 0.62, 1.0];
 
 #[cfg(test)]
 mod tests {

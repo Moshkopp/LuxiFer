@@ -49,7 +49,8 @@ pub use job::{
     Path, StartMode,
 };
 pub use laser::{
-    Connection, DriverKind, JobAction, LaserProfile, LaserRegistry, ScanOffsetCal, ScanOffsetPoint,
+    BedOrigin, Connection, DriverKind, JobAction, LaserProfile, LaserRegistry, ScanOffsetCal,
+    ScanOffsetPoint,
 };
 pub use model::{Layer, LayerMode, Shape, TextMeta, SWATCH_COLORS};
 pub use project::{

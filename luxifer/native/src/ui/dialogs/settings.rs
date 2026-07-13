@@ -309,6 +309,23 @@ fn laser_profile_form(ui: &mut egui::Ui, profile: &mut LaserProfile) {
                 ui.add(egui::DragValue::new(&mut profile.bed_mm.1).speed(1.0));
             });
             ui.end_row();
+
+            ui.label("Maschinen-Nullpunkt");
+            egui::ComboBox::from_id_salt("bed_origin")
+                .selected_text(match profile.origin {
+                    luxifer_core::BedOrigin::TopLeft => "Oben links",
+                    luxifer_core::BedOrigin::TopRight => "Oben rechts",
+                    luxifer_core::BedOrigin::BottomLeft => "Unten links",
+                    luxifer_core::BedOrigin::BottomRight => "Unten rechts",
+                })
+                .show_ui(ui, |ui| {
+                    use luxifer_core::BedOrigin::*;
+                    ui.selectable_value(&mut profile.origin, TopLeft, "Oben links");
+                    ui.selectable_value(&mut profile.origin, TopRight, "Oben rechts");
+                    ui.selectable_value(&mut profile.origin, BottomLeft, "Unten links");
+                    ui.selectable_value(&mut profile.origin, BottomRight, "Unten rechts");
+                });
+            ui.end_row();
         });
 
     // Scan-Offset (Reversal-Korrektur, ADR 0006 §6): Tabelle speed → offset;

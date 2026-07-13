@@ -39,6 +39,9 @@ use crate::app::App;
 use crate::laserpanel;
 use crate::tools::Tool;
 
+/// Einheitliche Kantenlänge aller kompakten Icon-Buttons.
+pub(super) const ICON_BUTTON_SIDE: f32 = 34.0;
+
 /// RGB-Tripel → egui-Farbe. Geteilter Helfer für die Panels.
 pub(super) fn c32(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
@@ -179,7 +182,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 }
             } else {
                 let left = egui::SidePanel::left("tools")
-                    .exact_width(96.0)
+                    .exact_width(88.0)
                     .resizable(false)
                     .show(ctx, |ui| tools::tools_panel(ui, cur_tool));
                 app.left_w = left.response.rect.width();
@@ -255,11 +258,18 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Lineale am Canvas-Rand — nach den Panels, damit `available_rect` genau
     // den freien Canvas-Bereich meint. Vorschau/Projekt bleiben linealfrei.
     if matches!(app.view, View::Design | View::Laser) {
+        let profile = app.laser_backend.active_profile();
+        let origin = profile.map(|p| p.origin).unwrap_or_default();
+        let bed = profile
+            .map(|p| p.bed_mm)
+            .unwrap_or((app.session.bed_w_mm, app.session.bed_h_mm));
         ruler::rulers(
             ctx,
             &app.canvas.cam,
             app.canvas.cursor,
             app.ui_settings.theme.accent.hue,
+            origin,
+            bed,
         );
     }
 

@@ -95,7 +95,7 @@ fn plan_rastert_bild_assets_wie_die_vorschau() {
 
     let mut s = luxifer_core::AppState::new();
     s.add_image(meta.id.clone(), 0.0, 0.0, 10.0, 10.0);
-    let plan = LaserService::plan(&s.shapes, &s.layers);
+    let plan = service_with_ruida().plan(&s.shapes, &s.layers);
 
     let has_raster = plan.layers.iter().any(|l| {
         matches!(
