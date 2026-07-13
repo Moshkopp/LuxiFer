@@ -56,7 +56,8 @@ pub fn shape_lines(state: &AppState) -> Vec<Vertex> {
     for shape in &state.shapes {
         let layer = state.layers.get(shape.layer_id);
         let visible = layer.map(|l| l.visible).unwrap_or(true);
-        if !visible {
+        let fill_mode = layer.map(|l| l.mode.is_filled()).unwrap_or(false);
+        if !visible || (shape.fill_only && !fill_mode) {
             continue;
         }
         let base = layer.map(|l| l.color).unwrap_or([200, 200, 200]);
@@ -80,7 +81,12 @@ pub fn selected_outlines(state: &AppState, accent: [u8; 3]) -> Vec<Vertex> {
             .get(shape.layer_id)
             .map(|l| l.visible)
             .unwrap_or(true);
-        if !visible {
+        let fill_mode = state
+            .layers
+            .get(shape.layer_id)
+            .map(|l| l.mode.is_filled())
+            .unwrap_or(false);
+        if !visible || (shape.fill_only && !fill_mode) {
             continue;
         }
         let (pts, closed) = world_outline(shape);

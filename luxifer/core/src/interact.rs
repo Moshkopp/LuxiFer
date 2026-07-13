@@ -241,7 +241,7 @@ impl AppState {
         self.selected.clear();
         for (i, s) in self.shapes.iter().enumerate() {
             if let Some(l) = self.layers.get(s.layer_id) {
-                if !l.visible || l.locked {
+                if !l.visible || l.locked || (s.fill_only && !l.mode.is_filled()) {
                     continue;
                 }
             }

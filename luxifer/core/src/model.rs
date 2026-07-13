@@ -177,6 +177,10 @@ pub struct TextMeta {
 pub struct Shape {
     pub layer_id: usize,
     pub geo: Geo,
+    /// Hilfskontur, die ausschließlich eine Flächenfüllung begrenzt. Sie wird
+    /// im Cut-Modus weder angezeigt noch in den Laserjob übernommen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fill_only: bool,
     /// Drehung in Grad (um den Bounding-Box-Mittelpunkt).
     #[serde(default)]
     pub rotation: f64,
@@ -204,6 +208,7 @@ impl Shape {
         Self {
             layer_id,
             geo,
+            fill_only: false,
             rotation: 0.0,
             group_id: None,
             speed_override: None,

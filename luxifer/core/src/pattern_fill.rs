@@ -15,6 +15,7 @@
 //! Objekt; hier erzeugt sie (Schnitt 1) echte Polylinien mit Undo. Ein
 //! nicht-destruktives Shape-Metadatum kann später darauf aufsetzen.
 
+use crate::geo_ops::{boolean, BoolOp};
 use crate::geometry::{rotate_point, Pt};
 use crate::scanline::{fill_segments, Contour};
 
@@ -81,27 +82,33 @@ pub fn fill_pattern(rings: &[Vec<Pt>], p: &FillParams) -> Vec<(Vec<Pt>, bool)> {
         Pattern::Lines => lines_fill(&rings, p, anchor),
         Pattern::Circles => {
             let r = (p.size / 2.0).max(0.05);
-            element_grid(
+            with_fill_boundary(
                 &rings,
-                p,
-                anchor,
-                p.size + p.gap_x,
-                p.size + p.gap_y,
-                false,
-                |cx, cy| circle_poly(cx, cy, r, 24),
+                element_grid(
+                    &rings,
+                    p,
+                    anchor,
+                    p.size + p.gap_x,
+                    p.size + p.gap_y,
+                    false,
+                    |cx, cy| circle_poly(cx, cy, r, 24),
+                ),
             )
         }
         Pattern::Slots => {
             let r = (p.size / 2.0).max(0.05);
             let len = p.size * 2.0;
-            element_grid(
+            with_fill_boundary(
                 &rings,
-                p,
-                anchor,
-                len + p.gap_x,
-                p.size + p.gap_y,
-                true, // Zeilen versetzt (halber Schritt) — wie die Referenz
-                move |cx, cy| slot_poly(cx, cy, len, r, 12),
+                element_grid(
+                    &rings,
+                    p,
+                    anchor,
+                    len + p.gap_x,
+                    p.size + p.gap_y,
+                    true, // Zeilen versetzt (halber Schritt) — wie die Referenz
+                    move |cx, cy| slot_poly(cx, cy, len, r, 12),
+                ),
             )
         }
         Pattern::Hex => {
@@ -111,17 +118,32 @@ pub fn fill_pattern(rings: &[Vec<Pt>], p: &FillParams) -> Vec<(Vec<Pt>, bool)> {
             let r = p.size.max(0.2);
             let gap = ((p.gap_x + p.gap_y) / 2.0).max(0.0);
             let rg = r + gap;
-            element_grid(
+            with_fill_boundary(
                 &rings,
-                p,
-                anchor,
-                (3.0f64).sqrt() * rg,
-                1.5 * rg,
-                true,
-                move |cx, cy| hex_poly(cx, cy, r),
+                element_grid(
+                    &rings,
+                    p,
+                    anchor,
+                    (3.0f64).sqrt() * rg,
+                    1.5 * rg,
+                    true,
+                    move |cx, cy| hex_poly(cx, cy, r),
+                ),
             )
         }
     }
+}
+
+/// Geschlossene Außen- und Lochringe gehören zum Formen-Muster. Im Filled-
+/// Modus bilden sie die Grundfläche; die ebenfalls geschlossenen Elemente
+/// schalten diese per Even-Odd wieder aus. So wird das Material *zwischen* den
+/// Waben/Kreisen/Slots gefüllt und nicht deren Innenraum.
+fn with_fill_boundary(rings: &[&Vec<Pt>], elements: Vec<(Vec<Pt>, bool)>) -> Vec<(Vec<Pt>, bool)> {
+    rings
+        .iter()
+        .map(|ring| ((*ring).clone(), true))
+        .chain(elements)
+        .collect()
 }
 
 // ── Muster: parallele Linien ─────────────────────────────────────────────────
@@ -210,137 +232,20 @@ where
         for ix in -n_left..=n_right {
             let cx = anchor.0 + ix as f64 * step_x + x_off;
             let poly = make(cx, cy);
-            for (piece, closed) in clip_element(&poly, &work) {
+            // Polygon-Intersection statt offener Kantenfragmente: Randzellen
+            // müssen echte geschlossene Teilpolygone sein, damit sie im
+            // Filled-Modus als Löcher der Außenkontur funktionieren.
+            for piece in boolean(&[poly], &work, BoolOp::Intersect) {
                 // Zurück in den Weltraum drehen.
                 let world: Vec<Pt> = piece
                     .iter()
                     .map(|&(x, y)| rotate_point(x, y, anchor.0, anchor.1, p.angle_deg))
                     .collect();
-                out.push((world, closed));
+                out.push((world, true));
             }
         }
     }
     out
-}
-
-/// Midpoint-Clipper: schneidet ein geschlossenes Element-Polygon gegen die
-/// Ringe (Even-Odd). Liegt es komplett innen → unverändert (geschlossen).
-/// Sonst bleiben die Kanten-Teilstücke, deren Mittelpunkt innen liegt (offen).
-fn clip_element(poly: &[Pt], rings: &[Vec<Pt>]) -> Vec<(Vec<Pt>, bool)> {
-    let n = poly.len();
-    if n < 3 {
-        return Vec::new();
-    }
-    // Schneller Komplett-Test: alle Ecken innen und keine Kante schneidet.
-    let all_inside = poly.iter().all(|&(x, y)| inside(x, y, rings));
-    if all_inside && !any_edge_crosses(poly, rings) {
-        return vec![(poly.to_vec(), true)];
-    }
-
-    // Randfall: Teilstücke sammeln. Offene Ketten aus behaltenen Stücken.
-    let mut chains: Vec<Vec<Pt>> = Vec::new();
-    let mut cur: Vec<Pt> = Vec::new();
-    for i in 0..n {
-        let a = poly[i];
-        let b = poly[(i + 1) % n];
-        for (sa, sb) in split_segment(a, b, rings) {
-            let mid = ((sa.0 + sb.0) / 2.0, (sa.1 + sb.1) / 2.0);
-            if inside(mid.0, mid.1, rings) {
-                if cur.is_empty() {
-                    cur.push(sa);
-                } else {
-                    let last = *cur.last().unwrap();
-                    if (last.0 - sa.0).hypot(last.1 - sa.1) > 1e-9 {
-                        chains.push(std::mem::take(&mut cur));
-                        cur.push(sa);
-                    }
-                }
-                cur.push(sb);
-            } else if !cur.is_empty() {
-                chains.push(std::mem::take(&mut cur));
-            }
-        }
-    }
-    if !cur.is_empty() {
-        chains.push(cur);
-    }
-    chains
-        .into_iter()
-        .filter(|c| c.len() >= 2)
-        .map(|c| (c, false))
-        .collect()
-}
-
-/// Teilt die Strecke a–b an allen Schnittpunkten mit den Ring-Kanten.
-fn split_segment(a: Pt, b: Pt, rings: &[Vec<Pt>]) -> Vec<(Pt, Pt)> {
-    let mut ts = vec![0.0, 1.0];
-    for ring in rings {
-        let n = ring.len();
-        for i in 0..n {
-            let c = ring[i];
-            let d = ring[(i + 1) % n];
-            if let Some(t) = seg_intersect_t(a, b, c, d) {
-                ts.push(t);
-            }
-        }
-    }
-    ts.sort_by(|x, y| x.partial_cmp(y).unwrap());
-    ts.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
-    let lerp = |t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-    ts.windows(2).map(|w| (lerp(w[0]), lerp(w[1]))).collect()
-}
-
-/// Parameter t des Schnitts von a–b mit c–d (beide als Strecken), falls vorhanden.
-fn seg_intersect_t(a: Pt, b: Pt, c: Pt, d: Pt) -> Option<f64> {
-    let r = (b.0 - a.0, b.1 - a.1);
-    let s = (d.0 - c.0, d.1 - c.1);
-    let denom = r.0 * s.1 - r.1 * s.0;
-    if denom.abs() < 1e-12 {
-        return None;
-    }
-    let qp = (c.0 - a.0, c.1 - a.1);
-    let t = (qp.0 * s.1 - qp.1 * s.0) / denom;
-    let u = (qp.0 * r.1 - qp.1 * r.0) / denom;
-    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
-        Some(t)
-    } else {
-        None
-    }
-}
-
-fn any_edge_crosses(poly: &[Pt], rings: &[Vec<Pt>]) -> bool {
-    let n = poly.len();
-    for i in 0..n {
-        let a = poly[i];
-        let b = poly[(i + 1) % n];
-        for ring in rings {
-            let m = ring.len();
-            for j in 0..m {
-                if seg_intersect_t(a, b, ring[j], ring[(j + 1) % m]).is_some() {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Even-Odd-Punkttest über alle Ringe (Löcher zählen doppelt = außen).
-fn inside(x: f64, y: f64, rings: &[Vec<Pt>]) -> bool {
-    let mut odd = false;
-    for ring in rings {
-        let n = ring.len();
-        let mut j = n - 1;
-        for i in 0..n {
-            let (xi, yi) = ring[i];
-            let (xj, yj) = ring[j];
-            if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
-                odd = !odd;
-            }
-            j = i;
-        }
-    }
-    odd
 }
 
 /// Flächen-Centroid; bei entartetem Polygon der bbox-Mittelpunkt.
@@ -497,12 +402,20 @@ impl AppState {
         }
 
         self.selected.clear();
-        for (pts, closed) in filled {
+        let fill_boundary_count = if p.pattern == Pattern::Lines {
+            0
+        } else {
+            rings.len()
+        };
+        for (fill_index, (pts, closed)) in filled.into_iter().enumerate() {
             let idx = self.shapes.len();
             let mut shape = crate::model::Shape::new(layer_id, Geo::Polyline { pts, closed });
+            shape.fill_only = fill_index < fill_boundary_count;
             shape.group_id = Some(group_id);
             self.shapes.push(shape);
-            self.selected.push(idx);
+            if fill_index >= fill_boundary_count {
+                self.selected.push(idx);
+            }
         }
         self.dirty = true;
     }
@@ -545,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn kreise_innen_bleiben_geschlossen_randkreise_werden_geclippt() {
+    fn kreise_und_geclippte_randkreise_sind_geschlossen() {
         let p = FillParams {
             pattern: Pattern::Circles,
             gap_x: 2.0,
@@ -554,10 +467,15 @@ mod tests {
             ..Default::default()
         };
         let out = fill_pattern(&[square(0.0, 0.0, 30.0)], &p);
-        let closed = out.iter().filter(|(_, c)| *c).count();
-        let open = out.iter().filter(|(_, c)| !*c).count();
-        assert!(closed > 4, "innere Kreise ganz ({closed})");
-        assert!(open > 0, "Randkreise geclippt ({open})");
+        assert!(out.len() > 5, "zu wenige Konturen ({})", out.len());
+        assert!(out.iter().all(|(_, closed)| *closed));
+        assert_eq!(out[0].0, square(0.0, 0.0, 30.0), "Außenrand fehlt");
+        assert!(
+            out.iter()
+                .skip(1)
+                .any(|(pts, _)| pts.iter().any(|&(x, y)| x.abs() < 1e-9 || y.abs() < 1e-9)),
+            "kein sauber geclipptes Randelement"
+        );
         // Alle Punkte aller Stücke liegen (fast) in der Kontur.
         for (pts, _) in &out {
             for &(x, y) in pts {
@@ -582,14 +500,41 @@ mod tests {
             ..Default::default()
         };
         let out = fill_pattern(&[outer, hole], &p);
-        for (pts, closed) in &out {
-            if !closed {
-                continue;
-            }
+        // Die ersten beiden Konturen sind Außenrand und vorhandenes Loch.
+        for (pts, _) in out.iter().skip(2) {
             let (cx, cy) = centroid(pts);
             let in_hole = (11.0..19.0).contains(&cx) && (11.0..19.0).contains(&cy);
-            assert!(!in_hole, "geschlossenes Element im Loch bei {cx},{cy}");
+            assert!(!in_hole, "Musterelement im Loch bei {cx},{cy}");
         }
+    }
+
+    #[test]
+    fn formen_muster_filled_fuellt_zwischenraum_nicht_elemente() {
+        let p = FillParams {
+            pattern: Pattern::Circles,
+            gap_x: 2.0,
+            gap_y: 2.0,
+            size: 3.0,
+            ..Default::default()
+        };
+        let out = fill_pattern(&[square(0.0, 0.0, 30.0)], &p);
+        let contours: Vec<Contour<'_>> = out
+            .iter()
+            .map(|(pts, closed)| Contour {
+                points: pts,
+                closed: *closed,
+            })
+            .collect();
+        let fill = fill_segments(&contours, 0.25);
+        let row: Vec<_> = fill.iter().filter(|s| (s.y - 15.0).abs() < 1e-9).collect();
+        assert!(
+            !row.iter().any(|s| s.x0 < 15.0 && s.x1 > 15.0),
+            "Kreismitte darf nicht gefüllt sein"
+        );
+        assert!(
+            row.iter().any(|s| s.x0 < 12.5 && s.x1 > 12.5),
+            "Zwischenraum muss gefüllt sein"
+        );
     }
 
     #[test]

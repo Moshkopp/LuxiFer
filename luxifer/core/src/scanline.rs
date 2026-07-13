@@ -32,7 +32,11 @@ pub fn fill_segments(contours: &[Contour], step_mm: f64) -> Vec<FillSegment> {
     let mut max_y = f64::MIN;
     let mut any = false;
     for c in contours {
-        if c.points.len() < 3 {
+        // Eine offene Polyline begrenzt keine Fläche. Sie darf weder den
+        // Scanbereich erweitern noch Schnittpunkte zum Even-Odd-Paaren
+        // beitragen; mehrere offene Pattern-Fill-Randstücke würden sonst
+        // scheinbar zufällig miteinander zu gefüllten Keilen verbunden.
+        if !c.closed || c.points.len() < 3 {
             continue;
         }
         for &(_, y) in c.points {
@@ -52,11 +56,10 @@ pub fn fill_segments(contours: &[Contour], step_mm: f64) -> Vec<FillSegment> {
         let mut xs: Vec<f64> = Vec::new();
         for c in contours {
             let n = c.points.len();
-            if n < 3 {
+            if !c.closed || n < 3 {
                 continue;
             }
-            let edges = if c.closed { n } else { n - 1 };
-            for i in 0..edges {
+            for i in 0..n {
                 let (x0, y0) = c.points[i];
                 let (x1, y1) = c.points[(i + 1) % n];
                 // Halb-offenes Intervall: Kante zählt, wenn y genau eine
@@ -132,8 +135,9 @@ mod tests {
 
     #[test]
     fn offene_kontur_wird_nicht_gefuellt() {
-        // Zu wenige Punkte / offen → keine Fläche.
-        let pts = vec![(0.0, 0.0), (10.0, 0.0)];
+        // Auch eine offene Kontur mit genug Punkten begrenzt keine Fläche.
+        // Das ist insbesondere für geclippte Pattern-Fill-Randstücke wichtig.
+        let pts = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         let c = Contour {
             points: &pts,
             closed: false,

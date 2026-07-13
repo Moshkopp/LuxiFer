@@ -28,6 +28,9 @@ pub(crate) fn preview_from_state(state: &AppState) -> ProjectPreview {
         if !layer.map(|l| l.visible).unwrap_or(true) {
             continue;
         }
+        if shape.fill_only && !layer.map(|l| l.mode.is_filled()).unwrap_or(false) {
+            continue;
+        }
         let color = layer.map(|l| l.color).unwrap_or([200, 200, 200]);
         let (pts, closed) = crate::scene_geo::world_outline(shape);
         if let luxifer_core::Geo::Image { asset, .. } = &shape.geo {

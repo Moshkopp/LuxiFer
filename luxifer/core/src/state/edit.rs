@@ -13,7 +13,7 @@ impl super::AppState {
         for i in (0..self.shapes.len()).rev() {
             let s = &self.shapes[i];
             if let Some(l) = self.layers.get(s.layer_id) {
-                if !l.visible || l.locked {
+                if !l.visible || l.locked || (s.fill_only && !l.mode.is_filled()) {
                     continue;
                 }
             }

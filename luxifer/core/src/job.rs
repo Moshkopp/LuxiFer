@@ -261,7 +261,7 @@ impl JobPlan {
 
             let paths: Vec<Path> = shapes
                 .iter()
-                .filter(|s| s.layer_id == li)
+                .filter(|s| s.layer_id == li && (layer.mode.is_filled() || !s.fill_only))
                 .map(shape_to_path)
                 .collect();
             if paths.is_empty() {
@@ -681,6 +681,51 @@ mod tests {
         assert!(paths[0].closed);
         assert_eq!(paths[0].points.len(), 4);
         assert_eq!(paths[0].points[0], (10.0, 20.0));
+    }
+
+    #[test]
+    fn fill_hilfskontur_wird_gefuellt_aber_nicht_geschnitten() {
+        let mut s = AppState::new();
+        s.add_shape(Geo::Rect {
+            x: 4.0,
+            y: 4.0,
+            w: 2.0,
+            h: 2.0,
+        });
+        let mut boundary = Shape::new(
+            0,
+            Geo::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            },
+        );
+        boundary.fill_only = true;
+        s.shapes.insert(0, boundary);
+
+        let cut = JobPlan::from_shapes(&s.shapes, &s.layers);
+        let LayerWork::Cut { paths } = &cut.layers[0].work else {
+            panic!("Cut erwartet")
+        };
+        assert_eq!(paths.len(), 1, "Hilfskontur darf nicht geschnitten werden");
+        assert_eq!(cut.bbox, Some((4.0, 4.0, 6.0, 6.0)));
+
+        s.layers[0].mode = LayerMode::Fill;
+        s.layers[0].line_step_mm = 1.0;
+        let fill = JobPlan::from_shapes(&s.shapes, &s.layers);
+        let LayerWork::Fill { segments } = &fill.layers[0].work else {
+            panic!("Fill erwartet")
+        };
+        assert!(segments
+            .iter()
+            .any(|line| line.x0 == 0.0 && line.x1 == 10.0));
+        assert!(
+            !segments
+                .iter()
+                .any(|line| line.y == 5.0 && line.x0 < 5.0 && line.x1 > 5.0),
+            "innere Musterkontur muss als Loch ausgespart bleiben"
+        );
     }
 
     #[test]
