@@ -37,7 +37,6 @@ use egui::Color32;
 
 use crate::app::App;
 use crate::laserpanel;
-use crate::tools::Tool;
 
 /// Einheitliche Kantenlänge aller kompakten Icon-Buttons.
 pub(super) const ICON_BUTTON_SIDE: f32 = 34.0;
@@ -182,7 +181,11 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 }
             } else {
                 let left = egui::SidePanel::left("tools")
-                    .exact_width(88.0)
+                    // Zwei 34-pt-Buttons + Abstand + Panel-Innenränder
+                    // brauchen bei DPI-Rundung etwas Reserve. 88 pt lagen
+                    // exakt auf der rechnerischen Untergrenze und schnitten
+                    // die rechte Buttonkante optisch an.
+                    .exact_width(100.0)
                     .resizable(false)
                     .show(ctx, |ui| tools::tools_panel(ui, cur_tool));
                 app.left_w = left.response.rect.width();
@@ -224,29 +227,39 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 app.dispatch(action);
             }
 
-            // Farbpalette (+ Form-Wähler beim Polygon-Werkzeug) als Dock am
-            // unteren Canvas-Rand (nur Design), zentriert wie in der Tauri-App.
+            // Die Layerfarben schweben direkt über dem Canvas. Sie reservieren
+            // keine eigene Panelhöhe und bleiben eine unmittelbare
+            // Canvas-Aktion statt eines separaten UI-Bereichs.
             if !is_laser {
-                let show_shapes = app.canvas.tool == Tool::Polygon;
-                let active_shape = app.canvas.active_shape;
                 let accent = app.accent;
-                let actions = egui::TopBottomPanel::bottom("palette_dock")
-                    .show_separator_line(true)
-                    .show(ctx, |ui| {
-                        let mut actions = Vec::new();
-                        ui.add_space(6.0);
-                        if show_shapes {
-                            ui.vertical_centered(|ui| {
-                                actions.extend(palette::shape_picker(ui, active_shape))
-                            });
-                            ui.add_space(4.0);
-                        }
-                        ui.vertical_centered(|ui| {
-                            actions.extend(palette::palette_panel(ui, accent))
-                        });
-                        ui.add_space(6.0);
-                        actions
-                    })
+                let canvas_rect = ctx.available_rect();
+
+                // Polygonvarianten schweben oben mittig über der Zeichenfläche
+                // und verändern dadurch weder Header- noch Canvas-Geometrie.
+                if app.canvas.tool == crate::tools::Tool::Polygon {
+                    let active_shape = app.canvas.active_shape;
+                    let actions = egui::Area::new(egui::Id::new("canvas_polygon_shapes"))
+                        .order(egui::Order::Foreground)
+                        .pivot(egui::Align2::CENTER_TOP)
+                        .fixed_pos(egui::pos2(
+                            canvas_rect.center().x,
+                            canvas_rect.top() + ruler::TOP_THICKNESS + 16.0,
+                        ))
+                        .show(ctx, |ui| palette::shape_picker(ui, active_shape))
+                        .inner;
+                    for action in actions {
+                        app.dispatch(action);
+                    }
+                }
+
+                let actions = egui::Area::new(egui::Id::new("canvas_palette"))
+                    .order(egui::Order::Foreground)
+                    .pivot(egui::Align2::CENTER_BOTTOM)
+                    .fixed_pos(egui::pos2(
+                        canvas_rect.center().x,
+                        canvas_rect.bottom() - 16.0,
+                    ))
+                    .show(ctx, |ui| palette::palette_panel(ui, accent))
                     .inner;
                 for action in actions {
                     app.dispatch(action);

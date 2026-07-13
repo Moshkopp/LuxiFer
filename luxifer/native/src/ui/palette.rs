@@ -1,9 +1,9 @@
-//! Farbpalette und Form-Wähler (unteres Dock im Design-Reiter).
+//! Schwebende Canvas-Farbpalette und Form-Wähler unter dem Design-Header.
 //!
 //! Über die `UiAction`-Grenze (ADR 0011): beide Panels lesen nur ihren
 //! aktiven Wert und liefern Absichten zurück, statt `App` zu mutieren.
 
-use egui::{Color32, RichText};
+use egui::Color32;
 use luxifer_core::{model::SWATCH_COLORS, PolyShape};
 
 use super::action::UiAction;
@@ -39,10 +39,8 @@ pub(super) fn shape_picker(ui: &mut egui::Ui, active: PolyShape) -> Vec<UiAction
 
 /// `active` = aktive Zeichenfarbe (nur für die Markierung des Swatches).
 pub(super) fn palette_panel(ui: &mut egui::Ui, active: [u8; 3]) -> Vec<UiAction> {
-    ui.label(RichText::new("FARBE").small().weak());
-    ui.add_space(6.0);
     let mut actions = Vec::new();
-    ui.horizontal_wrapped(|ui| {
+    ui.horizontal(|ui| {
         for &sw in SWATCH_COLORS {
             let is_active = sw == active;
             let size = if is_active { 26.0 } else { 22.0 };

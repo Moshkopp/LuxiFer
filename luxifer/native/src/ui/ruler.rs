@@ -11,7 +11,7 @@ use crate::camera::Camera;
 
 /// Lineal-Dicken in egui-Punkten. Links braucht eine normale horizontale
 /// Zahlenbeschriftung mehr Platz als das obere Lineal.
-const TOP_THICKNESS: f32 = 26.0;
+pub(super) const TOP_THICKNESS: f32 = 26.0;
 const LEFT_THICKNESS: f32 = 42.0;
 /// Mindestabstand beschrifteter Haupt-Ticks in Punkten.
 const MIN_LABEL_PT: f32 = 60.0;
