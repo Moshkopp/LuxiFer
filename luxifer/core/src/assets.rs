@@ -1,6 +1,7 @@
 //! Zentraler Asset-Store (ADR 0004).
 //!
-//! Importierte Bilder werden **einmalig** unter `<data_root>/Assets/` abgelegt,
+//! Importierte Bilder, Fonts und originale SVG-/DXF-Quellen werden **einmalig**
+//! unter `<data_root>/Assets/` abgelegt,
 //! per **Content-Hash** benannt und projektübergreifend geteilt (nie pro Projekt
 //! kopiert — das war ThorBurns Import-Fehler). Farbige Quellen werden beim Import
 //! zu **Graustufe in voller Auflösung** konvertiert (Luminanz) und *diese* als
@@ -26,9 +27,19 @@ pub fn assets_dir() -> PathBuf {
     data_root().join(ASSETS_DIR)
 }
 
-/// Stabile Asset-Identität = Content-Hash der (Graustufen-)Bytes. Gleiches Bild
+/// Stabile Asset-Identität = Content-Hash der abgelegten Bytes. Gleicher Inhalt
 /// zweimal importiert ⇒ dieselbe ID ⇒ ein Asset.
 pub type AssetId = String;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetKind {
+    #[default]
+    Image,
+    Font,
+    SvgSource,
+    DxfSource,
+}
 
 /// Metadaten eines Assets, liegen als `<hash>.meta.json` neben den Bytes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,6 +48,8 @@ pub struct AssetMeta {
     pub id: AssetId,
     /// Dateiendung der abgelegten Bytes (aktuell immer `png`, da Graustufe).
     pub ext: String,
+    #[serde(default)]
+    pub kind: AssetKind,
     /// Ursprünglicher Dateiname der Quelldatei (nur zur Anzeige).
     #[serde(default)]
     pub original_name: String,
@@ -44,7 +57,9 @@ pub struct AssetMeta {
     #[serde(default)]
     pub source_format: String,
     /// Pixelmaße des abgelegten Graustufenbildes.
+    #[serde(default)]
     pub width: u32,
+    #[serde(default)]
     pub height: u32,
     /// Importzeitpunkt (ISO-8601 UTC).
     #[serde(default)]
@@ -134,6 +149,7 @@ pub fn import_image(
     let meta = AssetMeta {
         id: id.clone(),
         ext: "png".into(),
+        kind: AssetKind::Image,
         original_name: original_name.to_string(),
         source_format,
         width,
@@ -148,9 +164,99 @@ pub fn import_image(
     Ok(meta)
 }
 
+/// Legt eine unveränderte Quelldatei content-adressiert im Katalog ab.
+pub fn import_source(
+    store_dir: &Path,
+    source_bytes: &[u8],
+    original_name: &str,
+    ext: &str,
+    kind: AssetKind,
+) -> Result<AssetMeta, AssetError> {
+    if kind == AssetKind::Image {
+        return Err(AssetError(
+            "Bildquellen müssen über import_image laufen".into(),
+        ));
+    }
+    let ext = ext.trim_start_matches('.').to_ascii_lowercase();
+    if ext.is_empty() || !ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(AssetError("Ungültige Asset-Dateiendung".into()));
+    }
+    let id = content_hash(source_bytes);
+    std::fs::create_dir_all(store_dir)?;
+    let bytes_path = store_dir.join(format!("{id}.{ext}"));
+    if !bytes_path.exists() {
+        std::fs::write(&bytes_path, source_bytes)?;
+    }
+    let meta = AssetMeta {
+        id: id.clone(),
+        ext,
+        kind,
+        original_name: original_name.into(),
+        source_format: String::new(),
+        width: 0,
+        height: 0,
+        import_at: now_iso8601(),
+    };
+    let meta_path = store_dir.join(format!("{id}.meta.json"));
+    if !meta_path.exists() {
+        let json = serde_json::to_vec_pretty(&meta).map_err(|e| AssetError(e.to_string()))?;
+        std::fs::write(meta_path, json)?;
+    }
+    Ok(meta)
+}
+
+pub fn list_assets(store_dir: &Path) -> Result<Vec<AssetMeta>, AssetError> {
+    let entries = match std::fs::read_dir(store_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut assets: Vec<AssetMeta> = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+            || !path.to_string_lossy().ends_with(".meta.json")
+        {
+            continue;
+        }
+        let bytes = std::fs::read(path)?;
+        assets.push(serde_json::from_slice(&bytes).map_err(|e| AssetError(e.to_string()))?);
+    }
+    assets.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(assets)
+}
+
+/// Übernimmt ein bereits normalisiertes Katalog-Asset (z. B. von Charon).
+pub fn store_asset(store_dir: &Path, meta: &AssetMeta, bytes: &[u8]) -> Result<(), AssetError> {
+    if content_hash(bytes) != meta.id
+        || meta.ext.is_empty()
+        || !meta.ext.bytes().all(|b| b.is_ascii_alphanumeric())
+    {
+        return Err(AssetError(
+            "Asset-Hash oder Dateiendung ist ungültig".into(),
+        ));
+    }
+    std::fs::create_dir_all(store_dir)?;
+    let data_path = store_dir.join(format!("{}.{}", meta.id, meta.ext));
+    let meta_path = store_dir.join(format!("{}.meta.json", meta.id));
+    if !data_path.exists() {
+        let temp = store_dir.join(format!(".{}.data.tmp", meta.id));
+        std::fs::write(&temp, bytes)?;
+        std::fs::rename(temp, data_path)?;
+    }
+    if !meta_path.exists() {
+        let temp = store_dir.join(format!(".{}.meta.tmp", meta.id));
+        let json = serde_json::to_vec_pretty(meta).map_err(|e| AssetError(e.to_string()))?;
+        std::fs::write(&temp, json)?;
+        std::fs::rename(temp, meta_path)?;
+    }
+    Ok(())
+}
+
 /// Lädt die (Graustufen-)Bytes eines Assets.
 pub fn load_asset(store_dir: &Path, id: &AssetId) -> Result<Vec<u8>, AssetError> {
-    let path = store_dir.join(format!("{id}.png"));
+    let meta = asset_meta(store_dir, id)?;
+    let path = store_dir.join(format!("{id}.{}", meta.ext));
     std::fs::read(&path).map_err(|e| AssetError(format!("Asset {id} nicht lesbar: {e}")))
 }
 
@@ -177,7 +283,8 @@ pub fn asset_meta(store_dir: &Path, id: &AssetId) -> Result<AssetMeta, AssetErro
 
 /// Pfad zu den Asset-Bytes (`<store>/<id>.png`) oder `None`, wenn nicht vorhanden.
 pub fn asset_path(store_dir: &Path, id: &AssetId) -> Option<PathBuf> {
-    let p = store_dir.join(format!("{id}.png"));
+    let meta = asset_meta(store_dir, id).ok()?;
+    let p = store_dir.join(format!("{id}.{}", meta.ext));
     p.exists().then_some(p)
 }
 
@@ -373,6 +480,47 @@ mod tests {
             })
             .count();
         assert_eq!(count, 1, "nur ein PNG im Store");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn quell_asset_bleibt_unveraendert_und_wird_gelistet() {
+        let dir = std::env::temp_dir().join(format!("luxifer_sources_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let source = br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0L1 1"/></svg>"#;
+
+        let meta = import_source(&dir, source, "kontur.svg", "svg", AssetKind::SvgSource)
+            .expect("SVG katalogisieren");
+        assert_eq!(load_asset(&dir, &meta.id).unwrap(), source);
+        assert_eq!(list_assets(&dir).unwrap(), vec![meta.clone()]);
+        assert_eq!(
+            asset_path(&dir, &meta.id).unwrap().extension().unwrap(),
+            "svg"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empfangenes_asset_wird_nur_mit_passendem_hash_gespeichert() {
+        let dir = std::env::temp_dir().join(format!("luxifer_received_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bytes = b"font-data";
+        let meta = AssetMeta {
+            id: content_hash(bytes),
+            ext: "ttf".into(),
+            kind: AssetKind::Font,
+            original_name: "Werkstatt.ttf".into(),
+            source_format: String::new(),
+            width: 0,
+            height: 0,
+            import_at: String::new(),
+        };
+
+        store_asset(&dir, &meta, bytes).expect("gültiges Asset speichern");
+        assert_eq!(load_asset(&dir, &meta.id).unwrap(), bytes);
+        assert!(store_asset(&dir, &meta, b"manipuliert").is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

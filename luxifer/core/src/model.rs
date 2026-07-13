@@ -166,6 +166,9 @@ impl Layer {
 pub struct TextMeta {
     pub text: String,
     pub font_path: String,
+    /// Content-adressierte Schriftdatei im Asset-Katalog.
+    #[serde(default)]
+    pub font_asset: Option<String>,
     pub size_mm: f64,
 }
 
@@ -412,6 +415,7 @@ mod tests {
         s.text_meta = Some(TextMeta {
             text: "A".into(),
             font_path: "font.ttf".into(),
+            font_asset: None,
             size_mm: 10.0,
         });
         s.set_bbox(0.0, 0.0, 20.0, 40.0);
@@ -424,6 +428,7 @@ mod tests {
             Some(TextMeta {
                 text: "A".into(),
                 font_path: "font.ttf".into(),
+                font_asset: None,
                 size_mm: 10.0,
             })
         };

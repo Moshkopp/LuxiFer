@@ -116,6 +116,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             app.left_w = 0.0;
             app.right_w = 0.0;
             let projects = app.project.list();
+            let assets = luxifer_core::list_assets(&luxifer_core::assets_dir()).unwrap_or_default();
             let open_name = app.project.open_name().map(|s| s.to_string());
             sync_project_browser(app, &projects, open_name.as_deref());
             let dirty = app.session.is_dirty();
@@ -126,6 +127,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                         &mut app.project_browser,
                         &projects,
                         &app.project_inbox,
+                        &assets,
                         open_name.as_deref(),
                         dirty,
                     )

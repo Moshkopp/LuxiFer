@@ -6,6 +6,16 @@ use super::App;
 use crate::ui::ImageDialogState;
 
 impl App {
+    /// Fügt ein bereits im globalen Katalog vorhandenes Asset erneut ein.
+    pub fn import_catalog_asset(&mut self, id: &str) {
+        let store = luxifer_core::assets_dir();
+        let Some(path) = luxifer_core::asset_path(&store, &id.to_string()) else {
+            self.toasts.error("Asset-Datei ist lokal nicht verfügbar.");
+            return;
+        };
+        self.import_path(&path);
+    }
+
     /// Öffnet den Bildparameter-Dialog mit den aktuellen Werten des Bild-Shapes.
     pub fn open_image_dialog(&mut self, index: usize) {
         if let Some(Geo::Image { params, .. }) =
@@ -92,6 +102,24 @@ impl App {
         };
         match luxifer_core::import::import_vector(&bytes, &ext) {
             Ok(contours) => {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("quelle");
+                let kind = if ext == "svg" {
+                    luxifer_core::AssetKind::SvgSource
+                } else {
+                    luxifer_core::AssetKind::DxfSource
+                };
+                if let Err(error) = luxifer_core::import_source(
+                    &luxifer_core::assets_dir(),
+                    &bytes,
+                    name,
+                    &ext,
+                    kind,
+                ) {
+                    log::error!("Quelldatei katalogisieren: {error}");
+                }
                 let started = std::time::Instant::now();
                 self.session.add_polylines(contours);
                 self.refresh_accent();

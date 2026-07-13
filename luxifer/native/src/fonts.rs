@@ -22,6 +22,23 @@ pub fn list_fonts() -> Vec<FontEntry> {
     ];
     let mut out: Vec<FontEntry> = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    if let Ok(assets) = luxifer_core::list_assets(&luxifer_core::assets_dir()) {
+        for meta in assets
+            .into_iter()
+            .filter(|meta| meta.kind == luxifer_core::AssetKind::Font)
+        {
+            if let Some(path) = luxifer_core::asset_path(&luxifer_core::assets_dir(), &meta.id) {
+                let name = std::path::Path::new(&meta.original_name)
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&meta.original_name)
+                    .to_string();
+                if seen.insert(name.clone()) {
+                    out.push(FontEntry { name, path });
+                }
+            }
+        }
+    }
     for dir in dirs {
         let mut stack = vec![PathBuf::from(dir)];
         while let Some(d) = stack.pop() {

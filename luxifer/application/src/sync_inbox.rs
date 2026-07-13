@@ -157,13 +157,8 @@ pub fn ignore_inbox_revision(revision_id: &str) -> Result<(), AppError> {
 /// arbeitsplatzlokal. Bild-Assets werden bis zur Asset-Synchronisierung abgelehnt.
 pub fn accept_inbox_revision(revision_id: &str) -> Result<String, AppError> {
     let entry = read_entry(&inbox_dir().join(revision_id).join(MANIFEST_FILE))?;
-    let remote = read_verified_project(&entry)?;
-    if !remote.asset_refs.is_empty() {
-        return Err(AppError::new(
-            "inbox_assets_pending",
-            "Dieses Projekt verwendet Bild-Assets. Die Assetübertragung ist noch nicht verfügbar.",
-        ));
-    }
+    let mut remote = read_verified_project(&entry)?;
+    resolve_project_assets(&mut remote)?;
     let projects_dir = luxifer_core::projects_dir();
     let (local_name, mut local) = luxifer_core::list_projects(&projects_dir)
         .into_iter()
@@ -315,12 +310,7 @@ pub fn compare_inbox_revision(revision_id: &str) -> Result<InboxComparison, AppE
 pub fn apply_inbox_revision(revision_id: &str) -> Result<String, AppError> {
     let entry = read_entry(&inbox_dir().join(revision_id).join(MANIFEST_FILE))?;
     let mut project = read_verified_project(&entry)?;
-    if !project.asset_refs.is_empty() {
-        return Err(AppError::new(
-            "inbox_assets_pending",
-            "Dieses Projekt verwendet Bild-Assets. Die Assetübertragung ist noch nicht verfügbar.",
-        ));
-    }
+    resolve_project_assets(&mut project)?;
     project
         .versions
         .retain(|version| version.id == project.current_version);
@@ -403,6 +393,28 @@ fn read_verified_project(entry: &InboxEntry) -> Result<luxifer_core::ProjectFile
         ));
     }
     Ok(project)
+}
+
+fn resolve_project_assets(project: &mut luxifer_core::ProjectFile) -> Result<(), AppError> {
+    let store = luxifer_core::assets_dir();
+    for id in &project.asset_refs {
+        if luxifer_core::asset_path(&store, id).is_none() {
+            return Err(AppError::new(
+                "inbox_asset_missing",
+                format!("Projekt-Asset {id} ist lokal noch nicht verfügbar."),
+            ));
+        }
+    }
+    for shape in &mut project.shapes {
+        if let Some(text) = shape.text_meta.as_mut() {
+            if let Some(id) = text.font_asset.as_ref() {
+                if let Some(path) = luxifer_core::asset_path(&store, id) {
+                    text.font_path = path.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn set_inbox_status(revision_id: &str, status: InboxStatus) -> Result<(), AppError> {
@@ -564,6 +576,46 @@ mod tests {
                 .unwrap();
         assert_eq!(imported.id, project.id);
         assert_eq!(list_inbox().unwrap()[0].status, InboxStatus::Applied);
+    }
+
+    #[test]
+    fn projekt_mit_vorhandenem_asset_wird_uebernommen() {
+        let _guard = with_temp_dir("sync_inbox_asset");
+        let bytes = b"synchronisiertes-asset";
+        let asset_id = luxifer_core::assets::content_hash(bytes);
+        let meta = luxifer_core::AssetMeta {
+            id: asset_id.clone(),
+            ext: "bin".into(),
+            kind: luxifer_core::AssetKind::Image,
+            original_name: "bild.bin".into(),
+            source_format: String::new(),
+            width: 1,
+            height: 1,
+            import_at: String::new(),
+        };
+        luxifer_core::store_asset(&luxifer_core::assets_dir(), &meta, bytes).unwrap();
+
+        let mut state = luxifer_core::AppState::new();
+        state.add_image(asset_id, 0.0, 0.0, 10.0, 10.0);
+        let project = luxifer_core::ProjectFile::from_state(&state, "Mit Asset", Vec::new());
+        let payload = project.to_json().unwrap();
+        store_remote_revision(CharonRevision {
+            revision_id: "revision-asset-1".into(),
+            project_id: project.id.clone(),
+            project_name: project.name.clone(),
+            project_version_id: project.current_version.clone(),
+            parent_revision_id: None,
+            workplace_id: "office-1".into(),
+            queued_at: "2026-07-13T12:00:00Z".into(),
+            content_hash: content_hash(payload.as_bytes()),
+            payload,
+        })
+        .unwrap();
+
+        assert_eq!(
+            apply_inbox_revision("revision-asset-1").unwrap(),
+            "Mit Asset"
+        );
     }
 
     #[test]

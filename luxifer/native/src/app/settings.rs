@@ -81,6 +81,13 @@ impl App {
                                 report.received
                             ));
                         }
+                        if report.assets_uploaded > 0 || report.assets_downloaded > 0 {
+                            self.image_dirty = true;
+                            self.toasts.success(format!(
+                                "Assets synchronisiert: {} hochgeladen, {} empfangen.",
+                                report.assets_uploaded, report.assets_downloaded
+                            ));
+                        }
                     }
                     Err(message) => self.charon_sync_error = Some(message),
                 }

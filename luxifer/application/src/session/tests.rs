@@ -199,6 +199,7 @@ fn textblock_ersetzen_erzeugt_genau_einen_undo_schritt() {
     let meta = luxifer_core::TextMeta {
         text: "Alt".into(),
         font_path: "font.ttf".into(),
+        font_asset: None,
         size_mm: 10.0,
     };
     let indices = session.add_text_block(old, meta);
@@ -207,6 +208,7 @@ fn textblock_ersetzen_erzeugt_genau_einen_undo_schritt() {
     let meta = luxifer_core::TextMeta {
         text: "Neu".into(),
         font_path: "font.ttf".into(),
+        font_asset: None,
         size_mm: 10.0,
     };
 

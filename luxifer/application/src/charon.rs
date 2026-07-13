@@ -68,6 +68,8 @@ pub struct CharonSyncReport {
     pub uploaded: usize,
     pub pending: usize,
     pub received: usize,
+    pub assets_uploaded: usize,
+    pub assets_downloaded: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,6 +99,12 @@ struct ReceiptAck {
     revision_id: String,
     content_hash: String,
     accepted: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AssetTransfer {
+    meta: luxifer_core::AssetMeta,
+    content_hex: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -159,6 +167,107 @@ pub fn wait_for_project_event(
         "",
         EVENT_TIMEOUT,
     )?)
+}
+
+pub fn sync_assets(base_url: &str) -> Result<CharonSyncReport, AppError> {
+    let endpoint = HttpEndpoint::parse(base_url)?;
+    let mut remote: Vec<luxifer_core::AssetMeta> = parse_json_response(&send_request(
+        &endpoint,
+        "GET",
+        "/api/v1/assets",
+        "",
+        UPLOAD_TIMEOUT,
+    )?)?;
+    let store = luxifer_core::assets_dir();
+    let local = luxifer_core::list_assets(&store).map_err(|error| {
+        AppError::wrap(
+            "asset_list",
+            "Asset-Katalog konnte nicht gelesen werden.",
+            error.to_string(),
+        )
+    })?;
+    let mut report = CharonSyncReport::default();
+    for meta in &local {
+        if remote.iter().any(|item| item.id == meta.id) {
+            continue;
+        }
+        let bytes = luxifer_core::load_asset(&store, &meta.id).map_err(|error| {
+            AppError::wrap(
+                "asset_read",
+                "Asset konnte nicht gelesen werden.",
+                error.to_string(),
+            )
+        })?;
+        let body = serde_json::to_string(&AssetTransfer {
+            meta: meta.clone(),
+            content_hex: hex_encode(&bytes),
+        })
+        .map_err(|error| {
+            AppError::wrap(
+                "asset_json",
+                "Asset konnte nicht serialisiert werden.",
+                error.to_string(),
+            )
+        })?;
+        let _: luxifer_core::AssetMeta = parse_json_response(&send_request(
+            &endpoint,
+            "POST",
+            "/api/v1/assets",
+            &body,
+            UPLOAD_TIMEOUT,
+        )?)?;
+        remote.push(meta.clone());
+        report.assets_uploaded += 1;
+    }
+    for meta in remote {
+        if local.iter().any(|item| item.id == meta.id) {
+            continue;
+        }
+        let transfer: AssetTransfer = parse_json_response(&send_request(
+            &endpoint,
+            "GET",
+            &format!("/api/v1/assets/{}", meta.id),
+            "",
+            UPLOAD_TIMEOUT,
+        )?)?;
+        let bytes = hex_decode(&transfer.content_hex).ok_or_else(|| {
+            AppError::new("asset_encoding", "Charon lieferte ungültige Asset-Daten.")
+        })?;
+        luxifer_core::store_asset(&store, &transfer.meta, &bytes).map_err(|error| {
+            AppError::wrap(
+                "asset_write",
+                "Asset konnte nicht gespeichert werden.",
+                error.to_string(),
+            )
+        })?;
+        report.assets_downloaded += 1;
+    }
+    Ok(report)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn hex_decode(value: &str) -> Option<Vec<u8>> {
+    if !value.len().is_multiple_of(2) {
+        return None;
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let hi = (pair[0] as char).to_digit(16)?;
+            let lo = (pair[1] as char).to_digit(16)?;
+            Some(((hi << 4) | lo) as u8)
+        })
+        .collect()
 }
 
 pub fn upload_pending_revisions(base_url: &str) -> Result<CharonSyncReport, AppError> {
@@ -443,5 +552,13 @@ mod tests {
         let event: CharonProjectEvent = parse_json_response(response).unwrap();
         assert_eq!(event.cursor, 7);
         assert!(event.changed);
+    }
+
+    #[test]
+    fn asset_hex_roundtrip_erhaelt_alle_bytes() {
+        let bytes = b"\0LuxiFer\xff\x10";
+        assert_eq!(hex_decode(&hex_encode(bytes)).unwrap(), bytes);
+        assert!(hex_decode("abc").is_none());
+        assert!(hex_decode("xx").is_none());
     }
 }

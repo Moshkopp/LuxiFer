@@ -94,6 +94,7 @@ pub(super) fn project_browser(
     browser: &mut ProjectBrowserState,
     projects: &[ProjectInfo],
     inbox: &[InboxEntry],
+    assets: &[luxifer_core::AssetMeta],
     open_name: Option<&str>,
     dirty: bool,
 ) -> Vec<UiAction> {
@@ -106,10 +107,14 @@ pub(super) fn project_browser(
     ui.horizontal(|ui| {
         ui.heading("Projekte");
         if ui
-            .selectable_label(!browser.show_inbox, "Meine Projekte")
+            .selectable_label(
+                !browser.show_inbox && !browser.show_assets,
+                "Meine Projekte",
+            )
             .clicked()
         {
             browser.show_inbox = false;
+            browser.show_assets = false;
         }
         let pending = inbox
             .iter()
@@ -125,6 +130,11 @@ pub(super) fn project_browser(
             .clicked()
         {
             browser.show_inbox = true;
+            browser.show_assets = false;
+        }
+        if ui.selectable_label(browser.show_assets, "Assets").clicked() {
+            browser.show_assets = true;
+            browser.show_inbox = false;
         }
         if ui.button("Neues Projekt…").clicked() {
             actions.push(UiAction::OpenProjectSaveDialog);
@@ -149,6 +159,10 @@ pub(super) fn project_browser(
         inbox_pane(ui, inbox, &mut actions);
         return actions;
     }
+    if browser.show_assets {
+        assets_pane(ui, assets, &mut actions);
+        return actions;
+    }
 
     // Master-Detail: Liste links, Detailbereich rechts.
     egui::SidePanel::left("project_list")
@@ -163,6 +177,58 @@ pub(super) fn project_browser(
     });
 
     actions
+}
+
+fn assets_pane(ui: &mut egui::Ui, assets: &[luxifer_core::AssetMeta], actions: &mut Vec<UiAction>) {
+    ui.add_space(10.0);
+    ui.heading("Assets");
+    ui.weak("Importierte Bilder und originale SVG-/DXF-Dateien stehen projektübergreifend bereit.");
+    ui.add_space(8.0);
+
+    let reusable: Vec<_> = assets
+        .iter()
+        .filter(|asset| {
+            matches!(
+                asset.kind,
+                luxifer_core::AssetKind::Image
+                    | luxifer_core::AssetKind::SvgSource
+                    | luxifer_core::AssetKind::DxfSource
+            )
+        })
+        .collect();
+    if reusable.is_empty() {
+        ui.weak("Noch keine wiederverwendbaren Assets importiert.");
+        return;
+    }
+
+    egui::ScrollArea::vertical()
+        .id_salt("asset_catalog")
+        .show(ui, |ui| {
+            for asset in reusable {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.strong(if asset.original_name.is_empty() {
+                            &asset.id
+                        } else {
+                            &asset.original_name
+                        });
+                        ui.weak(match asset.kind {
+                            luxifer_core::AssetKind::Image => "Bild",
+                            luxifer_core::AssetKind::SvgSource => "SVG",
+                            luxifer_core::AssetKind::DxfSource => "DXF",
+                            luxifer_core::AssetKind::Font => "Font",
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Einfügen").clicked() {
+                                actions.push(UiAction::ImportCatalogAsset(asset.id.clone()));
+                            }
+                        });
+                    });
+                });
+                ui.add_space(6.0);
+            }
+        });
 }
 
 fn inbox_pane(ui: &mut egui::Ui, inbox: &[InboxEntry], actions: &mut Vec<UiAction>) {

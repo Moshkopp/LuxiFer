@@ -2,7 +2,7 @@
 
 ## Status
 
-Akzeptiert — 2026-07-13 · Projekt-Sync umgesetzt in `v1.0`.
+Akzeptiert — 2026-07-13 · Projekt-Sync in `v1.0`, Asset-Sync danach ergänzt.
 
 ## Kontext
 
@@ -19,10 +19,9 @@ Deployment, Authentifizierung oder ein Proxmox-Betrieb hinzukommen.
 
 ## Entscheidung
 
-Charon beginnt als **optional aktivierter lokaler HTTP-Dienst**. Der in `v1.0`
-umgesetzte erste Meilenstein umfasst Erreichbarkeit, Protokollaushandlung,
-Mehrinstanz-Präsenz und vollständigen Projekt-Sync für Projekte ohne externe
-Bild-Assets:
+Charon beginnt als **optional aktivierter lokaler HTTP-Dienst**. Der aktuelle
+Ausbaustand umfasst Erreichbarkeit, Protokollaushandlung, Mehrinstanz-Präsenz
+sowie Projekt- und Asset-Synchronisierung:
 
 - Standardbindung: `127.0.0.1:3737`; keine Freigabe ins LAN;
 - `GET /health` bestätigt nur die Prozessbereitschaft;
@@ -44,7 +43,7 @@ Bild-Assets:
 
 Die erste Protokollversion ist `1`. Fähigkeiten werden als stabile String-IDs
 gemeldet. Der Server meldet `health`, `handshake`, `workplaces`,
-`project_revisions` und `project_events`; unbekannte Fähigkeiten müssen von
+`project_revisions`, `project_events` und `assets`; unbekannte Fähigkeiten müssen von
 Clients ignoriert werden.
 
 ## Invarianten
@@ -100,7 +99,7 @@ Clients ignoriert werden.
 ## Nicht Teil von v1.0
 
 - Settings-/Laserprofil-Sicherung;
-- Assetübertragung und Deduplizierung;
+- Assetübertragung und Deduplizierung (direkt nach `v1.0` ergänzt);
 - Drei-Wege-Merge einzelner Shapes oder Layer;
 - Aufräum- und Aufbewahrungsregeln für bestätigte Sync-Revisionen;
 - Benutzerkonten, Tokens, TLS, Discovery oder Fernzugriff;
@@ -109,16 +108,14 @@ Clients ignoriert werden.
 
 ## Nächste Schritte
 
-1. Assetübertragung und hashbasierte Deduplizierung ergänzen, damit auch
-   Bildprojekte vollständig synchronisiert werden können.
-2. Arbeitsplatzbezogene Settings- und Laserprofil-Sicherungen ergänzen.
-3. Explizites `Verbinden`/`Trennen` im Laser-Tab einführen.
-4. Ruida-Lease, Heartbeat, Übergabe-Push und sichere Zwangsfreigabe als eigenen
+1. Arbeitsplatzbezogene Settings- und Laserprofil-Sicherungen ergänzen.
+2. Explizites `Verbinden`/`Trennen` im Laser-Tab einführen.
+3. Ruida-Lease, Heartbeat, Übergabe-Push und sichere Zwangsfreigabe als eigenen
    Meilenstein umsetzen.
-5. Charon auf Proxmox als gesicherten Systemdienst bereitstellen; Freigabe ins
+4. Charon auf Proxmox als gesicherten Systemdienst bereitstellen; Freigabe ins
    LAN erst zusammen mit Authentifizierung und TLS.
-6. Empfangsbestätigungen für definierte Aufräum- und Aufbewahrungsregeln nutzen.
-7. Optional stabile Shape-/Layer-IDs und einen Drei-Wege-Objekt-Merge
+5. Empfangsbestätigungen für definierte Aufräum- und Aufbewahrungsregeln nutzen.
+6. Optional stabile Shape-/Layer-IDs und einen Drei-Wege-Objekt-Merge
    vorbereiten; bis dahin bleiben Konfliktentscheidungen auf Versionsebene.
 
 ## Umsetzungsstand
@@ -176,7 +173,7 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
 - wiederholte identische Uploads sind idempotent. Dieselbe Revisions-ID mit
   anderem Inhalt wird als Konflikt abgelehnt;
 - der lokale HTTP-Server liest vollständige Requests bis 64 MiB statt nur den
-  ersten Netzwerkblock. Assets sind weiterhin nicht Bestandteil des Transfers;
+  ersten Netzwerkblock;
 - Charon liefert einem Arbeitsplatz ausschließlich Revisionen anderer
   Arbeitsplätze. LuxiFer prüft deren Hash und legt sie idempotent und atomar
   unter `sync/inbox/<revision_id>/` ab;
@@ -197,8 +194,20 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
 - `Übernehmen` importiert ausschließlich Projekte, deren stabile Projekt-ID
   lokal noch nicht existiert. Bereits vorhandene Projekte bleiben bis zum
   Vergleichs-/Konfliktablauf unangetastet in der Inbox;
-- da Assets noch nicht übertragen werden, wird die Übernahme von Projekten mit
-  `asset_refs` verständlich abgelehnt;
+- ein globaler, content-adressierter Asset-Katalog hält normalisierte Bilder,
+  verwendete Fonts und unveränderte SVG-/DXF-Quelldateien. Gleiche Bytes werden
+  anhand ihres Hashs nur einmal abgelegt;
+- Charon bietet den Katalog über `GET /api/v1/assets`,
+  `GET /api/v1/assets/<id>` und `POST /api/v1/assets` an. Der Hintergrunddienst
+  gleicht Assets vor den Projektrevisionen bidirektional ab und überprüft beim
+  Empfang erneut den Inhaltshash;
+- Projektdateien referenzieren Bild- und Font-Assets über stabile IDs. Beim
+  Empfang wird die lokale Verfügbarkeit aller Abhängigkeiten geprüft und der
+  Fontpfad auf die lokale Katalogdatei aufgelöst;
+- originale SVG- und DXF-Uploads bleiben zusätzlich zur daraus erzeugten
+  Geometrie erhalten. Im Projekt-Reiter listet `Assets` Bilder sowie diese
+  Vektorquellen und fügt sie über die reguläre Import-Pipeline in neue Projekte
+  ein. Katalogisierte Fonts erscheinen stattdessen in der Schrift-Auswahl;
 - nach erfolgreichem Import erscheint das Projekt in `Meine Projekte`; der
   Canvas und ein eventuell geöffnetes, ungespeichertes Projekt werden nicht
   automatisch ersetzt;
@@ -211,11 +220,11 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
   Revision als ignoriert. `Charon-Version übernehmen` hängt den empfangenen
   Stand als neue lokale Version mit eigener Versions-ID und Herkunftsnotiz an;
   die lokale Historie bleibt erhalten. Ist genau dieses Projekt geöffnet und
-  ungespeichert, greift vorher der Dirty-Guard. Projekte mit noch nicht
-  übertragenen Bild-Assets bleiben gesperrt.
+  ungespeichert, greift vorher der Dirty-Guard. Fehlt eine referenzierte
+  Asset-Datei trotz Synchronisierung, bleibt die Übernahme sicher gesperrt.
 
-Noch offen sind Asset- und Settings-Transfer, manuelle Laser-Verbindung samt
-Ruida-Leases, Proxmox-/LAN-Betrieb, Aufbewahrungsregeln und optional ein
+Noch offen sind Settings-Transfer, manuelle Laser-Verbindung samt Ruida-Leases,
+Proxmox-/LAN-Betrieb, Aufbewahrungsregeln und optional ein
 späterer Objekt-Merge. Charon darf Versionen verteilen und Verbindungen
 koordinieren, aber keine Projektinhalte selbst bearbeiten oder laufende Jobs
 unterbrechen.

@@ -140,6 +140,15 @@ impl ProjectFile {
                     refs.push(asset.clone());
                 }
             }
+            if let Some(font_asset) = s
+                .text_meta
+                .as_ref()
+                .and_then(|meta| meta.font_asset.as_ref())
+            {
+                if !refs.contains(font_asset) {
+                    refs.push(font_asset.clone());
+                }
+            }
         }
         self.asset_refs = refs;
     }
@@ -873,6 +882,7 @@ mod tests {
             sh.text_meta = Some(TextMeta {
                 text: "Hi".into(),
                 font_path: font.into(),
+                font_asset: None,
                 size_mm: 10.0,
             });
             sh
@@ -892,6 +902,29 @@ mod tests {
             pf.font_refs(),
             vec!["/fonts/a.ttf".to_string(), "/fonts/b.ttf".to_string()]
         );
+    }
+
+    #[test]
+    fn font_asset_wird_als_projektabhaengigkeit_gesichert() {
+        use crate::model::{Shape, TextMeta};
+        let mut state = AppState::new();
+        let mut shape = Shape::new(
+            0,
+            Geo::Polyline {
+                pts: vec![(0.0, 0.0), (1.0, 1.0)],
+                closed: false,
+            },
+        );
+        shape.text_meta = Some(TextMeta {
+            text: "A".into(),
+            font_path: "/fonts/a.ttf".into(),
+            font_asset: Some("font-hash".into()),
+            size_mm: 10.0,
+        });
+        state.shapes.push(shape);
+
+        let project = ProjectFile::from_state(&state, "Font", vec![]);
+        assert_eq!(project.asset_refs, vec!["font-hash"]);
     }
 
     #[test]

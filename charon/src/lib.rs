@@ -50,13 +50,19 @@ struct Handshake {
     server_version: &'static str,
     protocol_version: u32,
     instance_id: String,
-    capabilities: [&'static str; 5],
+    capabilities: [&'static str; 6],
 }
 
 #[derive(Serialize)]
 struct ProjectEvent {
     cursor: u64,
     changed: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AssetTransfer {
+    meta: luxifer_core::AssetMeta,
+    content_hex: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,9 +263,34 @@ fn route(
                 "workplaces",
                 "project_revisions",
                 "project_events",
+                "assets",
             ],
         })?,
         ("GET", "/api/v1/workplaces") => json_body(&workplace_list(state, now_unix()))?,
+        ("GET", "/api/v1/assets") => json_body(
+            &luxifer_core::list_assets(&state.data_dir.join("assets"))
+                .map_err(|error| std::io::Error::other(error.to_string()))?,
+        )?,
+        ("POST", "/api/v1/assets") => {
+            let transfer: AssetTransfer = match serde_json::from_str(body) {
+                Ok(transfer) => transfer,
+                Err(_) => return Ok(("400 Bad Request", r#"{"error":"invalid_json"}"#.into())),
+            };
+            let bytes = match hex_decode(&transfer.content_hex) {
+                Some(bytes) => bytes,
+                None => return Ok(("400 Bad Request", r#"{"error":"invalid_asset"}"#.into())),
+            };
+            match luxifer_core::store_asset(&state.data_dir.join("assets"), &transfer.meta, &bytes)
+            {
+                Ok(()) => json_body(&transfer.meta)?,
+                Err(_) => {
+                    return Ok((
+                        "422 Unprocessable Entity",
+                        r#"{"error":"invalid_asset"}"#.into(),
+                    ))
+                }
+            }
+        }
         ("POST", "/api/v1/workplaces/heartbeat") => {
             let heartbeat: WorkplaceHeartbeat = match serde_json::from_str(body) {
                 Ok(heartbeat) => heartbeat,
@@ -331,12 +362,54 @@ fn route(
                 Err(StoreReceiptError::Io(error)) => return Err(error),
             }
         }
+        ("GET", path) if path.starts_with("/api/v1/assets/") => {
+            let id = path.trim_start_matches("/api/v1/assets/");
+            if !valid_id(id) {
+                return Ok(("400 Bad Request", r#"{"error":"invalid_asset"}"#.into()));
+            }
+            let store = state.data_dir.join("assets");
+            let meta = match luxifer_core::asset_meta(&store, &id.to_string()) {
+                Ok(meta) => meta,
+                Err(_) => return Ok(("404 Not Found", r#"{"error":"not_found"}"#.into())),
+            };
+            let bytes = luxifer_core::load_asset(&store, &id.to_string())
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            json_body(&AssetTransfer {
+                meta,
+                content_hex: hex_encode(&bytes),
+            })?
+        }
         ("GET", _) => ("404 Not Found", r#"{"error":"not_found"}"#.into()),
         _ => (
             "405 Method Not Allowed",
             r#"{"error":"method_not_allowed"}"#.into(),
         ),
     })
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn hex_decode(value: &str) -> Option<Vec<u8>> {
+    if !value.len().is_multiple_of(2) {
+        return None;
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let hi = (pair[0] as char).to_digit(16)?;
+            let lo = (pair[1] as char).to_digit(16)?;
+            Some(((hi << 4) | lo) as u8)
+        })
+        .collect()
 }
 
 fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
@@ -637,6 +710,7 @@ mod tests {
                 "workplaces",
                 "project_revisions",
                 "project_events",
+                "assets",
             ],
         })
         .unwrap()

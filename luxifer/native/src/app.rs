@@ -411,6 +411,7 @@ impl App {
             A::Undo => self.undo(),
             A::Redo => self.redo(),
             A::Import => self.import_dialog(),
+            A::ImportCatalogAsset(id) => self.import_catalog_asset(&id),
             A::DismissError => self.app_error = None,
             A::LaserSelect(id) => self.laser_select(&id),
             A::LaserRun(action) => self.laser_run(action),
@@ -589,6 +590,7 @@ mod tests {
             TextMeta {
                 text: "Hi".into(),
                 font_path: font.path.to_string_lossy().to_string(),
+                font_asset: None,
                 size_mm: 20.0,
             },
         );

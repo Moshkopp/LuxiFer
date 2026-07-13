@@ -164,6 +164,7 @@ pub fn add_text(
         luxifer_core::TextMeta {
             text,
             font_path,
+            font_asset: None,
             size_mm,
         },
     );
@@ -209,6 +210,7 @@ pub fn update_text(
         luxifer_core::TextMeta {
             text,
             font_path,
+            font_asset: None,
             size_mm,
         },
     );

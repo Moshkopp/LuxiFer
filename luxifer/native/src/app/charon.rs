@@ -83,11 +83,18 @@ fn worker(command_rx: Receiver<WorkerCommand>, result_tx: Sender<CharonWorkerRes
                             event_cursor = 0;
                             server_instance = Some(connection.handshake.instance_id.clone());
                         }
-                        let sync = luxifer_application::sync_project_revisions(
-                            &current.url,
-                            &current.workplace_id,
-                        )
-                        .map_err(|error| error.message().to_owned());
+                        let sync = luxifer_application::sync_assets(&current.url)
+                            .and_then(|mut report| {
+                                let projects = luxifer_application::sync_project_revisions(
+                                    &current.url,
+                                    &current.workplace_id,
+                                )?;
+                                report.uploaded += projects.uploaded;
+                                report.pending += projects.pending;
+                                report.received += projects.received;
+                                Ok(report)
+                            })
+                            .map_err(|error| error.message().to_owned());
                         CharonWorkerResult::Connected(connection, sync)
                     })
                     .unwrap_or_else(|error| CharonWorkerResult::Failed(error.message().to_owned()));

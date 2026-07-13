@@ -119,6 +119,8 @@ pub enum PendingProjectAction {
 pub struct ProjectBrowserState {
     /// `true` zeigt die empfangenen Charon-Revisionen statt lokaler Projekte.
     pub show_inbox: bool,
+    /// `true` zeigt den projektübergreifenden Asset-Katalog.
+    pub show_assets: bool,
     /// Im Browser markiertes Projekt (unabhängig vom offenen Projekt).
     pub selected: Option<String>,
     /// `Some` = Umbenennen-Feld ist sichtbar und hält den Namensentwurf.

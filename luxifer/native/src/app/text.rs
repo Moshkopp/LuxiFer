@@ -66,11 +66,33 @@ impl App {
                 return false;
             }
         };
+        let font_name = font_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("font.ttf");
+        let font_ext = font_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("ttf");
+        let font_asset = match luxifer_core::import_source(
+            &luxifer_core::assets_dir(),
+            &font_data,
+            font_name,
+            font_ext,
+            luxifer_core::AssetKind::Font,
+        ) {
+            Ok(meta) => Some(meta.id),
+            Err(error) => {
+                self.toasts.error(format!("Font katalogisieren: {error}"));
+                return false;
+            }
+        };
         match luxifer_core::text::text_to_contours(&font_data, &text, size) {
             Ok(contours) if !contours.is_empty() => {
                 let meta = luxifer_core::TextMeta {
                     text,
                     font_path: font_path.to_string_lossy().to_string(),
+                    font_asset,
                     size_mm: size,
                 };
                 if let Some(index) = edit_index {

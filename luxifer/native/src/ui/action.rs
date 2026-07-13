@@ -92,6 +92,8 @@ pub enum UiAction {
     Redo,
     /// Import-Dialog öffnen (Vektor SVG/DXF oder Bild, nach Endung verzweigt).
     Import,
+    /// Ein bereits katalogisiertes Bild bzw. eine Vektorquelle wiederverwenden.
+    ImportCatalogAsset(String),
     /// Die aktuelle Fehleranzeige schließen.
     DismissError,
     /// Laser-Profil aktivieren.

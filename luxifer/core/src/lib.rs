@@ -38,8 +38,8 @@ pub mod ui_settings;
 
 pub use arrange::{Align, Distribute};
 pub use assets::{
-    apply_params, asset_meta, asset_path, assets_dir, import_image, load_asset, load_asset_luma,
-    rendered_png, AssetId, AssetMeta,
+    apply_params, asset_meta, asset_path, assets_dir, import_image, import_source, list_assets,
+    load_asset, load_asset_luma, rendered_png, store_asset, AssetId, AssetKind, AssetMeta,
 };
 pub use geo_ops::BoolOp;
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
