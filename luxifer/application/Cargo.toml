@@ -10,6 +10,8 @@ description = "UI-unabhängige Anwendungsschicht für LuxiFer."
 luxifer-core = { path = "../core" }
 luxifer-driver-ruida = { path = "../drivers/ruida" }
 luxifer-driver-grbl = { path = "../drivers/grbl" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # Nur für Tests: PNG-Testbilder erzeugen (Trace/Raster). Gleiche Version wie

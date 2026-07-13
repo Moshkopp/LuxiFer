@@ -1,7 +1,7 @@
 //! Softwareweite LuxiFer-Einstellungen. Geräteprofile und Controllerdaten
 //! liegen bewusst in der separaten Laser-Verwaltung.
 
-use crate::ui::state::{SettingsDialogState, SettingsSection};
+use crate::ui::state::{CharonTestStatus, SettingsDialogState, SettingsSection};
 use egui::RichText;
 use luxifer_core::ui_settings::{
     GRID_SIZE_MAX, GRID_SIZE_MIN, INTENSITY_MAX, INTENSITY_MIN, SPLASH_MS_MAX, SPLASH_MS_MIN,
@@ -13,6 +13,7 @@ pub(in crate::ui) enum SettingsOutcome {
     None,
     Commit,
     Cancel,
+    CharonTest,
 }
 
 pub(in crate::ui) fn settings_dialog_window(
@@ -40,6 +41,7 @@ pub(in crate::ui) fn settings_dialog_window(
                         ui.vertical(|ui| {
                             for (section, label) in [
                                 (SettingsSection::Oberflaeche, "Oberfläche"),
+                                (SettingsSection::Charon, "Charon"),
                                 (SettingsSection::Ueber, "Über"),
                             ] {
                                 if ui
@@ -59,6 +61,7 @@ pub(in crate::ui) fn settings_dialog_window(
                     ui.add_space(2.0);
                     ui.heading(match st.section {
                         SettingsSection::Oberflaeche => "Oberfläche",
+                        SettingsSection::Charon => "Charon",
                         SettingsSection::Ueber => "Über",
                     });
                     ui.add_space(6.0);
@@ -67,6 +70,7 @@ pub(in crate::ui) fn settings_dialog_window(
                         .auto_shrink([false, false])
                         .show(ui, |ui| match st.section {
                             SettingsSection::Oberflaeche => ui_section(ui, st),
+                            SettingsSection::Charon => charon_section(ui, st, &mut outcome),
                             SettingsSection::Ueber => about_section(ui),
                         });
                 });
@@ -155,4 +159,51 @@ fn about_section(ui: &mut egui::Ui) {
     ui.add_space(6.0);
     ui.label(format!("Version: {}", env!("LUXIFER_VERSION")));
     ui.label(format!("Commit: {}", env!("LUXIFER_COMMIT")));
+}
+
+fn charon_section(
+    ui: &mut egui::Ui,
+    state: &mut SettingsDialogState,
+    outcome: &mut SettingsOutcome,
+) {
+    ui.checkbox(
+        &mut state.draft.charon_enabled,
+        "Charon-Koordination verwenden",
+    );
+    ui.add_space(8.0);
+    ui.label("Serveradresse");
+    ui.add_enabled(
+        state.draft.charon_enabled,
+        egui::TextEdit::singleline(&mut state.draft.charon_url).desired_width(320.0),
+    );
+    ui.weak("Der erste Meilenstein unterstützt ausschließlich lokales HTTP.");
+    ui.add_space(10.0);
+    if ui
+        .add_enabled(
+            state.draft.charon_enabled,
+            egui::Button::new("Verbindung testen"),
+        )
+        .clicked()
+    {
+        *outcome = SettingsOutcome::CharonTest;
+    }
+    ui.add_space(8.0);
+    match &state.charon_status {
+        CharonTestStatus::Idle => {
+            ui.weak("Noch nicht getestet.");
+        }
+        CharonTestStatus::Connected(handshake) => {
+            ui.colored_label(
+                egui::Color32::from_rgb(0x34, 0xd3, 0x99),
+                format!(
+                    "Verbunden: Charon {} · Protokoll {}",
+                    handshake.server_version, handshake.protocol_version
+                ),
+            );
+            ui.weak(format!("Instanz: {}", handshake.instance_id));
+        }
+        CharonTestStatus::Failed(message) => {
+            ui.colored_label(ui.visuals().error_fg_color, message);
+        }
+    }
 }

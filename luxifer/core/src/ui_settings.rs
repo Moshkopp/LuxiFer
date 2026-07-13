@@ -101,6 +101,12 @@ pub struct UiSettings {
     /// Deckkraft der dunklen Fläche hinter modalen Dialogen.
     #[serde(default = "default_modal_backdrop_alpha")]
     pub modal_backdrop_alpha: u8,
+    /// Optionalen Charon-Koordinationsdienst verwenden.
+    #[serde(default)]
+    pub charon_enabled: bool,
+    /// Basisadresse des Charon-Dienstes (ADR 0012).
+    #[serde(default = "default_charon_url")]
+    pub charon_url: String,
 }
 
 /// Default-Mindestdauer des Splash (ms).
@@ -110,6 +116,10 @@ fn default_splash_ms() -> u32 {
 
 fn default_modal_backdrop_alpha() -> u8 {
     200
+}
+
+fn default_charon_url() -> String {
+    "http://127.0.0.1:3737".into()
 }
 
 /// Default-Rasterweite (mm), wenn eine alte Settings-Datei das Feld nicht hat.
@@ -142,6 +152,8 @@ impl Default for UiSettings {
             show_splash: true,
             splash_ms: default_splash_ms(),
             modal_backdrop_alpha: default_modal_backdrop_alpha(),
+            charon_enabled: false,
+            charon_url: default_charon_url(),
         }
     }
 }
@@ -239,6 +251,8 @@ mod tests {
         assert!(back.show_splash);
         assert_eq!(back.splash_ms, default_splash_ms());
         assert_eq!(back.modal_backdrop_alpha, default_modal_backdrop_alpha());
+        assert!(!back.charon_enabled);
+        assert_eq!(back.charon_url, default_charon_url());
     }
 
     #[test]

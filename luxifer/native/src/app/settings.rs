@@ -1,7 +1,7 @@
 //! GUI-Einstellungen-Workflow (ADR 0002): Dialog-Entwurf öffnen/übernehmen,
 //! Ausschließlich softwareweite LuxiFer-Einstellungen (ADR 0002).
 
-use crate::ui::{SettingsDialogState, SettingsSection};
+use crate::ui::{CharonTestStatus, SettingsDialogState, SettingsSection};
 use luxifer_application::AppError;
 
 use super::App;
@@ -12,7 +12,19 @@ impl App {
         self.settings_dialog = Some(SettingsDialogState {
             draft: self.ui_settings.clone(),
             section: SettingsSection::Oberflaeche,
+            charon_status: CharonTestStatus::Idle,
         });
+    }
+
+    pub fn test_charon_connection(&mut self) {
+        let Some(state) = self.settings_dialog.as_mut() else {
+            return;
+        };
+        state.charon_status =
+            match luxifer_application::test_charon_connection(&state.draft.charon_url) {
+                Ok(handshake) => CharonTestStatus::Connected(handshake),
+                Err(error) => CharonTestStatus::Failed(error.message().to_string()),
+            };
     }
 
     /// Übernimmt den GUI-Entwurf: klemmen, speichern, anwenden. Bei Erfolg true

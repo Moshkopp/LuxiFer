@@ -27,9 +27,10 @@ mod topbar;
 pub use action::UiAction;
 pub use splash::Splash;
 pub use state::{
-    CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LaserManagerState,
-    LaserManagerTab, LayerDialogState, PendingProjectAction, ProjectBrowserState,
-    ProjectSaveDialogState, SettingsDialogState, SettingsSection, TextDialogState,
+    CachedProjectDetail, CharonTestStatus, GeoOpDialogState, GeoOpKind, ImageDialogState,
+    LaserManagerState, LaserManagerTab, LayerDialogState, PendingProjectAction,
+    ProjectBrowserState, ProjectSaveDialogState, SettingsDialogState, SettingsSection,
+    TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -377,6 +378,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 }
             }
             dialogs::SettingsOutcome::Cancel => app.settings_dialog = None,
+            dialogs::SettingsOutcome::CharonTest => app.test_charon_connection(),
         }
     }
 

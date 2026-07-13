@@ -130,7 +130,16 @@ pub struct ProjectBrowserState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsSection {
     Oberflaeche,
+    Charon,
     Ueber,
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum CharonTestStatus {
+    #[default]
+    Idle,
+    Connected(luxifer_application::CharonHandshake),
+    Failed(String),
 }
 
 /// Entwurf des globalen Einstellungen-Dialogs. Laserprofile werden bewusst in
@@ -138,6 +147,7 @@ pub enum SettingsSection {
 pub struct SettingsDialogState {
     pub draft: luxifer_core::UiSettings,
     pub section: SettingsSection,
+    pub charon_status: CharonTestStatus,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

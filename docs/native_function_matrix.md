@@ -1,6 +1,6 @@
 # Native-only-Funktionsmatrix
 
-Stand: 2026-07-12  
+Stand: 2026-07-13
 Gehört zu: [Native-only-Migration](native_only_migration_tasks.md)
 
 ## Legende
@@ -30,11 +30,16 @@ Sammelmodul werden; Projekt-, Asset- und Laserabläufe erhalten eigene Services.
 | `swatch_colors` | Core | vorhanden | direkt aus Core, kein UI-Duplikat |
 | `app_version` | Application | fehlt | Cargo-Paketversion ohne Tauri liefern |
 | `job_preview` | Core/Application | nativ vollständig | Cut/Fill/Travel + verarbeitete Bild-Rasterungen + Legende; gleicher Asset-Resolver wie der echte Job; **offen:** Simulation/Scrubber |
-| `get_ui_settings` | Application | fehlt | plattformneutral laden, Defaults bei fehlender Datei |
-| `save_ui_settings` | Application | fehlt | validieren und fehlersicher speichern |
+| `get_ui_settings` | Core/Native | nativ vollständig | plattformneutral laden, Defaults bei fehlender/alter Datei |
+| `save_ui_settings` | Core/Native | nativ vollständig | sanitizen, fehlersicher speichern und Theme/Raster/Dialogdarstellung anwenden |
 | `undo` | Core/Application | über `EditorSession` | Strg+Z; Gesten erzeugen genau einen Undo-Schritt; Shortcut-Zuordnung getestet |
 | `redo` | Core/Application | über `EditorSession` | Strg+Shift+Z und Strg+Y; Modal-/Fokus-Gate wirksam |
 | `frontend_ready` | entfällt | entfällt | reiner Tauri/WebView-Lebenszyklus |
+
+Charon-Meilenstein 1 (ADR 0012): lokaler Server auf `127.0.0.1:3737`,
+`/health`, versionierter Handshake, UI-unabhängiger Application-Client sowie
+persistente Aktivierung/URL und Verbindungstest in den globalen Einstellungen.
+Projekt-/Asset-Synchronisation ist noch ausdrücklich nicht enthalten.
 
 ## Editor, Auswahl und Layer
 

@@ -4,6 +4,7 @@
 //! vollständige Anwendungsfälle. Sie kennt weder egui/winit/wgpu noch Tauri.
 
 mod assets;
+mod charon;
 mod error;
 mod laser;
 mod project;
@@ -11,6 +12,7 @@ mod session;
 #[cfg(test)]
 mod test_env;
 
+pub use charon::{test_charon_connection, CharonHandshake};
 pub use error::AppError;
 pub use laser::LaserService;
 pub use luxifer_driver_ruida::{RuidaMachineSetting, RuidaSettingUnit};

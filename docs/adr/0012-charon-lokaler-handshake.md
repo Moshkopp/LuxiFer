@@ -64,3 +64,17 @@ Fähigkeiten müssen von Clients ignoriert werden.
    Einstellungen anbinden.
 4. Erst nach realer lokaler Nutzung den ersten Synchronisationsfall separat
    entscheiden.
+
+## Umsetzungsstand
+
+Der erste Meilenstein ist umgesetzt:
+
+- Charon bindet standardmäßig und erzwungen an `127.0.0.1:3737`;
+- Health und Handshake antworten mit JSON und wurden gegen einen real
+  gestarteten lokalen Prozess geprüft;
+- der Client liegt in `luxifer-application`, validiert URL, HTTP-Status,
+  Serverkennung und Protokollversion und übersetzt Fehler in `AppError`;
+- Aktivierung, URL und Verbindungstest liegen in der globalen
+  Charon-Einstellungssektion; alte Settings erhalten sichere Defaults.
+
+Noch offen ist bewusst jede Form der Synchronisation.
