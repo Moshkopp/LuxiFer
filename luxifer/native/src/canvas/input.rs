@@ -33,6 +33,8 @@ pub fn map_key(key: &WinitKey) -> Option<Key> {
             "p" => Key::P,
             "z" => Key::Z,
             "y" => Key::Y,
+            "a" => Key::A,
+            "f" => Key::F,
             _ => return None,
         },
         _ => return None,

@@ -305,6 +305,8 @@ impl App {
             }
             S::Undo => self.undo(),
             S::Redo => self.redo(),
+            S::SelectAll => self.session.select_all(),
+            S::FitView => self.fit_view(),
             S::SelectTool(tool) => self.canvas.tool = tool,
             S::PanModifier(down) => self.canvas.space_down = down,
         }
@@ -384,6 +386,15 @@ impl App {
             A::LaserJog(dx, dy) => self.laser_jog(dx, dy),
             A::LaserHome => self.laser_home(),
             A::OpenLaserSettings { edit_active } => self.open_laser_settings(edit_active),
+        }
+    }
+
+    /// F-Shortcut: Kamera auf die Auswahl einpassen, sonst auf alle Objekte.
+    fn fit_view(&mut self) {
+        if let Some(b) = self.session.selection_bbox() {
+            self.canvas.cam.fit_bbox([b.x, b.y, b.w, b.h], 0.85);
+        } else {
+            self.fit_all();
         }
     }
 

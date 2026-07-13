@@ -85,6 +85,26 @@ fn additive_auswahl_toggelt_und_erweitert_gruppen() {
 }
 
 #[test]
+fn select_all_waehlt_jedes_objekt_genau_einmal() {
+    let mut state = AppState::new();
+    for x in [0.0, 20.0, 40.0] {
+        state.add_shape(Geo::Rect {
+            x,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        });
+    }
+    state.selected.clear();
+    let mut session = EditorSession::new(state);
+    session.select_all();
+    assert_eq!(session.selected, vec![0, 1, 2]);
+    // Idempotent — kein Toggle wie bei der additiven Auswahl.
+    session.select_all();
+    assert_eq!(session.selected, vec![0, 1, 2]);
+}
+
+#[test]
 fn mehrere_drag_updates_erzeugen_genau_einen_undo_schritt() {
     let mut session = session_with_rect();
     let original = session.shapes[0].bbox();

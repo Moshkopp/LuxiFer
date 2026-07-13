@@ -31,6 +31,11 @@ impl EditorSession {
         self.state.selected.clear();
     }
 
+    /// Wählt alle Objekte auf dem Canvas aus (Strg+A).
+    pub fn select_all(&mut self) {
+        self.state.selected = (0..self.state.shapes.len()).collect();
+    }
+
     /// Beginnt eine zusammenhängende direkte Manipulation. Beliebig viele
     /// Zwischenstände bilden danach genau einen Undo-Schritt.
     pub fn begin_edit(&mut self) {

@@ -116,6 +116,10 @@ pub enum Shortcut {
     FinishPolygon,
     Undo,
     Redo,
+    /// Alle Objekte auf dem Canvas auswählen (Strg+A).
+    SelectAll,
+    /// Kamera einpassen: auf die Auswahl, sonst auf alle Objekte (F).
+    FitView,
     SelectTool(Tool),
     /// Leertaste gedrückt/losgelassen (Pan-Modifier) — kein einmaliger Befehl.
     PanModifier(bool),
@@ -136,6 +140,8 @@ pub enum Key {
     P,
     Z,
     Y,
+    A,
+    F,
 }
 
 /// Modifier-Zustand zum Zeitpunkt des Tastendrucks.
@@ -181,6 +187,12 @@ pub fn resolve_shortcut(
         Key::Y if mods.ctrl => Some(Shortcut::Redo),
         // Undo/Redo verlangen Strg — ein nacktes „z" ist kein Undo.
         Key::Z | Key::Y => None,
+        Key::A if mods.ctrl => Some(Shortcut::SelectAll),
+        // Ein nacktes „a" bleibt frei (könnte ein Werkzeug werden).
+        Key::A => None,
+        // FitView nur ohne Strg — Strg+F bleibt für Suche o. Ä. reserviert.
+        Key::F if !mods.ctrl => Some(Shortcut::FitView),
+        Key::F => None,
         Key::Delete => Some(Shortcut::Delete),
         Key::Escape => Some(Shortcut::Cancel),
         Key::Enter => Some(Shortcut::FinishPolygon),
@@ -277,6 +289,24 @@ mod shortcut_tests {
             resolve_shortcut(Key::Z, CTRL_SHIFT, true, false),
             Some(Shortcut::Redo)
         );
+    }
+
+    #[test]
+    fn alles_auswaehlen_verlangt_strg_fitview_verbietet_es() {
+        assert_eq!(
+            resolve_shortcut(Key::A, CTRL, true, false),
+            Some(Shortcut::SelectAll)
+        );
+        assert_eq!(resolve_shortcut(Key::A, NONE, true, false), None);
+        assert_eq!(
+            resolve_shortcut(Key::F, NONE, true, false),
+            Some(Shortcut::FitView)
+        );
+        // Strg+F bleibt frei (z. B. künftige Suche).
+        assert_eq!(resolve_shortcut(Key::F, CTRL, true, false), None);
+        // Und wie alle Canvas-Shortcuts: ruhen, solange ein Textfeld tippt.
+        assert_eq!(resolve_shortcut(Key::A, CTRL, true, true), None);
+        assert_eq!(resolve_shortcut(Key::F, NONE, true, true), None);
     }
 
     #[test]
