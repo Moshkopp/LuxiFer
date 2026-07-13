@@ -289,7 +289,12 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
   vor Ort kontrolliert wurden;
 - Trennen, Profilwechsel und Konfigurationswechsel geben eine aktive Lease
   bestmöglich frei. Geht Heartbeat oder Lease verloren, trennt LuxiFer den
-  eigenen Treiber und meldet den Fehler sichtbar.
+  eigenen Treiber und meldet den Fehler sichtbar;
+- Hintergrundberichte werden im UI strikt in Empfangsreihenfolge verarbeitet.
+  Insbesondere dürfen spätere Heartbeats keinen früheren Bericht über neu
+  empfangene Projekte oder Assets verdrängen, weil sonst die Daten bereits auf
+  dem Datenträger liegen, aber Inbox und Asset-Katalog sichtbar veraltet
+  bleiben.
 
 Damit ist der lokale Funktionsumfang dieses ADR abgeschlossen. Noch offen sind
 die ausdrücklich nachgelagerten Betriebs- und Ausbaupunkte:

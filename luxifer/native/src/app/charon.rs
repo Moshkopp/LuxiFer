@@ -120,7 +120,7 @@ impl CharonRuntime {
     }
 
     pub fn try_result(&self) -> Option<CharonWorkerResult> {
-        self.result_rx.try_iter().last()
+        self.result_rx.try_recv().ok()
     }
 
     pub fn fetch_backups(&self) {
@@ -144,7 +144,7 @@ impl CharonRuntime {
     }
 
     pub fn try_lease_result(&self) -> Option<LeaseWorkerResult> {
-        self.lease_rx.try_iter().last()
+        self.lease_rx.try_recv().ok()
     }
 }
 
