@@ -117,6 +117,22 @@ struct RevisionDownload {
     payload: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct RevisionReceipt {
+    workplace_id: String,
+    revision_id: String,
+    project_id: String,
+    content_hash: String,
+    received_at_unix: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ReceiptAck {
+    revision_id: String,
+    content_hash: String,
+    accepted: bool,
+}
+
 struct ServerState {
     workplaces: BTreeMap<String, WorkplaceEntry>,
     data_dir: PathBuf,
@@ -230,6 +246,28 @@ fn route(
             }
             json_body(&list_remote_revisions(&state.data_dir, workplace_id)?)?
         }
+        ("POST", "/api/v1/projects/revisions/ack") => {
+            let receipt: RevisionReceipt = match serde_json::from_str(body) {
+                Ok(receipt) => receipt,
+                Err(_) => return Ok(("400 Bad Request", r#"{"error":"invalid_json"}"#.into())),
+            };
+            match store_receipt(&state.data_dir, receipt) {
+                Ok(ack) => json_body(&ack)?,
+                Err(StoreReceiptError::Invalid) => {
+                    return Ok(("400 Bad Request", r#"{"error":"invalid_receipt"}"#.into()));
+                }
+                Err(StoreReceiptError::UnknownRevision) => {
+                    return Ok(("404 Not Found", r#"{"error":"unknown_revision"}"#.into()));
+                }
+                Err(StoreReceiptError::HashMismatch) => {
+                    return Ok((
+                        "409 Conflict",
+                        r#"{"error":"receipt_hash_mismatch"}"#.into(),
+                    ));
+                }
+                Err(StoreReceiptError::Io(error)) => return Err(error),
+            }
+        }
         ("GET", _) => ("404 Not Found", r#"{"error":"not_found"}"#.into()),
         _ => (
             "405 Method Not Allowed",
@@ -272,7 +310,9 @@ fn list_remote_revisions(
             let manifest = std::fs::read(revision_dir.path().join("manifest.json"))?;
             let stored: StoredRevision = serde_json::from_slice(&manifest)
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-            if stored.workplace_id == workplace_id {
+            if stored.workplace_id == workplace_id
+                || receipt_path(data_dir, workplace_id, &stored.revision_id).exists()
+            {
                 continue;
             }
             let payload = std::fs::read_to_string(revision_dir.path().join("payload.luxi"))?;
@@ -291,6 +331,65 @@ fn list_remote_revisions(
     }
     revisions.sort_by(|a, b| a.revision_id.cmp(&b.revision_id));
     Ok(revisions)
+}
+
+#[derive(Debug)]
+enum StoreReceiptError {
+    Invalid,
+    UnknownRevision,
+    HashMismatch,
+    Io(std::io::Error),
+}
+
+fn store_receipt(
+    data_dir: &Path,
+    mut receipt: RevisionReceipt,
+) -> Result<ReceiptAck, StoreReceiptError> {
+    if !valid_id(&receipt.workplace_id)
+        || !valid_id(&receipt.revision_id)
+        || !valid_id(&receipt.project_id)
+    {
+        return Err(StoreReceiptError::Invalid);
+    }
+    let manifest_path = data_dir
+        .join("projects")
+        .join(&receipt.project_id)
+        .join("revisions")
+        .join(&receipt.revision_id)
+        .join("manifest.json");
+    let bytes = match std::fs::read(manifest_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(StoreReceiptError::UnknownRevision);
+        }
+        Err(error) => return Err(StoreReceiptError::Io(error)),
+    };
+    let stored: StoredRevision = serde_json::from_slice(&bytes)
+        .map_err(|error| StoreReceiptError::Io(std::io::Error::other(error)))?;
+    if stored.content_hash != receipt.content_hash {
+        return Err(StoreReceiptError::HashMismatch);
+    }
+    receipt.received_at_unix = now_unix();
+    let path = receipt_path(data_dir, &receipt.workplace_id, &receipt.revision_id);
+    let parent = path.parent().ok_or(StoreReceiptError::Invalid)?;
+    std::fs::create_dir_all(parent).map_err(StoreReceiptError::Io)?;
+    let temp = parent.join(format!(".{}.tmp", receipt.revision_id));
+    let bytes = serde_json::to_vec_pretty(&receipt)
+        .map_err(|error| StoreReceiptError::Io(std::io::Error::other(error)))?;
+    std::fs::write(&temp, bytes).map_err(StoreReceiptError::Io)?;
+    std::fs::rename(temp, path).map_err(StoreReceiptError::Io)?;
+    Ok(ReceiptAck {
+        revision_id: receipt.revision_id,
+        content_hash: receipt.content_hash,
+        accepted: true,
+    })
+}
+
+fn receipt_path(data_dir: &Path, workplace_id: &str, revision_id: &str) -> PathBuf {
+    data_dir
+        .join("receipts")
+        .join(workplace_id)
+        .join(format!("{revision_id}.json"))
 }
 
 fn read_http_request(stream: &mut TcpStream) -> std::io::Result<String> {
@@ -531,6 +630,19 @@ mod tests {
         assert_eq!(remote.len(), 1);
         assert_eq!(remote[0].payload, payload);
         assert!(list_remote_revisions(&dir, "office-1").unwrap().is_empty());
+        let receipt = RevisionReceipt {
+            workplace_id: "workshop-1".into(),
+            revision_id: "revision-1".into(),
+            project_id: "project-1".into(),
+            content_hash: luxifer_core::assets::content_hash(payload.as_bytes()),
+            received_at_unix: 0,
+        };
+        let ack = store_receipt(&dir, receipt).unwrap();
+        assert!(ack.accepted);
+        assert!(list_remote_revisions(&dir, "workshop-1")
+            .unwrap()
+            .is_empty());
+        assert!(receipt_path(&dir, "workshop-1", "revision-1").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

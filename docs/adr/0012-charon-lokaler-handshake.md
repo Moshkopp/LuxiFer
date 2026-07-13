@@ -94,7 +94,7 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nicht Teil dieses Meilensteins
 
-- Übernahme aus der Projekt-Inbox, Empfangsbestätigung und Push-Kanal;
+- Übernahme aus der Projekt-Inbox und Push-Kanal;
 - Settings-/Laserprofil-Sicherung;
 - Assetübertragung und Deduplizierung;
 - Benutzerkonten, Tokens, TLS, Discovery oder Fernzugriff;
@@ -103,9 +103,8 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nächste Schritte
 
-1. Empfangene Revisionen bei Charon bestätigen und nur unbestätigte Stände
-   wiederholt zustellen.
-2. Inbox-Übersicht und sicheren Übernehmen-/Später-Ablauf ergänzen.
+1. Inbox-Übersicht und sicheren Übernehmen-/Später-Ablauf ergänzen.
+2. Empfangsbestätigungen später für Aufräum- und Aufbewahrungsregeln nutzen.
 3. Push-Kanal und Konfliktbenachrichtigung ergänzen; zunächst ganze Version
    übernehmen oder zurückstellen. Stabil identifizierbare Shapes/Layer sind
    Voraussetzung für späteren Vergleich und Drei-Wege-Objekt-Merge.
@@ -166,10 +165,16 @@ Der erste Meilenstein ist umgesetzt:
 - Inbox-Einträge starten mit `pending_review`. Empfangene Payloads verändern
   weder den Canvas noch lokale Projektdateien automatisch;
 - neue Inbox-Einträge werden per Toast gemeldet. Bis zur serverseitigen
-  Empfangsbestätigung liefert Charon bekannte Revisionen erneut; die lokale
-  idempotente Ablage verhindert dabei Duplikate.
+  Empfangsbestätigung verhindert die lokale idempotente Ablage Duplikate;
+- erst nach erfolgreicher, hashgeprüfter Inbox-Ablage bestätigt LuxiFer die
+  Revision bei Charon. Charon speichert den Beleg pro Arbeitsplatz atomar unter
+  `receipts/<workplace_id>/<revision_id>.json` und liefert bestätigte Stände an
+  diesen Arbeitsplatz nicht erneut aus;
+- geht die Bestätigung unterwegs verloren, wird die Revision noch einmal
+  geliefert, lokal als bereits vorhanden erkannt und erneut bestätigt. Damit
+  bleibt der Ablauf auch über Prozess- und Netzwerkausfälle hinweg sicher.
 
-Noch offen sind Inbox-Bestätigung/-Übernahme, Settings-Transfer, Push-Kanal,
+Noch offen sind Inbox-Übersicht/-Übernahme, Settings-Transfer, Push-Kanal,
 Konfliktvergleich sowie Ruida-Leases. Charon darf Versionen verteilen und
 Verbindungen koordinieren, aber keine Projektinhalte selbst bearbeiten oder
 laufende Jobs unterbrechen.

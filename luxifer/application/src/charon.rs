@@ -82,6 +82,22 @@ pub(crate) struct CharonRevision {
     pub payload: String,
 }
 
+#[derive(Serialize)]
+struct RevisionReceipt<'a> {
+    workplace_id: &'a str,
+    revision_id: &'a str,
+    project_id: &'a str,
+    content_hash: &'a str,
+    received_at_unix: u64,
+}
+
+#[derive(Deserialize)]
+struct ReceiptAck {
+    revision_id: String,
+    content_hash: String,
+    accepted: bool,
+}
+
 pub fn connect_charon(
     base_url: &str,
     workplace_id: &str,
@@ -163,11 +179,51 @@ pub fn sync_project_revisions(
     let revisions: Vec<CharonRevision> =
         parse_json_response(&send_request(&endpoint, "GET", &path, "", UPLOAD_TIMEOUT)?)?;
     for revision in revisions {
-        if crate::sync_inbox::store_remote_revision(revision)? {
+        let is_new = crate::sync_inbox::store_remote_revision(revision.clone())?;
+        acknowledge_revision(&endpoint, workplace_id, &revision)?;
+        if is_new {
             report.received += 1;
         }
     }
     Ok(report)
+}
+
+fn acknowledge_revision(
+    endpoint: &HttpEndpoint,
+    workplace_id: &str,
+    revision: &CharonRevision,
+) -> Result<(), AppError> {
+    let body = serde_json::to_string(&RevisionReceipt {
+        workplace_id,
+        revision_id: &revision.revision_id,
+        project_id: &revision.project_id,
+        content_hash: &revision.content_hash,
+        received_at_unix: 0,
+    })
+    .map_err(|error| {
+        AppError::wrap(
+            "charon_json",
+            "Empfangsbestätigung konnte nicht serialisiert werden.",
+            error.to_string(),
+        )
+    })?;
+    let ack: ReceiptAck = parse_json_response(&send_request(
+        endpoint,
+        "POST",
+        "/api/v1/projects/revisions/ack",
+        &body,
+        TIMEOUT,
+    )?)?;
+    if !ack.accepted
+        || ack.revision_id != revision.revision_id
+        || ack.content_hash != revision.content_hash
+    {
+        return Err(AppError::new(
+            "charon_receipt_ack",
+            "Charon hat die Empfangsbestätigung nicht eindeutig angenommen.",
+        ));
+    }
+    Ok(())
 }
 
 fn upload_revision(endpoint: &HttpEndpoint, entry: &crate::OutboxEntry) -> Result<(), AppError> {
