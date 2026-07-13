@@ -35,6 +35,22 @@ pub struct InboxEntry {
     pub status: InboxStatus,
 }
 
+/// Read-only Sicht auf eine empfangene Revision und den gegebenenfalls lokal
+/// vorhandenen Projektstand. Der Vergleich mutiert weder Inbox noch Projekte.
+#[derive(Debug, Clone)]
+pub struct InboxComparison {
+    pub entry: InboxEntry,
+    pub local_project_name: Option<String>,
+    pub local_modified_at: Option<String>,
+    pub remote_modified_at: String,
+    pub local_state: Option<luxifer_core::state::AppState>,
+    pub remote_state: luxifer_core::state::AppState,
+    pub bed_changed: bool,
+    pub layers_changed: bool,
+    pub shapes_changed: bool,
+    pub metadata_changed: bool,
+}
+
 impl InboxEntry {
     pub fn payload_path(&self) -> PathBuf {
         inbox_dir().join(&self.revision_id).join(&self.payload_file)
@@ -132,28 +148,73 @@ pub fn reconsider_inbox_revision(revision_id: &str) -> Result<(), AppError> {
     set_inbox_status(revision_id, InboxStatus::PendingReview)
 }
 
+pub fn compare_inbox_revision(revision_id: &str) -> Result<InboxComparison, AppError> {
+    let entry = read_entry(&inbox_dir().join(revision_id).join(MANIFEST_FILE))?;
+    let remote = read_verified_project(&entry)?;
+    let projects_dir = luxifer_core::projects_dir();
+    let local = luxifer_core::list_projects(&projects_dir)
+        .into_iter()
+        .map(|info| {
+            luxifer_core::ProjectFile::load_by_name(&projects_dir, &info.name)
+                .map(|project| (info.name, project))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            AppError::wrap(
+                "project_read",
+                "Lokale Projekte konnten nicht verglichen werden.",
+                error,
+            )
+        })?
+        .into_iter()
+        .find(|(_, project)| project.id == entry.project_id);
+
+    let (
+        local_project_name,
+        local_modified_at,
+        local_state,
+        bed_changed,
+        layers_changed,
+        shapes_changed,
+        metadata_changed,
+    ) = if let Some((name, local)) = local {
+        let bed_changed = local.bed_w_mm != remote.bed_w_mm || local.bed_h_mm != remote.bed_h_mm;
+        let layers_changed = local.layers != remote.layers;
+        let shapes_changed = local.shapes != remote.shapes;
+        let metadata_changed = local.name != remote.name
+            || local.description != remote.description
+            || local.tags != remote.tags;
+        (
+            Some(name),
+            Some(local.modified_at.clone()),
+            Some(local.into_state()),
+            bed_changed,
+            layers_changed,
+            shapes_changed,
+            metadata_changed,
+        )
+    } else {
+        (None, None, None, true, true, true, true)
+    };
+    let remote_modified_at = remote.modified_at.clone();
+    let remote_state = remote.into_state();
+    Ok(InboxComparison {
+        entry,
+        local_project_name,
+        local_modified_at,
+        remote_modified_at,
+        local_state,
+        remote_state,
+        bed_changed,
+        layers_changed,
+        shapes_changed,
+        metadata_changed,
+    })
+}
+
 pub fn apply_inbox_revision(revision_id: &str) -> Result<String, AppError> {
     let entry = read_entry(&inbox_dir().join(revision_id).join(MANIFEST_FILE))?;
-    let payload = std::fs::read_to_string(entry.payload_path()).map_err(inbox_read_error)?;
-    if content_hash(payload.as_bytes()) != entry.content_hash {
-        return Err(AppError::new(
-            "inbox_hash",
-            "Die lokale Inbox-Revision ist beschädigt.",
-        ));
-    }
-    let mut project = luxifer_core::ProjectFile::from_json(&payload).map_err(|error| {
-        AppError::wrap(
-            "inbox_project_json",
-            "Die empfangene Projektrevision ist ungültig.",
-            error,
-        )
-    })?;
-    if project.id != entry.project_id || project.current_version != entry.project_version_id {
-        return Err(AppError::new(
-            "inbox_project_identity",
-            "Die empfangene Projektrevision passt nicht zu ihrem Manifest.",
-        ));
-    }
+    let mut project = read_verified_project(&entry)?;
     if !project.asset_refs.is_empty() {
         return Err(AppError::new(
             "inbox_assets_pending",
@@ -218,6 +279,30 @@ pub fn apply_inbox_revision(revision_id: &str) -> Result<String, AppError> {
     result?;
     set_inbox_status(revision_id, InboxStatus::Applied)?;
     Ok(local_name)
+}
+
+fn read_verified_project(entry: &InboxEntry) -> Result<luxifer_core::ProjectFile, AppError> {
+    let payload = std::fs::read_to_string(entry.payload_path()).map_err(inbox_read_error)?;
+    if content_hash(payload.as_bytes()) != entry.content_hash {
+        return Err(AppError::new(
+            "inbox_hash",
+            "Die lokale Inbox-Revision ist beschädigt.",
+        ));
+    }
+    let project = luxifer_core::ProjectFile::from_json(&payload).map_err(|error| {
+        AppError::wrap(
+            "inbox_project_json",
+            "Die empfangene Projektrevision ist ungültig.",
+            error,
+        )
+    })?;
+    if project.id != entry.project_id || project.current_version != entry.project_version_id {
+        return Err(AppError::new(
+            "inbox_project_identity",
+            "Die empfangene Projektrevision passt nicht zu ihrem Manifest.",
+        ));
+    }
+    Ok(project)
 }
 
 fn set_inbox_status(revision_id: &str, status: InboxStatus) -> Result<(), AppError> {
@@ -369,5 +454,52 @@ mod tests {
                 .unwrap();
         assert_eq!(imported.id, project.id);
         assert_eq!(list_inbox().unwrap()[0].status, InboxStatus::Applied);
+    }
+
+    #[test]
+    fn vergleich_findet_lokales_projekt_ueber_stabile_id_und_mutiert_nichts() {
+        let _guard = with_temp_dir("sync_inbox_compare");
+        let local = luxifer_core::ProjectFile::from_state(
+            &luxifer_core::AppState::new(),
+            "Werkstattname",
+            Vec::new(),
+        );
+        local.save_to_dir(&luxifer_core::projects_dir()).unwrap();
+
+        let mut remote_state = luxifer_core::AppState::new();
+        remote_state.add_shape(luxifer_core::Geo::Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        });
+        let mut remote = local.clone();
+        remote.name = "Officename".into();
+        remote.update_from_state(&remote_state);
+        let payload = remote.to_json().unwrap();
+        store_remote_revision(CharonRevision {
+            revision_id: "revision-compare-1".into(),
+            project_id: remote.id.clone(),
+            project_name: remote.name.clone(),
+            project_version_id: remote.current_version.clone(),
+            parent_revision_id: None,
+            workplace_id: "office-1".into(),
+            queued_at: "2026-07-13T12:00:00Z".into(),
+            content_hash: content_hash(payload.as_bytes()),
+            payload,
+        })
+        .unwrap();
+
+        let comparison = compare_inbox_revision("revision-compare-1").unwrap();
+        assert_eq!(
+            comparison.local_project_name.as_deref(),
+            Some("Werkstattname")
+        );
+        assert!(comparison.layers_changed);
+        assert!(comparison.shapes_changed);
+        assert!(comparison.metadata_changed);
+        assert_eq!(comparison.local_state.unwrap().shapes.len(), 0);
+        assert_eq!(comparison.remote_state.shapes.len(), 1);
+        assert_eq!(list_inbox().unwrap()[0].status, InboxStatus::PendingReview);
     }
 }

@@ -202,6 +202,13 @@ pub struct ProjectPreview {
     pub outlines: Vec<PreviewOutline>,
 }
 
+/// Read-only Präsentationszustand des Vergleichsdialogs.
+pub struct RevisionComparisonState {
+    pub comparison: luxifer_application::InboxComparison,
+    pub local_preview: Option<ProjectPreview>,
+    pub remote_preview: ProjectPreview,
+}
+
 /// Eine Shape-Kontur der Miniatur in Layer-Farbe.
 pub struct PreviewOutline {
     pub points: Vec<(f32, f32)>,

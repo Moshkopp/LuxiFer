@@ -59,6 +59,8 @@ pub struct App {
     pub project_browser: crate::ui::ProjectBrowserState,
     /// Persistente, noch nicht automatisch angewandte Charon-Revisionen.
     pub project_inbox: Vec<luxifer_application::InboxEntry>,
+    /// Geöffneter read-only Vergleich einer Charon-Revision.
+    pub revision_comparison: Option<crate::ui::RevisionComparisonState>,
     /// Material-Vorlage der Laser-Vorschau (Präsentationszustand).
     pub preview_material: crate::canvas::scene::PreviewMaterial,
     /// Leerfahrten in der Vorschau zeichnen (Präsentationszustand).
@@ -148,6 +150,7 @@ impl App {
             laser_manager: None,
             project_browser: Default::default(),
             project_inbox,
+            revision_comparison: None,
             preview_material: Default::default(),
             preview_show_travel: false,
             laser: LaserUi::default(),
@@ -292,6 +295,7 @@ impl App {
             || self.project_save_dialog.is_some()
             || self.settings_dialog.is_some()
             || self.laser_manager.is_some()
+            || self.revision_comparison.is_some()
             || self.pending_project.is_some()
             || self.close_pending
             || self.splash.is_some()
@@ -375,6 +379,7 @@ impl App {
             A::DeferInboxRevision(id) => self.defer_inbox_revision(&id),
             A::ReconsiderInboxRevision(id) => self.reconsider_inbox_revision(&id),
             A::ApplyInboxRevision(id) => self.apply_inbox_revision(&id),
+            A::ShowInboxComparison(id) => self.show_inbox_comparison(&id),
             A::SelectView(view) => {
                 self.view = view;
                 if view == crate::tools::View::Laser {

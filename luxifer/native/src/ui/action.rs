@@ -76,6 +76,8 @@ pub enum UiAction {
     ReconsiderInboxRevision(String),
     /// Neues empfangenes Projekt sicher in die lokale Ablage übernehmen.
     ApplyInboxRevision(String),
+    /// Empfangene und lokale Projektversion read-only vergleichen.
+    ShowInboxComparison(String),
     /// Haupt-Ansicht (Reiter) wechseln.
     SelectView(View),
     /// Material-Vorlage der Laser-Vorschau wählen.

@@ -103,7 +103,8 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nächste Schritte
 
-1. Visuellen Revisionsvergleich für bestehende Projekte ergänzen.
+1. Vergleich um sichere Entscheidungen für bestehende Projekte erweitern
+   (`lokal behalten` oder ganze Charon-Version übernehmen).
 2. Empfangsbestätigungen später für Aufräum- und Aufbewahrungsregeln nutzen.
 3. Push-Kanal und Konfliktbenachrichtigung ergänzen; zunächst ganze Version
    übernehmen oder zurückstellen. Stabil identifizierbare Shapes/Layer sind
@@ -185,8 +186,14 @@ Der erste Meilenstein ist umgesetzt:
 - nach erfolgreichem Import erscheint das Projekt in `Meine Projekte`; der
   Canvas und ein eventuell geöffnetes, ungespeichertes Projekt werden nicht
   automatisch ersetzt.
+- `Änderungen anzeigen` öffnet einen strikt read-only Vergleich. Lokales Projekt
+  und Charon-Revision werden über die stabile Projekt-ID zugeordnet und mit
+  getrennten Miniaturen, Größen sowie Änderungsmarkern für Arbeitsbereich,
+  Ebenen, Objekte und Metadaten angezeigt. Der Dialog verändert weder Inbox-
+  Status noch Projektdateien.
 
-Noch offen sind Revisionsvergleich/-Merge, Asset- und Settings-Transfer, Push-Kanal,
-Konfliktvergleich sowie Ruida-Leases. Charon darf Versionen verteilen und
+Noch offen sind Übernahmeentscheidungen und späterer Merge, Asset- und
+Settings-Transfer, Push-Kanal, Konfliktbenachrichtigung sowie Ruida-Leases.
+Charon darf Versionen verteilen und
 Verbindungen koordinieren, aber keine Projektinhalte selbst bearbeiten oder
 laufende Jobs unterbrechen.

@@ -20,7 +20,7 @@ use super::state::{PreviewOutline, ProjectBrowserState, ProjectPreview};
 /// Baut die Vektor-Miniatur aus einem Projektzustand: sichtbare Konturen in
 /// Layer-Farbe, Weltkoordinaten in mm. Reine Präsentationsaufbereitung — die
 /// Outline-Ableitung ist dieselbe wie im Canvas (`scene_geo::world_outline`).
-pub(super) fn preview_from_state(state: &AppState) -> ProjectPreview {
+pub(crate) fn preview_from_state(state: &AppState) -> ProjectPreview {
     let mut outlines = Vec::new();
     for shape in &state.shapes {
         let layer = state.layers.get(shape.layer_id);
@@ -46,7 +46,7 @@ pub(super) fn preview_from_state(state: &AppState) -> ProjectPreview {
 
 /// Zeichnet die Miniatur in einen festen Rahmen (Bett eingepasst, Y wie im
 /// Design-Canvas nach unten).
-fn draw_preview(ui: &mut egui::Ui, preview: &ProjectPreview) {
+pub(super) fn draw_preview(ui: &mut egui::Ui, preview: &ProjectPreview) {
     let height = 180.0_f32.min(ui.available_width() * 0.6);
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
@@ -213,10 +213,9 @@ fn inbox_pane(ui: &mut egui::Ui, inbox: &[InboxEntry], actions: &mut Vec<UiActio
                         if ui.button("Übernehmen").clicked() {
                             actions.push(UiAction::ApplyInboxRevision(entry.revision_id.clone()));
                         }
-                        ui.add_enabled(false, egui::Button::new("Änderungen anzeigen"))
-                            .on_disabled_hover_text(
-                                "Der visuelle Vergleich folgt im nächsten Konfliktschritt.",
-                            );
+                        if ui.button("Änderungen anzeigen").clicked() {
+                            actions.push(UiAction::ShowInboxComparison(entry.revision_id.clone()));
+                        }
                         if entry.status == InboxStatus::PendingReview {
                             if ui.button("Später").clicked() {
                                 actions

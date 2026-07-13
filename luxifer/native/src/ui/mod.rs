@@ -25,12 +25,13 @@ mod tools;
 mod topbar;
 
 pub use action::UiAction;
+pub(crate) use project::preview_from_state;
 pub use splash::Splash;
 pub use state::{
     CachedProjectDetail, CharonTestStatus, GeoOpDialogState, GeoOpKind, ImageDialogState,
     LaserManagerState, LaserManagerTab, LayerDialogState, PendingProjectAction,
-    ProjectBrowserState, ProjectSaveDialogState, SettingsDialogState, SettingsSection,
-    TextDialogState,
+    ProjectBrowserState, ProjectSaveDialogState, RevisionComparisonState, SettingsDialogState,
+    SettingsSection, TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -304,6 +305,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         || app.settings_dialog.is_some()
         || app.laser_manager.is_some()
         || app.project_save_dialog.is_some()
+        || app.revision_comparison.is_some()
         || app.pending_project.is_some()
         || app.close_pending;
     if has_dialog {
@@ -407,6 +409,12 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             dialogs::LaserManagerOutcome::Delete => app.laser_manager_delete(),
             dialogs::LaserManagerOutcome::MachineRead => app.laser_manager_machine_read(),
             dialogs::LaserManagerOutcome::MachineWrite => app.laser_manager_machine_write(),
+        }
+    }
+
+    if let Some(state) = app.revision_comparison.as_ref() {
+        if dialogs::revision_comparison_window(ctx, state) {
+            app.revision_comparison = None;
         }
     }
 

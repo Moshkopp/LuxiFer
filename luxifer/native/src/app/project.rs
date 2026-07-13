@@ -38,6 +38,24 @@ impl App {
         }
     }
 
+    pub fn show_inbox_comparison(&mut self, revision_id: &str) {
+        match luxifer_application::compare_inbox_revision(revision_id) {
+            Ok(comparison) => {
+                let local_preview = comparison
+                    .local_state
+                    .as_ref()
+                    .map(crate::ui::preview_from_state);
+                let remote_preview = crate::ui::preview_from_state(&comparison.remote_state);
+                self.revision_comparison = Some(crate::ui::RevisionComparisonState {
+                    comparison,
+                    local_preview,
+                    remote_preview,
+                });
+            }
+            Err(error) => self.app_error = Some(error),
+        }
+    }
+
     pub fn refresh_project_inbox(&mut self) {
         match luxifer_application::list_inbox() {
             Ok(entries) => self.project_inbox = entries,

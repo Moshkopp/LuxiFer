@@ -24,7 +24,7 @@ pub use luxifer_driver_ruida::{RuidaMachineSetting, RuidaSettingUnit};
 pub use project::{ProjectDetail, ProjectService};
 pub use session::{BoxShape, EditorSession, LayerParams, LayerToggle, PointPath};
 pub use sync_inbox::{
-    apply_inbox_revision, defer_inbox_revision, list_inbox, reconsider_inbox_revision, InboxEntry,
-    InboxStatus,
+    apply_inbox_revision, compare_inbox_revision, defer_inbox_revision, list_inbox,
+    reconsider_inbox_revision, InboxComparison, InboxEntry, InboxStatus,
 };
 pub use sync_outbox::{list_outbox, OutboxEntry, OutboxStatus};
