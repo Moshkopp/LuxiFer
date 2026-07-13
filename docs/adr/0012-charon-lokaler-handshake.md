@@ -94,7 +94,7 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nicht Teil dieses Meilensteins
 
-- Projekt-Outbox/Inbox, Versionstransfer und Push-Kanal;
+- Projekt-Inbox, Versionstransfer und Push-Kanal;
 - Settings-/Laserprofil-Sicherung;
 - Assetübertragung und Deduplizierung;
 - Benutzerkonten, Tokens, TLS, Discovery oder Fernzugriff;
@@ -103,8 +103,8 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nächste Schritte
 
-1. Persistente lokale Projekt-Outbox/Inbox modellieren.
-2. Unveränderte Projektversionen übertragen, bestätigen und erneut zustellen.
+1. Unveränderte Projektrevisionen übertragen, bestätigen und erneut zustellen.
+2. Persistente lokale Projekt-Inbox modellieren.
 3. Push-Kanal und Konfliktbenachrichtigung ergänzen; zunächst ganze Version
    übernehmen oder zurückstellen. Stabil identifizierbare Shapes/Layer sind
    Voraussetzung für späteren Vergleich und Drei-Wege-Objekt-Merge.
@@ -137,8 +137,19 @@ Der erste Meilenstein ist umgesetzt:
   wieder an;
 - `scripts/run-local-charon-demo.sh` startet Charon, Office und Workshop mit
   voneinander isolierten Datenverzeichnissen in drei Terminals.
+- nach jedem erfolgreichen lokalen Speichern legt LuxiFer bei aktiviertem
+  Charon einen atomar geschriebenen Outbox-Eintrag unter
+  `sync/outbox/<revision_id>/` an. Manifest und eigene `payload.luxi`-Kopie
+  bleiben auch bei einem späteren Strg+S unverändert;
+- Sync-Revisionen sind von den sichtbaren Projektversionen getrennt. Sie tragen
+  Projekt-/Versions-/Arbeitsplatz-ID, Elternrevision, Zeitpunkt, Inhaltshash
+  und Status. Dadurch bildet auch mehrfaches Speichern innerhalb etwa V1 eine
+  eindeutige, konfliktfähige Kette;
+- ein Outbox-Fehler macht das zuvor erfolgreiche lokale Speichern nicht
+  rückgängig und wird als separate Warnung angezeigt.
 
-Noch offen sind Outbox/Inbox, Projekt- und Settings-Transfer, Push-Kanal,
+Noch offen sind Outbox-Upload/Wiederholung, Inbox, Projekt- und
+Settings-Transfer, Push-Kanal,
 Konfliktvergleich sowie Ruida-Leases. Charon darf Versionen verteilen und
 Verbindungen koordinieren, aber keine Projektinhalte selbst bearbeiten oder
 laufende Jobs unterbrechen.

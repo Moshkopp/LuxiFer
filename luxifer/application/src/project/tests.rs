@@ -7,6 +7,7 @@ use luxifer_core::Geo;
 
 use super::ProjectService;
 use crate::test_env::with_temp_dir;
+use crate::{list_outbox, OutboxStatus};
 
 fn state_with_rect() -> AppState {
     let mut s = AppState::new();
@@ -39,6 +40,37 @@ fn anlegen_speichern_oeffnen_roundtrip() {
     let restored = svc2.open("Erstes").unwrap();
     assert_eq!(restored.shapes.len(), n);
     assert_eq!(svc2.open_name(), Some("Erstes"));
+}
+
+#[test]
+fn outbox_friert_jeden_speicherstand_mit_parent_ein() {
+    let _g = with_temp_dir("outbox_chain");
+    let mut svc = ProjectService::new();
+    let mut state = state_with_rect();
+    svc.new_project(&state, "Sync", "").unwrap();
+
+    let first = svc.queue_current_for_sync("office-id").unwrap();
+    let first_payload = std::fs::read(first.payload_path()).unwrap();
+    assert_eq!(first.status, OutboxStatus::Pending);
+    assert_eq!(first.parent_revision_id, None);
+
+    state.add_shape(Geo::Ellipse {
+        cx: 60.0,
+        cy: 40.0,
+        rx: 10.0,
+        ry: 8.0,
+    });
+    svc.save(&state).unwrap();
+    let second = svc.queue_current_for_sync("office-id").unwrap();
+
+    assert_eq!(
+        second.parent_revision_id.as_deref(),
+        Some(first.revision_id.as_str())
+    );
+    assert_eq!(first.project_version_id, second.project_version_id);
+    assert_ne!(first.content_hash, second.content_hash);
+    assert_eq!(std::fs::read(first.payload_path()).unwrap(), first_payload);
+    assert_eq!(list_outbox().unwrap().len(), 2);
 }
 
 #[test]

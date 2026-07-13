@@ -126,6 +126,7 @@ impl App {
         {
             Ok(()) => {
                 self.session.mark_saved();
+                self.queue_project_for_charon();
                 self.toasts
                     .success(format!("Neues Projekt: {}", name.trim()));
                 true
@@ -171,6 +172,7 @@ impl App {
         match self.project.save(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
+                self.queue_project_for_charon();
                 self.toasts
                     .success(format!("Gespeichert ({})", version.label));
             }
@@ -188,10 +190,28 @@ impl App {
         match self.project.save_version(self.session.state()) {
             Ok(version) => {
                 self.session.mark_saved();
+                self.queue_project_for_charon();
                 self.toasts
                     .success(format!("Neue Version {}", version.label));
             }
             Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Erst nach erfolgreichem lokalem Speichern aufrufen. Ein Outbox-Fehler
+    /// wird sichtbar, ändert den erfolgreichen lokalen Projektstand aber nicht.
+    fn queue_project_for_charon(&mut self) {
+        if !self.ui_settings.charon_enabled {
+            return;
+        }
+        if let Err(error) = self
+            .project
+            .queue_current_for_sync(&self.ui_settings.workplace_id)
+        {
+            self.toasts.error(format!(
+                "Projekt lokal gespeichert, Charon-Vormerkung fehlgeschlagen: {}",
+                error.message()
+            ));
         }
     }
 

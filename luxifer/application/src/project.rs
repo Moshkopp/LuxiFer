@@ -94,6 +94,22 @@ impl ProjectService {
         self.open.as_ref().map(|p| p.current_version.as_str())
     }
 
+    /// Friert den zuletzt erfolgreich gespeicherten Stand als unveränderliche
+    /// lokale Sync-Revision ein. Ein Fehler hier macht das Projektspeichern
+    /// nicht rückgängig; diese Grenze entscheidet der aufrufende Client.
+    pub fn queue_current_for_sync(
+        &self,
+        workplace_id: &str,
+    ) -> Result<crate::OutboxEntry, AppError> {
+        let project = self.require_open_ref()?;
+        let version_id = &project.current_version;
+        let snapshot = Self::dir()
+            .join(&project.name)
+            .join(luxifer_core::project::VERSIONS_DIR)
+            .join(format!("{version_id}.luxi"));
+        crate::sync_outbox::enqueue_project_snapshot(project, version_id, workplace_id, &snapshot)
+    }
+
     /// Detailsicht eines Projekts für den Browser (Metadaten + Versionen),
     /// ohne das offene Projekt zu wechseln. Für das offene Projekt kommt die
     /// Sicht aus dem Speicher, sonst wird die Projektdatei nur gelesen.
