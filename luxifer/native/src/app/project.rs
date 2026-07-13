@@ -26,6 +26,21 @@ impl App {
     }
 
     pub fn apply_inbox_revision(&mut self, revision_id: &str) {
+        // Derselbe Inbox-Button deckt beide Fälle ab: Ein unbekanntes Projekt
+        // wird lokal angelegt, eine weitere Revision desselben stabilen
+        // Projekts wird als neue lokale Version übernommen. Der zweite Pfad
+        // besitzt außerdem den Dirty-Guard für ein gerade geöffnetes Projekt.
+        match luxifer_application::compare_inbox_revision(revision_id) {
+            Ok(comparison) if comparison.local_project_name.is_some() => {
+                self.accept_inbox_revision(revision_id);
+                return;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                self.app_error = Some(error);
+                return;
+            }
+        }
         match luxifer_application::apply_inbox_revision(revision_id) {
             Ok(name) => {
                 self.refresh_project_inbox();
