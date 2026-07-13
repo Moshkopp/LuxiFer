@@ -13,7 +13,10 @@ mod sync_outbox;
 #[cfg(test)]
 mod test_env;
 
-pub use charon::{connect_charon, CharonConnection, CharonHandshake, CharonWorkplace};
+pub use charon::{
+    connect_charon, upload_pending_revisions, CharonConnection, CharonHandshake, CharonSyncReport,
+    CharonWorkplace,
+};
 pub use error::AppError;
 pub use laser::LaserService;
 pub use luxifer_driver_ruida::{RuidaMachineSetting, RuidaSettingUnit};

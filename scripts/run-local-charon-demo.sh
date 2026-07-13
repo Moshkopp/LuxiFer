@@ -6,6 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_BASE="${LUXIFER_DEMO_DATA_DIR:-$ROOT/local-data/charon-demo}"
+CHARON_DATA="$DATA_BASE/charon"
 OFFICE_DATA="$DATA_BASE/office"
 WORKSHOP_DATA="$DATA_BASE/workshop"
 
@@ -22,7 +23,7 @@ case "${1:-}" in
             echo "Unsicheres Testdaten-Verzeichnis: '$DATA_BASE'" >&2
             exit 1
         fi
-        rm -rf -- "$OFFICE_DATA" "$WORKSHOP_DATA"
+        rm -rf -- "$CHARON_DATA" "$OFFICE_DATA" "$WORKSHOP_DATA"
         ;;
     -h|--help)
         usage
@@ -34,7 +35,7 @@ case "${1:-}" in
         ;;
 esac
 
-mkdir -p -- "$OFFICE_DATA" "$WORKSHOP_DATA"
+mkdir -p -- "$CHARON_DATA" "$OFFICE_DATA" "$WORKSHOP_DATA"
 
 echo "Baue Charon und LuxiFer …"
 cargo build --manifest-path "$ROOT/Cargo.toml" -p charon -p luxifer-native
@@ -63,7 +64,7 @@ terminal_command() {
 }
 
 terminal_command "Charon" \
-    "'$ROOT/target/debug/charon'"
+    "CHARON_DATA_DIR='$CHARON_DATA' '$ROOT/target/debug/charon'"
 
 terminal_command "LuxiFer — Office" \
     "LUXIFER_DATA_DIR='$OFFICE_DATA' '$ROOT/target/debug/luxifer-native'"
@@ -74,6 +75,7 @@ terminal_command "LuxiFer — Workshop" \
 echo
 echo "Testumgebung gestartet:"
 echo "  Charon:   http://127.0.0.1:3737"
+echo "  Ablage:   $CHARON_DATA"
 echo "  Office:   $OFFICE_DATA"
 echo "  Workshop: $WORKSHOP_DATA"
 echo

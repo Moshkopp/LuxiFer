@@ -220,4 +220,11 @@ fn charon_section(
             ui.colored_label(ui.visuals().error_fg_color, message);
         }
     }
+    if let Some(message) = &state.charon_sync_error {
+        ui.add_space(6.0);
+        ui.colored_label(
+            ui.visuals().error_fg_color,
+            format!("Projekt-Synchronisierung: {message}"),
+        );
+    }
 }

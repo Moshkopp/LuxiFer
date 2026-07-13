@@ -10,6 +10,7 @@ use crate::AppError;
 
 const PROTOCOL_VERSION: u32 = 1;
 const TIMEOUT: Duration = Duration::from_millis(800);
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct CharonHandshake {
@@ -40,13 +41,46 @@ struct WorkplaceHeartbeat<'a> {
     workplace_name: &'a str,
 }
 
+#[derive(Serialize)]
+struct RevisionUpload<'a> {
+    revision_id: &'a str,
+    project_id: &'a str,
+    project_name: &'a str,
+    project_version_id: &'a str,
+    parent_revision_id: Option<&'a str>,
+    workplace_id: &'a str,
+    queued_at: &'a str,
+    content_hash: &'a str,
+    payload: &'a str,
+}
+
+#[derive(Deserialize)]
+struct RevisionAck {
+    revision_id: String,
+    content_hash: String,
+    #[allow(dead_code)]
+    stored: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CharonSyncReport {
+    pub uploaded: usize,
+    pub pending: usize,
+}
+
 pub fn connect_charon(
     base_url: &str,
     workplace_id: &str,
     workplace_name: &str,
 ) -> Result<CharonConnection, AppError> {
     let endpoint = HttpEndpoint::parse(base_url)?;
-    let handshake = parse_json_response(&send_request(&endpoint, "GET", "/api/v1/handshake", "")?)?;
+    let handshake = parse_json_response(&send_request(
+        &endpoint,
+        "GET",
+        "/api/v1/handshake",
+        "",
+        TIMEOUT,
+    )?)?;
     validate_handshake(&handshake)?;
     let body = serde_json::to_string(&WorkplaceHeartbeat {
         workplace_id,
@@ -64,6 +98,7 @@ pub fn connect_charon(
         "POST",
         "/api/v1/workplaces/heartbeat",
         &body,
+        TIMEOUT,
     )?)?;
     Ok(CharonConnection {
         handshake,
@@ -71,11 +106,87 @@ pub fn connect_charon(
     })
 }
 
+pub fn upload_pending_revisions(base_url: &str) -> Result<CharonSyncReport, AppError> {
+    let endpoint = HttpEndpoint::parse(base_url)?;
+    let entries = crate::sync_outbox::list_outbox()?;
+    let mut report = CharonSyncReport::default();
+    for entry in entries
+        .into_iter()
+        .filter(|entry| entry.status != crate::OutboxStatus::Uploaded)
+    {
+        report.pending += 1;
+        let result = upload_revision(&endpoint, &entry);
+        match result {
+            Ok(()) => {
+                crate::sync_outbox::set_outbox_status(
+                    &entry.revision_id,
+                    crate::OutboxStatus::Uploaded,
+                    None,
+                )?;
+                report.uploaded += 1;
+                report.pending -= 1;
+            }
+            Err(error) => {
+                crate::sync_outbox::set_outbox_status(
+                    &entry.revision_id,
+                    crate::OutboxStatus::Failed,
+                    Some(error.message().to_owned()),
+                )?;
+                return Err(error);
+            }
+        }
+    }
+    Ok(report)
+}
+
+fn upload_revision(endpoint: &HttpEndpoint, entry: &crate::OutboxEntry) -> Result<(), AppError> {
+    let payload = std::fs::read_to_string(entry.payload_path()).map_err(|error| {
+        AppError::wrap(
+            "outbox_payload_read",
+            "Vorgemerkte Projektrevision konnte nicht gelesen werden.",
+            error.to_string(),
+        )
+    })?;
+    let body = serde_json::to_string(&RevisionUpload {
+        revision_id: &entry.revision_id,
+        project_id: &entry.project_id,
+        project_name: &entry.project_name,
+        project_version_id: &entry.project_version_id,
+        parent_revision_id: entry.parent_revision_id.as_deref(),
+        workplace_id: &entry.workplace_id,
+        queued_at: &entry.queued_at,
+        content_hash: &entry.content_hash,
+        payload: &payload,
+    })
+    .map_err(|error| {
+        AppError::wrap(
+            "charon_json",
+            "Projektrevision konnte nicht serialisiert werden.",
+            error.to_string(),
+        )
+    })?;
+    let ack: RevisionAck = parse_json_response(&send_request(
+        endpoint,
+        "POST",
+        "/api/v1/projects/revisions",
+        &body,
+        UPLOAD_TIMEOUT,
+    )?)?;
+    if ack.revision_id != entry.revision_id || ack.content_hash != entry.content_hash {
+        return Err(AppError::new(
+            "charon_revision_ack",
+            "Charon hat die Projektrevision nicht eindeutig bestätigt.",
+        ));
+    }
+    Ok(())
+}
+
 fn send_request(
     endpoint: &HttpEndpoint,
     method: &str,
     path: &str,
     body: &str,
+    timeout: Duration,
 ) -> Result<Vec<u8>, AppError> {
     let address = endpoint
         .authority
@@ -96,8 +207,8 @@ fn send_request(
             error.to_string(),
         )
     })?;
-    stream.set_read_timeout(Some(TIMEOUT)).ok();
-    stream.set_write_timeout(Some(TIMEOUT)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         endpoint.authority,

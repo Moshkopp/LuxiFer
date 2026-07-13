@@ -48,6 +48,7 @@ pub struct App {
     /// Periodischer Charon-Heartbeat läuft außerhalb des UI-Threads.
     charon_runtime: charon::CharonRuntime,
     pub charon_status: crate::ui::CharonTestStatus,
+    pub charon_sync_error: Option<String>,
     /// Laufender Start-Splash oder None (abgelaufen/übersprungen/deaktiviert).
     pub splash: Option<crate::ui::Splash>,
     /// Offener Einstellungen-Dialog (Entwurf) oder None.
@@ -139,6 +140,7 @@ impl App {
             ui_settings,
             charon_runtime,
             charon_status: crate::ui::CharonTestStatus::Idle,
+            charon_sync_error: None,
             settings_dialog: None,
             laser_manager: None,
             project_browser: Default::default(),

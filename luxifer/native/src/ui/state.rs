@@ -148,6 +148,7 @@ pub struct SettingsDialogState {
     pub draft: luxifer_core::UiSettings,
     pub section: SettingsSection,
     pub charon_status: CharonTestStatus,
+    pub charon_sync_error: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

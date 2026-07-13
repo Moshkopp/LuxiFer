@@ -104,6 +104,35 @@ pub fn list_outbox() -> Result<Vec<OutboxEntry>, AppError> {
     read_entries(&outbox_dir())
 }
 
+pub(crate) fn set_outbox_status(
+    revision_id: &str,
+    status: OutboxStatus,
+    last_error: Option<String>,
+) -> Result<(), AppError> {
+    let dir = outbox_dir().join(revision_id);
+    let manifest_path = dir.join(MANIFEST_FILE);
+    let bytes = std::fs::read(&manifest_path).map_err(outbox_read_error)?;
+    let mut entry: OutboxEntry = serde_json::from_slice(&bytes).map_err(|error| {
+        AppError::wrap(
+            "outbox_json",
+            "Charon-Outbox enthält ungültige Daten.",
+            error.to_string(),
+        )
+    })?;
+    entry.status = status;
+    entry.last_error = last_error;
+    let bytes = serde_json::to_vec_pretty(&entry).map_err(|error| {
+        AppError::wrap(
+            "outbox_json",
+            "Charon-Outbox konnte nicht serialisiert werden.",
+            error.to_string(),
+        )
+    })?;
+    let temp_path = dir.join(".manifest.tmp");
+    std::fs::write(&temp_path, bytes).map_err(outbox_write_error)?;
+    std::fs::rename(temp_path, manifest_path).map_err(outbox_write_error)
+}
+
 fn latest_for_project(root: &Path, project_id: &str) -> Result<Option<OutboxEntry>, AppError> {
     Ok(read_entries(root)?
         .into_iter()

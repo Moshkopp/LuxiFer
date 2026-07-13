@@ -19,7 +19,10 @@ enum WorkerCommand {
 }
 
 pub(super) enum CharonWorkerResult {
-    Connected(CharonConnection),
+    Connected(
+        CharonConnection,
+        Result<luxifer_application::CharonSyncReport, String>,
+    ),
     Failed(String),
     Disabled,
 }
@@ -69,7 +72,11 @@ fn worker(command_rx: Receiver<WorkerCommand>, result_tx: Sender<CharonWorkerRes
                     &current.workplace_id,
                     &current.workplace_name,
                 )
-                .map(CharonWorkerResult::Connected)
+                .map(|connection| {
+                    let sync = luxifer_application::upload_pending_revisions(&current.url)
+                        .map_err(|error| error.message().to_owned());
+                    CharonWorkerResult::Connected(connection, sync)
+                })
                 .unwrap_or_else(|error| CharonWorkerResult::Failed(error.message().to_owned()));
                 if result_tx.send(result).is_err() {
                     return;

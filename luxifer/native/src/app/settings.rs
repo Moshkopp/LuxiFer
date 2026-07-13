@@ -13,6 +13,7 @@ impl App {
             draft: self.ui_settings.clone(),
             section: SettingsSection::Oberflaeche,
             charon_status: self.charon_status.clone(),
+            charon_sync_error: self.charon_sync_error.clone(),
         });
     }
 
@@ -63,14 +64,33 @@ impl App {
             return false;
         };
         self.charon_status = match result {
-            super::charon::CharonWorkerResult::Connected(connection) => {
+            super::charon::CharonWorkerResult::Connected(connection, sync) => {
+                match sync {
+                    Ok(report) => {
+                        self.charon_sync_error = None;
+                        if report.uploaded > 0 {
+                            self.toasts.success(format!(
+                                "{} Projektrevision(en) an Charon übertragen.",
+                                report.uploaded
+                            ));
+                        }
+                    }
+                    Err(message) => self.charon_sync_error = Some(message),
+                }
                 CharonTestStatus::Connected(connection)
             }
-            super::charon::CharonWorkerResult::Failed(message) => CharonTestStatus::Failed(message),
-            super::charon::CharonWorkerResult::Disabled => CharonTestStatus::Idle,
+            super::charon::CharonWorkerResult::Failed(message) => {
+                self.charon_sync_error = None;
+                CharonTestStatus::Failed(message)
+            }
+            super::charon::CharonWorkerResult::Disabled => {
+                self.charon_sync_error = None;
+                CharonTestStatus::Idle
+            }
         };
         if let Some(dialog) = self.settings_dialog.as_mut() {
             dialog.charon_status = self.charon_status.clone();
+            dialog.charon_sync_error = self.charon_sync_error.clone();
         }
         true
     }

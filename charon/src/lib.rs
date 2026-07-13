@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_BIND: &str = "127.0.0.1:3737";
 pub const PROTOCOL_VERSION: u32 = 1;
 const ONLINE_TIMEOUT_SECS: u64 = 15;
+const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ServerConfig {
@@ -47,7 +49,7 @@ struct Handshake {
     server_version: &'static str,
     protocol_version: u32,
     instance_id: String,
-    capabilities: [&'static str; 3],
+    capabilities: [&'static str; 4],
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,14 +72,55 @@ struct WorkplacePresence {
     online: bool,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RevisionUpload {
+    revision_id: String,
+    project_id: String,
+    project_name: String,
+    project_version_id: String,
+    parent_revision_id: Option<String>,
+    workplace_id: String,
+    queued_at: String,
+    content_hash: String,
+    payload: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredRevision {
+    revision_id: String,
+    project_id: String,
+    project_name: String,
+    project_version_id: String,
+    parent_revision_id: Option<String>,
+    workplace_id: String,
+    queued_at: String,
+    content_hash: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RevisionAck {
+    revision_id: String,
+    content_hash: String,
+    stored: bool,
+}
+
 struct ServerState {
     workplaces: BTreeMap<String, WorkplaceEntry>,
+    data_dir: PathBuf,
+}
+
+impl ServerState {
+    fn new(data_dir: PathBuf) -> Self {
+        Self {
+            workplaces: BTreeMap::new(),
+            data_dir,
+        }
+    }
 }
 
 pub fn serve(config: ServerConfig) -> std::io::Result<()> {
     let listener = TcpListener::bind(config.bind)?;
-    let mut state = ServerState::default();
+    let mut state = ServerState::new(charon_data_dir());
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
@@ -93,9 +136,7 @@ pub fn serve(config: ServerConfig) -> std::io::Result<()> {
 
 fn serve_connection(stream: &mut TcpStream, state: &mut ServerState) -> std::io::Result<()> {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
-    let mut request = [0_u8; 4096];
-    let count = stream.read(&mut request)?;
-    let request = String::from_utf8_lossy(&request[..count]);
+    let request = read_http_request(stream)?;
     let first_line = request.lines().next().unwrap_or_default().to_string();
     let mut parts = first_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
@@ -123,7 +164,7 @@ fn route(
             server_version: env!("CARGO_PKG_VERSION"),
             protocol_version: PROTOCOL_VERSION,
             instance_id: format!("local-{}", std::process::id()),
-            capabilities: ["health", "handshake", "workplaces"],
+            capabilities: ["health", "handshake", "workplaces", "project_revisions"],
         })?,
         ("GET", "/api/v1/workplaces") => json_body(&workplace_list(state, now_unix()))?,
         ("POST", "/api/v1/workplaces/heartbeat") => {
@@ -146,12 +187,167 @@ fn route(
             );
             json_body(&workplace_list(state, now))?
         }
+        ("POST", "/api/v1/projects/revisions") => {
+            let upload: RevisionUpload = match serde_json::from_str(body) {
+                Ok(upload) => upload,
+                Err(_) => return Ok(("400 Bad Request", r#"{"error":"invalid_json"}"#.into())),
+            };
+            match store_revision(&state.data_dir, upload) {
+                Ok(ack) => json_body(&ack)?,
+                Err(StoreRevisionError::Invalid) => {
+                    return Ok(("400 Bad Request", r#"{"error":"invalid_revision"}"#.into()));
+                }
+                Err(StoreRevisionError::HashMismatch) => {
+                    return Ok((
+                        "422 Unprocessable Entity",
+                        r#"{"error":"hash_mismatch"}"#.into(),
+                    ));
+                }
+                Err(StoreRevisionError::Conflict) => {
+                    return Ok(("409 Conflict", r#"{"error":"revision_conflict"}"#.into()));
+                }
+                Err(StoreRevisionError::Io(error)) => return Err(error),
+            }
+        }
         ("GET", _) => ("404 Not Found", r#"{"error":"not_found"}"#.into()),
         _ => (
             "405 Method Not Allowed",
             r#"{"error":"method_not_allowed"}"#.into(),
         ),
     })
+}
+
+fn read_http_request(stream: &mut TcpStream) -> std::io::Result<String> {
+    let mut bytes = Vec::with_capacity(4096);
+    let mut chunk = [0_u8; 8192];
+    let mut expected = None;
+    loop {
+        let count = stream.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+        if bytes.len() > MAX_REQUEST_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "HTTP-Anfrage überschreitet das Größenlimit.",
+            ));
+        }
+        if expected.is_none() {
+            if let Some(header_end) = find_header_end(&bytes) {
+                let headers = std::str::from_utf8(&bytes[..header_end])
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                expected = Some(header_end + 4 + content_length);
+            }
+        }
+        if expected.is_some_and(|expected| bytes.len() >= expected) {
+            break;
+        }
+    }
+    String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+#[derive(Debug)]
+enum StoreRevisionError {
+    Invalid,
+    HashMismatch,
+    Conflict,
+    Io(std::io::Error),
+}
+
+fn store_revision(
+    data_dir: &Path,
+    upload: RevisionUpload,
+) -> Result<RevisionAck, StoreRevisionError> {
+    if !valid_id(&upload.revision_id)
+        || !valid_id(&upload.project_id)
+        || upload.workplace_id.trim().is_empty()
+        || upload.project_version_id.trim().is_empty()
+    {
+        return Err(StoreRevisionError::Invalid);
+    }
+    let actual_hash = luxifer_core::assets::content_hash(upload.payload.as_bytes());
+    if actual_hash != upload.content_hash {
+        return Err(StoreRevisionError::HashMismatch);
+    }
+    let revision_dir = data_dir
+        .join("projects")
+        .join(&upload.project_id)
+        .join("revisions")
+        .join(&upload.revision_id);
+    let manifest_path = revision_dir.join("manifest.json");
+    if manifest_path.exists() {
+        let bytes = std::fs::read(&manifest_path).map_err(StoreRevisionError::Io)?;
+        let stored: StoredRevision = serde_json::from_slice(&bytes)
+            .map_err(|error| StoreRevisionError::Io(std::io::Error::other(error)))?;
+        if stored.content_hash == upload.content_hash {
+            return Ok(RevisionAck {
+                revision_id: upload.revision_id,
+                content_hash: upload.content_hash,
+                stored: false,
+            });
+        }
+        return Err(StoreRevisionError::Conflict);
+    }
+
+    let stored = StoredRevision {
+        revision_id: upload.revision_id.clone(),
+        project_id: upload.project_id.clone(),
+        project_name: upload.project_name,
+        project_version_id: upload.project_version_id,
+        parent_revision_id: upload.parent_revision_id,
+        workplace_id: upload.workplace_id,
+        queued_at: upload.queued_at,
+        content_hash: upload.content_hash.clone(),
+    };
+    let parent = revision_dir.parent().ok_or(StoreRevisionError::Invalid)?;
+    std::fs::create_dir_all(parent).map_err(StoreRevisionError::Io)?;
+    let temp_dir = parent.join(format!(".{}.tmp", upload.revision_id));
+    std::fs::create_dir(&temp_dir).map_err(StoreRevisionError::Io)?;
+    let result = (|| {
+        std::fs::write(temp_dir.join("payload.luxi"), upload.payload)
+            .map_err(StoreRevisionError::Io)?;
+        let manifest = serde_json::to_vec_pretty(&stored)
+            .map_err(|error| StoreRevisionError::Io(std::io::Error::other(error)))?;
+        std::fs::write(temp_dir.join("manifest.json"), manifest).map_err(StoreRevisionError::Io)?;
+        std::fs::rename(&temp_dir, &revision_dir).map_err(StoreRevisionError::Io)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+    result?;
+    Ok(RevisionAck {
+        revision_id: upload.revision_id,
+        content_hash: upload.content_hash,
+        stored: true,
+    })
+}
+
+fn valid_id(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn charon_data_dir() -> PathBuf {
+    std::env::var_os("CHARON_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("local-data/charon"))
 }
 
 fn workplace_list(state: &ServerState, now: u64) -> Vec<WorkplacePresence> {
@@ -197,7 +393,7 @@ mod tests {
             server_version: "test",
             protocol_version: PROTOCOL_VERSION,
             instance_id: "local-test".into(),
-            capabilities: ["health", "handshake", "workplaces"],
+            capabilities: ["health", "handshake", "workplaces", "project_revisions"],
         })
         .unwrap()
         .1;
@@ -208,7 +404,7 @@ mod tests {
 
     #[test]
     fn zwei_arbeitsplaetze_werden_unabhaengig_registriert() {
-        let mut state = ServerState::default();
+        let mut state = ServerState::new(PathBuf::new());
         route(
             "POST",
             "/api/v1/workplaces/heartbeat",
@@ -226,5 +422,35 @@ mod tests {
         let workplaces: Vec<serde_json::Value> = serde_json::from_str(&body).unwrap();
         assert_eq!(workplaces.len(), 2);
         assert!(workplaces.iter().all(|entry| entry["online"] == true));
+    }
+
+    #[test]
+    fn revision_wird_geprueft_atomar_und_idempotent_gespeichert() {
+        let dir = std::env::temp_dir().join(format!(
+            "charon_revision_test_{}_{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let payload = r#"{"version":1}"#;
+        let upload = RevisionUpload {
+            revision_id: "revision-1".into(),
+            project_id: "project-1".into(),
+            project_name: "Test".into(),
+            project_version_id: "version-1".into(),
+            parent_revision_id: None,
+            workplace_id: "office-1".into(),
+            queued_at: "2026-07-13T12:00:00Z".into(),
+            content_hash: luxifer_core::assets::content_hash(payload.as_bytes()),
+            payload: payload.into(),
+        };
+
+        let first = store_revision(&dir, upload.clone()).unwrap();
+        let second = store_revision(&dir, upload).unwrap();
+        assert!(first.stored);
+        assert!(!second.stored);
+        let stored_payload = dir.join("projects/project-1/revisions/revision-1/payload.luxi");
+        assert_eq!(std::fs::read_to_string(stored_payload).unwrap(), payload);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

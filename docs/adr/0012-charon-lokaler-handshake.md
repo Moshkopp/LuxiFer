@@ -94,7 +94,7 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nicht Teil dieses Meilensteins
 
-- Projekt-Inbox, Versionstransfer und Push-Kanal;
+- Projekt-Inbox, eingehender Versionstransfer und Push-Kanal;
 - Settings-/Laserprofil-Sicherung;
 - Assetübertragung und Deduplizierung;
 - Benutzerkonten, Tokens, TLS, Discovery oder Fernzugriff;
@@ -103,8 +103,9 @@ Fähigkeiten müssen von Clients ignoriert werden.
 
 ## Nächste Schritte
 
-1. Unveränderte Projektrevisionen übertragen, bestätigen und erneut zustellen.
-2. Persistente lokale Projekt-Inbox modellieren.
+1. Persistente lokale Projekt-Inbox modellieren und Revisionen von Charon
+   abrufen.
+2. Empfangene Revisionen bestätigen und wiederholbar zustellen.
 3. Push-Kanal und Konfliktbenachrichtigung ergänzen; zunächst ganze Version
    übernehmen oder zurückstellen. Stabil identifizierbare Shapes/Layer sind
    Voraussetzung für späteren Vergleich und Drei-Wege-Objekt-Merge.
@@ -147,9 +148,20 @@ Der erste Meilenstein ist umgesetzt:
   eindeutige, konfliktfähige Kette;
 - ein Outbox-Fehler macht das zuvor erfolgreiche lokale Speichern nicht
   rückgängig und wird als separate Warnung angezeigt.
+- der Hintergrunddienst überträgt offene und fehlgeschlagene Outbox-Einträge
+  nach einem erfolgreichen Heartbeat in Reihenfolge ihrer Revisionskette;
+- Charon prüft den Inhaltshash und speichert Manifest und Payload atomar unter
+  `projects/<project_id>/revisions/<revision_id>/`. Die Ablagewurzel ist über
+  `CHARON_DATA_DIR` konfigurierbar;
+- erst eine passende Bestätigung aus Revisions-ID und Hash setzt den lokalen
+  Eintrag auf `uploaded`. Fehlgeschlagene Übertragungen bleiben mit Fehlertext
+  erhalten und werden beim nächsten Heartbeat erneut versucht;
+- wiederholte identische Uploads sind idempotent. Dieselbe Revisions-ID mit
+  anderem Inhalt wird als Konflikt abgelehnt;
+- der lokale HTTP-Server liest vollständige Requests bis 64 MiB statt nur den
+  ersten Netzwerkblock. Assets sind weiterhin nicht Bestandteil des Transfers.
 
-Noch offen sind Outbox-Upload/Wiederholung, Inbox, Projekt- und
-Settings-Transfer, Push-Kanal,
+Noch offen sind Inbox, eingehender Projekt- und Settings-Transfer, Push-Kanal,
 Konfliktvergleich sowie Ruida-Leases. Charon darf Versionen verteilen und
 Verbindungen koordinieren, aber keine Projektinhalte selbst bearbeiten oder
 laufende Jobs unterbrechen.

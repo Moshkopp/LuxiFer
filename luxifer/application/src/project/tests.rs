@@ -71,6 +71,10 @@ fn outbox_friert_jeden_speicherstand_mit_parent_ein() {
     assert_ne!(first.content_hash, second.content_hash);
     assert_eq!(std::fs::read(first.payload_path()).unwrap(), first_payload);
     assert_eq!(list_outbox().unwrap().len(), 2);
+    crate::sync_outbox::set_outbox_status(&first.revision_id, OutboxStatus::Uploaded, None)
+        .unwrap();
+    let persisted = list_outbox().unwrap();
+    assert_eq!(persisted[0].status, OutboxStatus::Uploaded);
 }
 
 #[test]
