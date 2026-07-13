@@ -11,29 +11,60 @@ pub(super) struct ThumbnailRuntime {
 }
 
 type ImportedContours = Vec<(Vec<(f64, f64)>, bool)>;
-type AssetImportResult = Result<(luxifer_core::AssetMeta, Option<ImportedContours>), String>;
+struct PreparedImage {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+type AssetImportResult = Result<
+    (
+        luxifer_core::AssetMeta,
+        Option<ImportedContours>,
+        Option<PreparedImage>,
+    ),
+    String,
+>;
 
 pub(super) struct AssetImportRuntime {
-    request_tx: std::sync::mpsc::Sender<String>,
+    request_tx: std::sync::mpsc::Sender<AssetImportRequest>,
     result_rx: std::sync::mpsc::Receiver<AssetImportResult>,
+}
+
+enum AssetImportRequest {
+    Catalog(String),
+    ImagePath(std::path::PathBuf),
 }
 
 impl AssetImportRuntime {
     pub fn new() -> Self {
-        let (request_tx, request_rx) = std::sync::mpsc::channel::<String>();
+        let (request_tx, request_rx) = std::sync::mpsc::channel::<AssetImportRequest>();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("asset-import".into())
             .spawn(move || {
                 let store = luxifer_core::assets_dir();
-                while let Ok(id) = request_rx.recv() {
+                while let Ok(request) = request_rx.recv() {
                     let result = (|| {
-                        let meta = luxifer_core::asset_meta(&store, &id)
-                            .map_err(|error| error.to_string())?;
+                        let meta = match request {
+                            AssetImportRequest::Catalog(id) => {
+                                luxifer_core::asset_meta(&store, &id)
+                                    .map_err(|error| error.to_string())?
+                            }
+                            AssetImportRequest::ImagePath(path) => {
+                                let bytes = std::fs::read(&path)
+                                    .map_err(|error| format!("Bild lesen: {error}"))?;
+                                let name = path
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .unwrap_or("bild");
+                                luxifer_core::import_image(&store, &bytes, name)
+                                    .map_err(|error| error.to_string())?
+                            }
+                        };
                         let contours = match meta.kind {
                             luxifer_core::AssetKind::SvgSource
                             | luxifer_core::AssetKind::DxfSource => {
-                                let bytes = luxifer_core::load_asset(&store, &id)
+                                let bytes = luxifer_core::load_asset(&store, &meta.id)
                                     .map_err(|error| error.to_string())?;
                                 Some(
                                     luxifer_core::import::import_vector(&bytes, &meta.ext)
@@ -42,7 +73,23 @@ impl AssetImportRuntime {
                             }
                             _ => None,
                         };
-                        Ok((meta, contours))
+                        let prepared_image = if meta.kind == luxifer_core::AssetKind::Image {
+                            let (luma, width, height) =
+                                luxifer_core::load_asset_luma(&store, &meta.id)
+                                    .map_err(|error| error.to_string())?;
+                            let mut rgba = Vec::with_capacity(luma.len() * 4);
+                            for value in luma {
+                                rgba.extend_from_slice(&[value, value, value, 255]);
+                            }
+                            Some(PreparedImage {
+                                rgba,
+                                width,
+                                height,
+                            })
+                        } else {
+                            None
+                        };
+                        Ok((meta, contours, prepared_image))
                     })();
                     if result_tx.send(result).is_err() {
                         return;
@@ -176,7 +223,7 @@ impl App {
         if self
             .asset_import_runtime
             .request_tx
-            .send(id.to_owned())
+            .send(AssetImportRequest::Catalog(id.to_owned()))
             .is_ok()
         {
             self.asset_import_pending = true;
@@ -190,7 +237,7 @@ impl App {
             return false;
         };
         self.asset_import_pending = false;
-        let (meta, contours) = match result {
+        let (meta, contours, prepared_image) = match result {
             Ok(result) => result,
             Err(error) => {
                 self.toasts
@@ -200,6 +247,10 @@ impl App {
         };
         match meta.kind {
             luxifer_core::AssetKind::Image => {
+                if let Some(image) = prepared_image {
+                    self.renderer
+                        .preload_image(&meta.id, &image.rgba, image.width, image.height);
+                }
                 let index = self.session.add_image(
                     meta.id.clone(),
                     20.0,
@@ -352,40 +403,19 @@ impl App {
 
     /// Bilddatei in den Asset-Store importieren und als Image-Shape platzieren.
     fn import_image_path(&mut self, path: &Path) {
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                log::error!("Bild lesen: {error}");
-                return;
-            }
-        };
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("bild")
-            .to_string();
-        match luxifer_core::import_image(&luxifer_core::assets_dir(), &bytes, &name) {
-            Ok(meta) => {
-                self.session_asset_context.insert(meta.id.clone());
-                self.tag_asset_for_current_project(&meta.id);
-                self.refresh_asset_catalog();
-                // Pixel → mm bei 254 DPI (10 px/mm), wie der Core-Default.
-                let width_mm = meta.width as f64 / 10.0;
-                let height_mm = meta.height as f64 / 10.0;
-                let index =
-                    self.session
-                        .add_image(meta.id.clone(), 20.0, 20.0, width_mm, height_mm);
-                self.session.selected = vec![index];
-                self.image_dirty = true;
-                self.fit_all();
-                log::info!(
-                    "Bild importiert: {} ({}×{})",
-                    meta.id,
-                    meta.width,
-                    meta.height
-                );
-            }
-            Err(error) => log::error!("Bild-Import fehlgeschlagen: {error}"),
+        if self.asset_import_pending {
+            self.toasts
+                .error("Ein anderer Asset-Import wird bereits verarbeitet.");
+            return;
+        }
+        if self
+            .asset_import_runtime
+            .request_tx
+            .send(AssetImportRequest::ImagePath(path.to_owned()))
+            .is_ok()
+        {
+            self.asset_import_pending = true;
+            self.toasts.success("Bild wird im Hintergrund importiert …");
         }
     }
 

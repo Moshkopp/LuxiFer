@@ -57,6 +57,21 @@ pub struct ImageStore {
 }
 
 impl ImageStore {
+    pub fn insert_rgba(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        asset: &str,
+        rgba: &[u8],
+        size: (u32, u32),
+    ) {
+        let (width, height) = size;
+        self.ensure_pipeline(device, format);
+        let texture = self.upload_rgba(device, queue, rgba, width, height);
+        self.textures.insert(asset.to_owned(), texture);
+    }
+
     /// Baut die Pipeline lazy (beim ersten Bild). Trennt die einmalige
     /// GPU-Objekt-Erzeugung von der Textur-Verwaltung.
     fn ensure_pipeline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {

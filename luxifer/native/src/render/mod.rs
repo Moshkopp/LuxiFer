@@ -75,6 +75,17 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    pub fn preload_image(&mut self, asset: &str, rgba: &[u8], width: u32, height: u32) {
+        self.images.insert_rgba(
+            &self.gpu.device,
+            &self.gpu.queue,
+            self.gpu.config.format,
+            asset,
+            rgba,
+            (width, height),
+        );
+    }
+
     pub fn new(gpu: Gpu, egui_state: egui_winit::State) -> Self {
         let egui_renderer =
             egui_wgpu::Renderer::new(&gpu.device, gpu.config.format, None, 1, false);

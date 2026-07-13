@@ -307,7 +307,11 @@ Der erste Meilenstein ist mit Tag `v1.0` umgesetzt:
 - Projektminiaturen enthalten neben Vektorkonturen die platzierten Bild-Assets.
   Ihre Pixel kommen aus demselben asynchronen Thumbnail-Cache wie die
   Asset-Bibliothek und werden anhand der tatsächlichen, gegebenenfalls
-  rotierten Shape-Ecken in die Bettvorschau gezeichnet.
+  rotierten Shape-Ecken in die Bettvorschau gezeichnet;
+- auch der erstmalige Bildimport liest, dekodiert, normalisiert und schreibt
+  das Asset im Asset-Worker. Dieser bereitet zugleich die RGBA-Pixel für die
+  GPU vor; der UI-Thread übernimmt nur das fertige Asset, lädt den vorbereiteten
+  Texturpuffer hoch und fügt anschließend das `Geo::Image` ein.
 
 Damit ist der lokale Funktionsumfang dieses ADR abgeschlossen. Noch offen sind
 die ausdrücklich nachgelagerten Betriebs- und Ausbaupunkte:
