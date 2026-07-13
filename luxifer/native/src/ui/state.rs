@@ -130,19 +130,32 @@ pub struct ProjectBrowserState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsSection {
     Oberflaeche,
-    Laser,
     Ueber,
 }
 
-/// Entwurf des Einstellungen-Dialogs: Kopie der GUI-Settings plus die aktive
-/// Sektion und ein optionaler Laser-Profil-Entwurf (Laser-Sektion). Klemmen
-/// und Persistenz macht der Core (`UiSettings::sanitize`/`save`) bzw. der
-/// `LaserService` beim Übernehmen.
+/// Entwurf des globalen Einstellungen-Dialogs. Laserprofile werden bewusst in
+/// der separaten Laser-Verwaltung bearbeitet.
 pub struct SettingsDialogState {
     pub draft: luxifer_core::UiSettings,
     pub section: SettingsSection,
-    /// Gerade bearbeitetes Laser-Profil (None = nur Liste sichtbar).
-    pub laser_draft: Option<luxifer_core::LaserProfile>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum LaserManagerTab {
+    #[default]
+    Grunddaten,
+    Kalibrierung,
+    Controller,
+}
+
+pub struct LaserManagerState {
+    pub selected_id: Option<String>,
+    pub draft: luxifer_core::LaserProfile,
+    pub is_new: bool,
+    pub tab: LaserManagerTab,
+    pub machine_settings: Vec<luxifer_application::RuidaMachineSetting>,
+    pub machine_dirty: std::collections::BTreeMap<u16, i64>,
+    pub machine_confirm_write: bool,
 }
 
 /// Entwurf der „Neues Projekt"-Maske (Strg+S ohne offenes Projekt bzw.

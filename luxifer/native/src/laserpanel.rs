@@ -85,7 +85,7 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     ui.add_space(4.0);
     if view.profiles.is_empty() {
         if ui.button("+ Laser anlegen").clicked() {
-            actions.push(UiAction::OpenLaserSettings { edit_active: false });
+            actions.push(UiAction::OpenLaserManager { create_new: true });
         }
     } else {
         let active_label = view
@@ -103,7 +103,7 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
                     .on_hover_text("Laser verwalten")
                     .clicked()
                 {
-                    actions.push(UiAction::OpenLaserSettings { edit_active: true });
+                    actions.push(UiAction::OpenLaserManager { create_new: false });
                 }
                 egui::ComboBox::from_id_salt("laser_sel")
                     .selected_text(active_label)

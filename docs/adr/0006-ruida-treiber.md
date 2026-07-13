@@ -289,13 +289,35 @@ aufschlagen:
    (Release, Memory `performance-release-messen`).
 5. GUI-Anbindung (Tauri-Command „senden"/„rahmen"/„stop") — eigener Schritt.
 
+## Maschinenregister lesen und schreiben (umgesetzt)
+
+Die Controller-Sektion der nativen Laser-Verwaltung kann den Maschinenblock
+des dort ausgewählten Ruida-Controllers wieder lesen und gezielt ändern. Die
+Grenze bleibt strikt:
+
+- Adressen, Einheiten, Bitmasken, Raw-Register, Schreibschutz und
+  `DA 00`/`DA 01` liegen ausschließlich in `luxifer-driver-ruida`.
+- Bekannte Register erscheinen gruppiert und mit physikalischer Einheit;
+  zusätzliche X/Y/Z/U(E)-Register bleiben bewusst als Raw-Werte sichtbar.
+- Bitfelder werden aus dem gelesenen Rohwert per Read-Modify-Write geändert.
+  Unbeteiligte Flags bleiben erhalten.
+- Schreiben verwendet den HW-verifizierten doppelten 5-Byte-Wert und danach
+  die Commit-Register `0x0207` und `0x020B`.
+- Die UI verlangt eine zweite Bestätigung, schreibt nur geänderte Register und
+  liest anschließend den gesamten Block zur Kontrolle erneut.
+- Bestehende Job-/Live-Treiberinstanzen werden vor dem exklusiven
+  Verwaltungszugriff verworfen, damit nur ein UDP-Empfänger Port 40200 belegt.
+
+Das ist die Grundlage für spätere kuratierte Z- und U/E-Achsenoptionen. Solange
+deren Bitbelegung nicht an Hardware verifiziert ist, werden sie nicht erfunden,
+sondern nur im Raw-Bereich angeboten.
+
 ## Nicht Teil dieser Entscheidung
 
 - **Raster** (Bild-Zeilen): erst wenn `LayerWork::Raster` im `JobPlan` steht
   (an ADR 0004 §5 gekoppelt).
 - **Z-Achse / Fokustest** (relative `80 03`-Moves): die Referenz kann es, aber
   es hängt an einem Z-Modell im Core — späterer ADR.
-- **Maschinen-Settings lesen/schreiben** (`settings_registry`): eigener Schritt.
 - **GRBL/miniGRBL**-Treiber.
 - Feinschliff der **Nebenläufigkeit** (Fortschritts-Events, Abbruch während
   Upload) und der GUI-Verbindungs-UX.

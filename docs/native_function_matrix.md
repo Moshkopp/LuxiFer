@@ -173,7 +173,7 @@ Zusätzlich, obwohl es keine separaten Commands sind:
 | Werkzeugauswahl/Shortcuts | Native | typisierte `Shortcut`-Ebene, getestet | Fokus-/Modal-Gate wirksam; Space-Key-up kommt immer durch |
 | Drag-/Marquee-/Handle-Vorschau | Native | vorhanden | Marquee als gestricheltes Overlay; nur Präsentationszustand, Commit über Session |
 | FPS-/Statuszeile | Native | vorhanden | Dev-Metrik optional; Fehler/Projektstatus klar |
-| Laser-Profil-Dialog | Native + Application | vorhanden | UI hält nur den Draft; Fachprüfung im Service |
+| Laser-Verwaltung | Native + Application | vorhanden | Master-Detail aus dem Laser-Tab: Grunddaten, Scan-Offset und Ruida-Controller; UI hält nur Draft/Livewerte |
 | Text-Dialog | Native + Application | vorhanden | Anlegen + Editieren (Doppelklick); **offen:** Vorschau (G1), eigene Fonts (G2) |
 | Bildparameter-Dialog | Native + Application | vorhanden | Doppelklick aufs Bild; **offen:** Live-Vorschau (C2) |
 | Rechtes Panel (Inspector) | Native | resizierbar 300–460 px | Panelbreite ist Layout-Zustand des Roots, kein Fachzustand |

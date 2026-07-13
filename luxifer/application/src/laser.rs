@@ -42,6 +42,77 @@ pub struct LaserService {
 }
 
 impl LaserService {
+    /// Liest bekannte und rohe Maschinenregister eines Ruida-Controllers.
+    pub fn read_machine_settings(
+        &mut self,
+    ) -> Result<Vec<luxifer_driver_ruida::RuidaMachineSetting>, AppError> {
+        let profile = self
+            .active_profile()
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?
+            .clone();
+        if profile.kind != DriverKind::Ruida {
+            return Err(AppError::new(
+                "machine_settings_unsupported",
+                "Maschinendaten werden derzeit nur für Ruida unterstützt.",
+            ));
+        }
+        self.driver = None;
+        self.driver_id = None;
+        let mut driver = luxifer_driver_ruida::RuidaDriver::from_profile(&profile);
+        let target = connection_target(&profile);
+        driver.connect(&target).map_err(|e| {
+            AppError::wrap(
+                "laser_connect",
+                format!("Keine Verbindung zum Laser ({target})."),
+                e.to_string(),
+            )
+        })?;
+        driver.read_machine_settings().map_err(|e| {
+            AppError::wrap(
+                "machine_settings_read",
+                "Maschinendaten lesen fehlgeschlagen.",
+                e.to_string(),
+            )
+        })
+    }
+
+    /// Schreibt geprüfte Ruida-Rohwerte, commitet sie und liest anschließend
+    /// der Bestätigung halber den gesamten Block erneut.
+    pub fn write_machine_settings(
+        &mut self,
+        changes: &[(u16, i64)],
+    ) -> Result<Vec<luxifer_driver_ruida::RuidaMachineSetting>, AppError> {
+        let profile = self
+            .active_profile()
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?
+            .clone();
+        if profile.kind != DriverKind::Ruida {
+            return Err(AppError::new(
+                "machine_settings_unsupported",
+                "Maschinendaten werden derzeit nur für Ruida unterstützt.",
+            ));
+        }
+        self.driver = None;
+        self.driver_id = None;
+        let mut driver = luxifer_driver_ruida::RuidaDriver::from_profile(&profile);
+        let target = connection_target(&profile);
+        driver.connect(&target).map_err(|e| {
+            AppError::wrap(
+                "laser_connect",
+                format!("Keine Verbindung zum Laser ({target})."),
+                e.to_string(),
+            )
+        })?;
+        driver.write_machine_settings(changes).map_err(|e| {
+            AppError::wrap(
+                "machine_settings_write",
+                "Maschinendaten schreiben fehlgeschlagen.",
+                e.to_string(),
+            )
+        })?;
+        driver.read_machine_settings().map_err(|e| AppError::wrap("machine_settings_verify", "Maschinendaten wurden geschrieben, konnten aber nicht zur Kontrolle gelesen werden.", e.to_string()))
+    }
+
     pub fn load() -> Self {
         Self {
             registry: LaserRegistry::load(),

@@ -22,6 +22,7 @@ use crate::ui::{
 mod editor;
 mod image;
 mod laser;
+mod laser_manager;
 mod project;
 mod settings;
 mod text;
@@ -47,6 +48,8 @@ pub struct App {
     pub splash: Option<crate::ui::Splash>,
     /// Offener Einstellungen-Dialog (Entwurf) oder None.
     pub settings_dialog: Option<crate::ui::SettingsDialogState>,
+    /// Eigenständige Laserprofil-/Controllerverwaltung.
+    pub laser_manager: Option<crate::ui::LaserManagerState>,
     /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
     pub project_browser: crate::ui::ProjectBrowserState,
     /// Material-Vorlage der Laser-Vorschau (Präsentationszustand).
@@ -130,6 +133,7 @@ impl App {
             project_save_dialog: None,
             ui_settings,
             settings_dialog: None,
+            laser_manager: None,
             project_browser: Default::default(),
             preview_material: Default::default(),
             preview_show_travel: false,
@@ -274,6 +278,7 @@ impl App {
             || self.text_dialog.is_some()
             || self.project_save_dialog.is_some()
             || self.settings_dialog.is_some()
+            || self.laser_manager.is_some()
             || self.pending_project.is_some()
             || self.close_pending
             || self.splash.is_some()
@@ -390,7 +395,7 @@ impl App {
             A::LaserExport => self.laser_export(),
             A::LaserJog(dx, dy) => self.laser_jog(dx, dy),
             A::LaserHome => self.laser_home(),
-            A::OpenLaserSettings { edit_active } => self.open_laser_settings(edit_active),
+            A::OpenLaserManager { create_new } => self.open_laser_manager(create_new),
         }
     }
 

@@ -27,9 +27,9 @@ mod topbar;
 pub use action::UiAction;
 pub use splash::Splash;
 pub use state::{
-    CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LayerDialogState,
-    PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState, SettingsDialogState,
-    SettingsSection, TextDialogState,
+    CachedProjectDetail, GeoOpDialogState, GeoOpKind, ImageDialogState, LaserManagerState,
+    LaserManagerTab, LayerDialogState, PendingProjectAction, ProjectBrowserState,
+    ProjectSaveDialogState, SettingsDialogState, SettingsSection, TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -333,13 +333,10 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         }
     }
 
-    // Einstellungen (sektioniert): GUI-Entwurf + Laser-Profil-Entwurf als
-    // &mut, die Registry als Lesekopie (Borrow-Trennung vom App-Root).
-    // Klemmen/Speichern machen Core bzw. LaserService beim Übernehmen.
+    // Softwareweite Einstellungen. Geräteprofile leben getrennt im Manager.
     if app.settings_dialog.is_some() {
-        let registry = app.laser_backend.registry.clone();
         let st = app.settings_dialog.as_mut().unwrap();
-        match dialogs::settings_dialog_window(ctx, st, &registry) {
+        match dialogs::settings_dialog_window(ctx, st) {
             dialogs::SettingsOutcome::None => {}
             dialogs::SettingsOutcome::Commit => {
                 if app.commit_settings_dialog() {
@@ -347,9 +344,26 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 }
             }
             dialogs::SettingsOutcome::Cancel => app.settings_dialog = None,
-            // Profil-Aktionen lassen den Dialog offen (Liste aktualisiert sich).
-            dialogs::SettingsOutcome::LaserSave => app.settings_laser_save(),
-            dialogs::SettingsOutcome::LaserDelete(id) => app.settings_laser_delete(&id),
+        }
+    }
+
+    // Laserprofile, Kalibrierung und Controllerzugriff als eigene
+    // Master-Detail-Verwaltung aus dem Laser-Tab.
+    if app.laser_manager.is_some() {
+        let registry = app.laser_backend.registry.clone();
+        let outcome = {
+            let state = app.laser_manager.as_mut().unwrap();
+            dialogs::laser_manager_window(ctx, state, &registry)
+        };
+        match outcome {
+            dialogs::LaserManagerOutcome::None => {}
+            dialogs::LaserManagerOutcome::Close => app.laser_manager = None,
+            dialogs::LaserManagerOutcome::Select(id) => app.laser_manager_select(&id),
+            dialogs::LaserManagerOutcome::New => app.laser_manager_new(),
+            dialogs::LaserManagerOutcome::Save => app.laser_manager_save(),
+            dialogs::LaserManagerOutcome::Delete => app.laser_manager_delete(),
+            dialogs::LaserManagerOutcome::MachineRead => app.laser_manager_machine_read(),
+            dialogs::LaserManagerOutcome::MachineWrite => app.laser_manager_machine_write(),
         }
     }
 

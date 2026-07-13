@@ -152,6 +152,15 @@ pub fn cmd_read_reg(addr: u16) -> Vec<u8> {
     vec![0xDA, 0x00, (addr >> 8) as u8, (addr & 0xFF) as u8]
 }
 
+/// Register schreiben (`DA 01 <addr> <wert:5> <wert:5>`).
+pub fn cmd_write_reg(addr: u16, raw: i64) -> Vec<u8> {
+    let value = encode_value((raw & ((1_i64 << 35) - 1)) as u64, 5);
+    let mut out = vec![0xDA, 0x01, (addr >> 8) as u8, addr as u8];
+    out.extend_from_slice(&value);
+    out.extend_from_slice(&value);
+    out
+}
+
 /// 7-Bit-pro-Byte big-endian dekodieren (Umkehrung von [`encode_value`]).
 pub fn decode_value(data: &[u8]) -> u64 {
     data.iter()
@@ -218,6 +227,20 @@ mod tests {
         // 1 mm = 1000 µm → letzte Gruppe trägt den Wert.
         let e = encode_coord(1000);
         assert_eq!(e.len(), 5);
+    }
+
+    #[test]
+    fn settings_write_entspricht_hw_capture() {
+        assert_eq!(
+            cmd_write_reg(0x0201, 12_000),
+            vec![
+                0xDA, 0x01, 0x02, 0x01, 0x00, 0x00, 0x00, 0x5D, 0x60, 0x00, 0x00, 0x00, 0x5D, 0x60,
+            ]
+        );
+        assert_eq!(
+            cmd_write_reg(0x0207, 0),
+            vec![0xDA, 0x01, 0x02, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
     }
 
     #[test]

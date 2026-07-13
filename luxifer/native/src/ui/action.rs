@@ -94,6 +94,6 @@ pub enum UiAction {
     LaserJog(f64, f64),
     /// Laserkopf homen.
     LaserHome,
-    /// Laser-Einstellungen öffnen (`edit_active` = bestehendes bearbeiten).
-    OpenLaserSettings { edit_active: bool },
+    /// Eigenständige Laserprofil-Verwaltung öffnen.
+    OpenLaserManager { create_new: bool },
 }

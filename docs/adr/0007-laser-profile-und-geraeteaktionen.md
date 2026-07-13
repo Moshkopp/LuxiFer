@@ -77,20 +77,25 @@ Profile + die **aktive** Auswahl; Laden/Speichern der Datei liegt im Tauri-
 Backend (JSON), der Core bleibt I/O-frei und testbar (wie ADR 0004 beim
 Asset-Store).
 
-**Rollenteilung Settings ↔ Laserpanel:**
+**Rollenteilung globale Settings ↔ Laserpanel/Verwaltung:**
 
-- **Settings = verwalten (selten).** Ein Dialog, der Laser-Profile **anlegen /
-  bearbeiten / löschen** kann (CRUD), inkl. Scan-Offset-Tabelle. Erster und
-  vorerst einziger Inhalt der Settings; weitere Kategorien folgen später.
+- **Globale Settings = Software.** Dort liegen ausschließlich programmweite
+  Themen wie Oberfläche, Charon, Backup/Restore und About. Geräteprofile und
+  Controllerdaten gehören nicht in diesen Dialog.
 - **Laserpanel = auswählen (ständig).** Ein **Dropdown** im Panel listet die
   gespeicherten Laser; die Auswahl setzt den **aktiven** Laser. Laser wechseln
-  passiert beim Arbeiten laufend, anlegen selten — deshalb getrennt.
+  passiert beim Arbeiten laufend.
+- **„Verwalten“ im Laserpanel = Gerätedetails (selten).** Eine eigene
+  Master-Detail-Ansicht verwaltet Profile. Links steht die Profilliste, rechts
+  liegen Grunddaten (Treiber, Verbindung, Bett, Nullpunkt), Kalibrierung
+  (Scan-Offset) und — wenn unterstützt — live gelesene Controllerdaten. Ein
+  neues Profil zeigt bis zum ersten Speichern nur seine Grunddaten.
 
 Der aktive Laser bestimmt, welcher Treiber im Panel arbeitet. Beim Wechsel
 instanziiert die App den Treiber zum Profil **neu** (`RuidaDriver::new(profil)`,
 ADR 0006) — der neue Treiber trägt IP/Bett/Scan-Offset des gewählten Lasers. Ist
-kein Laser angelegt, zeigt das Dropdown einen Hinweis „In Settings anlegen"; die
-Job-Aktionen sind dann inaktiv.
+kein Laser angelegt, führt das Panel direkt zum Anlegen in der
+Laser-Verwaltung; die Job-Aktionen sind dann inaktiv.
 
 ### B. Gerätegemeldete Job-Aktionen
 
@@ -141,9 +146,9 @@ anzeige. Das sind Job-Parameter (`JobParams`), kein Gerätedetail.
 4. `LaserProfile`, `DriverKind`, `Connection`, `JobAction`, `JobParams` sind
    **gerätefreie Core-Typen**. Der Core baut daraus keinen Treiber-internen
    Zustand.
-5. **Anlegen/Verwalten in Settings, Auswählen im Panel-Dropdown.** Der aktive
-   Laser wird im Laserpanel gewählt; der Wechsel erzeugt den Treiber neu (ADR
-   0006). Profile bearbeiten passiert nur in Settings.
+5. **Anlegen/Verwalten über „Verwalten“ im Laserpanel, Auswählen im
+   Panel-Dropdown.** Der Wechsel erzeugt den Treiber neu (ADR 0006). Globale
+   Programmeinstellungen bleiben frei von Geräteverwaltung.
 
 ## Konsequenzen
 
@@ -163,7 +168,8 @@ anzeige. Das sind Job-Parameter (`JobParams`), kein Gerätedetail.
    `JobParams`; Profil-Liste + aktive Auswahl im `AppState` (I/O-frei), Tests.
 2. Backend-Persistenz: Profile-Datei (JSON) im App-Datenverzeichnis laden/
    speichern; Tauri-Commands (CRUD + aktiv setzen).
-3. Settings-UI: Laser-Profile anlegen/bearbeiten/löschen/aktiv wählen.
+3. Laser-Verwaltung: Profile anlegen/bearbeiten/löschen, kalibrieren und
+   unterstützte Controllerdaten lesen/schreiben.
 4. `MachineDriver` um `actions()`/`run_action()` erweitern; Ruida meldet
    `SendJob` & Co.
 5. Laserpanel umbauen: gerätegemeldete Aktions-Knöpfe statt fixem G-Code/Send.

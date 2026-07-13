@@ -10,9 +10,11 @@
 
 pub mod protocol;
 pub mod scan_offset;
+pub mod settings;
 pub mod transport;
 
 pub use scan_offset::{ScanOffset, ScanOffsetPoint};
+pub use settings::{RuidaMachineSetting, RuidaSettingDef, RuidaSettingUnit};
 pub use transport::{RuidaTransport, TransportError};
 
 use luxifer_core::{
@@ -520,6 +522,22 @@ fn read_reg(t: &RuidaTransport, addr: u16) -> Result<i32, DriverError> {
     } else {
         Err(DriverError::Transport("unerwartete Antwort".into()))
     }
+}
+
+/// Settings-Register als 35-Bit-Rohwert lesen. Der spezielle Ruida-Wert
+/// `0f 11 64 00 00` bedeutet „nicht belegt" und wird als `None` erhalten.
+fn read_reg_optional(t: &RuidaTransport, addr: u16) -> Result<Option<i64>, DriverError> {
+    let resp = t.query(&cmd_read_reg(addr)).map_err(to_driver_err)?;
+    if resp.len() < 9 || resp[0] != 0xDA || resp[1] != 0x01 {
+        return Err(DriverError::Transport(
+            "unerwartete Settings-Antwort".into(),
+        ));
+    }
+    let bytes = &resp[4..9];
+    if bytes == [0x0f, 0x11, 0x64, 0x00, 0x00] {
+        return Ok(None);
+    }
+    Ok(Some(decode_value(bytes) as i64))
 }
 
 /// Verschiebt Rahmenpunkte (µm) so, dass der `anchor`-Punkt ihrer BBox auf
