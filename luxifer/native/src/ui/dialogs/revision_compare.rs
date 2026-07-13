@@ -12,13 +12,13 @@ pub(in crate::ui) enum RevisionComparisonOutcome {
 }
 
 pub(in crate::ui) fn revision_comparison_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     state: &RevisionComparisonState,
     asset_thumbnails: &std::collections::BTreeMap<String, egui::TextureHandle>,
 ) -> RevisionComparisonOutcome {
     let mut open = true;
     let mut outcome = RevisionComparisonOutcome::None;
-    let screen = ctx.screen_rect().size();
+    let screen = root_ui.max_rect().size();
     egui::Window::new("Projektänderungen")
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -26,7 +26,7 @@ pub(in crate::ui) fn revision_comparison_window(
         .default_size([screen.x * 0.78, screen.y * 0.72])
         .open(&mut open)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             let comparison = &state.comparison;
             ui.heading(&comparison.entry.project_name);
             ui.weak(format!(
@@ -107,7 +107,7 @@ pub(in crate::ui) fn revision_comparison_window(
                 }
             });
         });
-    if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if !open || root_ui.input(|input| input.key_pressed(egui::Key::Escape)) {
         RevisionComparisonOutcome::Close
     } else {
         outcome

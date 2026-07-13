@@ -39,7 +39,7 @@ pub(super) fn layers_panel(ui: &mut egui::Ui, rows: &[LayerRow]) -> Vec<UiAction
     for i in (0..n).rev() {
         let row = &rows[i];
         egui::Frame::group(ui.style())
-            .inner_margin(egui::Margin::same(10.0))
+            .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (rect, resp) =

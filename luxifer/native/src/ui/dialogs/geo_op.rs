@@ -9,7 +9,7 @@ use super::super::state::{GeoOpDialogState, GeoOpKind};
 use super::DialogOutcome;
 
 pub(in crate::ui) fn geo_op_dialog_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     st: &mut GeoOpDialogState,
 ) -> DialogOutcome {
     let mut outcome = DialogOutcome::None;
@@ -24,7 +24,7 @@ pub(in crate::ui) fn geo_op_dialog_window(
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             ui.set_min_width(300.0);
             match st.kind {
                 GeoOpKind::Boolean => {

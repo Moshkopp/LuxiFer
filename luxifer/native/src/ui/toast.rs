@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use egui::{Align2, Color32, RichText, Rounding, Stroke};
+use egui::{Align2, Color32, CornerRadius, RichText, Stroke};
 
 /// Phasen der Lebensdauer in Sekunden.
 const SLIDE_IN: f32 = 0.25;
@@ -80,7 +80,7 @@ impl Toasts {
 
     /// Zeichnet alle aktiven Toasts (Aufruf am Ende von `ui::build`, damit sie
     /// über den Panels liegen) und entfernt abgelaufene.
-    pub fn show(&mut self, ctx: &egui::Context) {
+    pub fn show(&mut self, root_ui: &mut egui::Ui) {
         let now = Instant::now();
         self.items
             .retain(|t| now.duration_since(t.born).as_secs_f32() < SLIDE_IN + HOLD + SLIDE_OUT);
@@ -90,8 +90,8 @@ impl Toasts {
 
         // Unter der Topbar beginnen (available_rect klammert die Panels aus),
         // horizontal aber am echten Fensterrand hereinfahren.
-        let top = ctx.available_rect().top() + MARGIN;
-        let right = ctx.screen_rect().right() - MARGIN;
+        let top = root_ui.available_rect_before_wrap().top() + MARGIN;
+        let right = root_ui.max_rect().right() - MARGIN;
 
         // Panel-Fläche des Themes (apply_theme), leicht durchscheinend.
         let fill = Color32::from_rgba_unmultiplied(0x1c, 0x1f, 0x26, 0xf0);
@@ -115,12 +115,12 @@ impl Toasts {
                 .interactable(false)
                 .pivot(Align2::RIGHT_TOP)
                 .fixed_pos(egui::pos2(x, y))
-                .show(ctx, |ui| {
-                    egui::Frame::none()
+                .show(root_ui, |ui| {
+                    egui::Frame::new()
                         .fill(fill)
                         .stroke(Stroke::new(1.5, color.gamma_multiply(0.6)))
-                        .rounding(Rounding::same(10.0))
-                        .inner_margin(egui::Margin::symmetric(16.0, 12.0))
+                        .corner_radius(CornerRadius::same(10))
+                        .inner_margin(egui::Margin::symmetric(16, 12))
                         .show(ui, |ui| {
                             ui.set_max_width(WIDTH);
                             ui.horizontal(|ui| {
@@ -138,6 +138,6 @@ impl Toasts {
             y += response.rect.height() + 8.0;
         }
         // Animation läuft — bis alle Toasts weg sind weiterzeichnen.
-        ctx.request_repaint();
+        root_ui.request_repaint();
     }
 }

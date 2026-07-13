@@ -19,7 +19,7 @@ pub(in crate::ui) enum SettingsOutcome {
 }
 
 pub(in crate::ui) fn settings_dialog_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     st: &mut SettingsDialogState,
 ) -> SettingsOutcome {
     let mut outcome = SettingsOutcome::None;
@@ -31,13 +31,13 @@ pub(in crate::ui) fn settings_dialog_window(
         .fixed_size([660.0, 430.0])
         .open(&mut open)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             let body_height = ui.available_height() - 44.0;
             ui.horizontal(|ui| {
-                egui::Frame::none()
+                egui::Frame::new()
                     .fill(ui.visuals().extreme_bg_color)
-                    .rounding(egui::Rounding::same(8.0))
-                    .inner_margin(egui::Margin::same(8.0))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
                         ui.set_width(130.0);
                         ui.set_height(body_height - 16.0);
@@ -50,7 +50,7 @@ pub(in crate::ui) fn settings_dialog_window(
                                 if ui
                                     .add_sized(
                                         [ui.available_width(), 26.0],
-                                        egui::SelectableLabel::new(st.section == section, label),
+                                        egui::Button::selectable(st.section == section, label),
                                     )
                                     .clicked()
                                 {
@@ -98,7 +98,9 @@ pub(in crate::ui) fn settings_dialog_window(
     if !open {
         outcome = SettingsOutcome::Cancel;
     }
-    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && ctx.memory(|m| m.focused().is_none()) {
+    if root_ui.input(|i| i.key_pressed(egui::Key::Escape))
+        && root_ui.memory(|m| m.focused().is_none())
+    {
         outcome = SettingsOutcome::Cancel;
     }
     outcome

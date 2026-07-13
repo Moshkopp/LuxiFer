@@ -27,12 +27,12 @@ pub(super) use text::text_dialog_window;
 
 /// Einheitliche modale Abdunklung hinter allen Dialogen. Die Fläche fängt
 /// zugleich Interaktionen mit der darunterliegenden Anwendung ab.
-pub(super) fn modal_backdrop(ctx: &egui::Context, alpha: u8) {
-    let screen = ctx.screen_rect();
+pub(super) fn modal_backdrop(root_ui: &mut egui::Ui, alpha: u8) {
+    let screen = root_ui.max_rect();
     egui::Area::new(egui::Id::new("modal_backdrop"))
         .order(egui::Order::Middle)
         .fixed_pos(screen.min)
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, screen.size());
             ui.allocate_rect(rect, egui::Sense::click_and_drag());
             ui.painter()

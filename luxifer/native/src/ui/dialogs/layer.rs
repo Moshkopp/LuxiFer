@@ -12,7 +12,7 @@ use super::DialogOutcome;
 /// Zeichnet das Fenster auf `p` (den kurzlebigen Entwurf) und meldet, ob der
 /// Nutzer übernehmen/abbrechen will. Keine Mutation außerhalb des Entwurfs.
 pub(in crate::ui) fn layer_dialog_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     p: &mut LayerParams,
 ) -> DialogOutcome {
     use luxifer_core::LayerMode;
@@ -22,7 +22,7 @@ pub(in crate::ui) fn layer_dialog_window(
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             ui.set_min_width(340.0);
             let is_image = p.mode == LayerMode::Image;
 

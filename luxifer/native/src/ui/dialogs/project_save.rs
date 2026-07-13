@@ -8,7 +8,7 @@ use crate::ui::state::ProjectSaveDialogState;
 use super::DialogOutcome;
 
 pub(in crate::ui) fn project_save_dialog_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     st: &mut ProjectSaveDialogState,
 ) -> DialogOutcome {
     let mut outcome = DialogOutcome::None;
@@ -17,7 +17,7 @@ pub(in crate::ui) fn project_save_dialog_window(
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             ui.set_min_width(360.0);
 
             ui.label("Name");

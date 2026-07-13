@@ -55,6 +55,7 @@ fn material_card(ui: &mut egui::Ui, material: PreviewMaterial, active: bool) -> 
             rect,
             6.0,
             egui::Stroke::new(1.5, ui.visuals().selection.stroke.color),
+            egui::StrokeKind::Inside,
         );
     }
     // Muster links: Untergrund mit einer Brennlinie darüber.

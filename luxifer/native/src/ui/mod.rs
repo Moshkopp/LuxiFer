@@ -48,9 +48,9 @@ pub(super) fn c32(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
-pub fn build(ctx: &egui::Context, app: &mut App) {
+pub fn build(ui: &mut egui::Ui, app: &mut App) {
     use crate::tools::View;
-    apply_theme(ctx, &app.ui_settings.theme);
+    apply_theme(ui, &app.ui_settings.theme);
 
     // Oben: Reiter | Undo/Redo + Datei-Aktionen | Projektname.
     let view = app.view;
@@ -64,8 +64,8 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         .iter()
         .filter(|entry| entry.status == luxifer_application::InboxStatus::PendingReview)
         .count();
-    let topbar_actions = egui::TopBottomPanel::top("topbar")
-        .show(ctx, |ui| {
+    let topbar_actions = egui::Panel::top("topbar")
+        .show(ui, |ui| {
             topbar::topbar(ui, view, &project_name, inbox_count)
         })
         .inner;
@@ -77,8 +77,8 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         let code = error.code().to_string();
         let message = error.message().to_string();
         let details = error.details().map(|d| d.to_string());
-        let actions = egui::TopBottomPanel::top("application_error")
-            .show(ctx, |ui| {
+        let actions = egui::Panel::top("application_error")
+            .show(ui, |ui| {
                 status::error_banner(ui, &message, &code, details.as_deref())
             })
             .inner;
@@ -92,8 +92,8 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // UiAction-Grenze: Das Panel liefert Absichten, der Root führt sie aus.
     if app.view == View::Design {
         let selection = app.selection_count();
-        let actions = egui::TopBottomPanel::top("arrange")
-            .show(ctx, |ui| {
+        let actions = egui::Panel::top("arrange")
+            .show(ui, |ui| {
                 ui.add_space(3.0);
                 let a = arrange::arrange_bar(ui, selection);
                 ui.add_space(3.0);
@@ -107,7 +107,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
 
     // Statuszeile unten (rein lesend). Meldungen laufen über die Toasts.
     let (fps, tool_label, shapes) = (app.fps(), app.canvas.tool.label(), app.session.shapes.len());
-    egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+    egui::Panel::bottom("status").show(ui, |ui| {
         status::status_bar(ui, fps, tool_label, shapes);
     });
 
@@ -126,7 +126,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             let asset_import_pending = app.asset_import_pending;
             let browser = &mut app.project_browser;
             let actions = egui::CentralPanel::default()
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     project::project_browser(
                         ui,
                         browser,
@@ -148,15 +148,15 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             // Preview-Vertex-Aufbau im selben Frame NACH der UI — solange sie
             // fehlt, einmal nachzeichnen lassen.
             if app.preview_legend().is_none() {
-                ctx.request_repaint();
+                ui.request_repaint();
             }
             let material = app.preview_material;
             let show_travel = app.preview_show_travel;
-            let right = egui::SidePanel::right("preview_panel")
-                .default_width(240.0)
-                .width_range(200.0..=320.0)
+            let right = egui::Panel::right("preview_panel")
+                .default_size(240.0)
+                .size_range(200.0..=320.0)
                 .resizable(true)
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     preview::preview_panel(ui, material, show_travel, app.preview_legend())
                 });
             app.right_w = right.response.rect.width();
@@ -173,11 +173,11 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                 // Links: Ebenenliste + Positionsfreigabe in eigenem Panel —
                 // bei vielen Ebenen teilt sie sich sonst gequetscht die rechte
                 // Spalte mit dem Laser-Bedienpanel.
-                let left = egui::SidePanel::left("laser_layers")
-                    .default_width(300.0)
-                    .width_range(260.0..=420.0)
+                let left = egui::Panel::left("laser_layers")
+                    .default_size(300.0)
+                    .size_range(260.0..=420.0)
                     .resizable(true)
-                    .show(ctx, |ui| {
+                    .show(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
@@ -197,14 +197,16 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                     app.dispatch(action);
                 }
             } else {
-                let left = egui::SidePanel::left("tools")
+                let left = egui::Panel::left("tools")
                     // Zwei 34-pt-Buttons + Abstand + Panel-Innenränder
                     // brauchen bei DPI-Rundung etwas Reserve. 88 pt lagen
                     // exakt auf der rechnerischen Untergrenze und schnitten
                     // die rechte Buttonkante optisch an.
-                    .exact_width(100.0)
+                    .default_size(100.0)
+                    .min_size(100.0)
+                    .max_size(100.0)
                     .resizable(false)
-                    .show(ctx, |ui| tools::tools_panel(ui, cur_tool));
+                    .show(ui, |ui| tools::tools_panel(ui, cur_tool));
                 app.left_w = left.response.rect.width();
                 for action in left.inner {
                     app.dispatch(action);
@@ -222,11 +224,11 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             // Der Inspector-Inhalt ist länger als kleine Fenster: vertikal
             // scrollen, ohne die Breite schrumpfen zu lassen (auto_shrink
             // false hält die Zeilen exakt auf Panelbreite).
-            let right = egui::SidePanel::right("inspector")
-                .default_width(340.0)
-                .width_range(300.0..=460.0)
+            let right = egui::Panel::right("inspector")
+                .default_size(340.0)
+                .size_range(300.0..=460.0)
                 .resizable(true)
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
@@ -249,7 +251,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             // Canvas-Aktion statt eines separaten UI-Bereichs.
             if !is_laser {
                 let accent = app.accent;
-                let canvas_rect = ctx.available_rect();
+                let canvas_rect = ui.available_rect_before_wrap();
 
                 // Polygonvarianten schweben oben mittig über der Zeichenfläche
                 // und verändern dadurch weder Header- noch Canvas-Geometrie.
@@ -262,7 +264,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                             canvas_rect.center().x,
                             canvas_rect.top() + ruler::TOP_THICKNESS + 16.0,
                         ))
-                        .show(ctx, |ui| palette::shape_picker(ui, active_shape))
+                        .show(ui, |ui| palette::shape_picker(ui, active_shape))
                         .inner;
                     for action in actions {
                         app.dispatch(action);
@@ -276,7 +278,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
                         canvas_rect.center().x,
                         canvas_rect.bottom() - 16.0,
                     ))
-                    .show(ctx, |ui| palette::palette_panel(ui, accent))
+                    .show(ui, |ui| palette::palette_panel(ui, accent))
                     .inner;
                 for action in actions {
                     app.dispatch(action);
@@ -294,7 +296,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             .map(|p| p.bed_mm)
             .unwrap_or((app.session.bed_w_mm, app.session.bed_h_mm));
         ruler::rulers(
-            ctx,
+            ui,
             &app.canvas.cam,
             app.canvas.cursor,
             app.ui_settings.theme.accent.hue,
@@ -323,14 +325,14 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             .as_ref()
             .map(|state| state.draft.modal_backdrop_alpha)
             .unwrap_or(app.ui_settings.modal_backdrop_alpha);
-        dialogs::modal_backdrop(ctx, alpha);
+        dialogs::modal_backdrop(ui, alpha);
     }
 
     // Text-Dialog: Entwurf als &mut, Font-Namen als reine Anzeigeliste.
     if app.text_dialog.is_some() {
         let font_names: Vec<String> = app.fonts.iter().map(|f| f.name.clone()).collect();
         let state = app.text_dialog.as_mut().unwrap();
-        match dialogs::text_dialog_window(ctx, state, &font_names) {
+        match dialogs::text_dialog_window(ui, state, &font_names) {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => {
                 if app.commit_text() {
@@ -344,7 +346,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Layer-Dialog: der Entwurf wird als &mut gereicht, der Root behandelt das
     // Ergebnis (Übernahme über die validierende Session bzw. Verwerfen).
     if let Some(state) = app.layer_dialog.as_mut() {
-        match dialogs::layer_dialog_window(ctx, &mut state.params) {
+        match dialogs::layer_dialog_window(ui, &mut state.params) {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => {
                 if app.commit_layer_dialog() {
@@ -358,7 +360,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Bildparameter-Dialog: Entwurf als &mut; Speichern über die validierende
     // Session, Abbrechen verwirft.
     if let Some(state) = app.image_dialog.as_mut() {
-        match dialogs::image_dialog_window(ctx, state) {
+        match dialogs::image_dialog_window(ui, state) {
             dialogs::ImageDialogOutcome::None => {}
             dialogs::ImageDialogOutcome::Save => {
                 if app.commit_image_dialog() {
@@ -375,7 +377,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Geometrie-Parameterdialog (Boolean/Offset/Fillet): Entwurf als &mut,
     // Ausführung über die Session.
     if let Some(st) = app.geo_op_dialog.as_mut() {
-        match dialogs::geo_op_dialog_window(ctx, st) {
+        match dialogs::geo_op_dialog_window(ui, st) {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => {
                 if app.commit_geo_op() {
@@ -389,7 +391,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Softwareweite Einstellungen. Geräteprofile leben getrennt im Manager.
     if app.settings_dialog.is_some() {
         let st = app.settings_dialog.as_mut().unwrap();
-        match dialogs::settings_dialog_window(ctx, st) {
+        match dialogs::settings_dialog_window(ui, st) {
             dialogs::SettingsOutcome::None => {}
             dialogs::SettingsOutcome::Commit => {
                 if app.commit_settings_dialog() {
@@ -410,7 +412,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 ui.label("Charon ist aktiviert, aber derzeit nicht erreichbar.");
                 ui.label("Eine direkte Ethernet-Verbindung kann mit einem anderen Arbeitsplatz kollidieren.");
                 ui.add_space(10.0);
@@ -439,7 +441,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 ui.colored_label(
                     ui.visuals().error_fg_color,
                     "Die letzte bekannte Lease war nicht sicher untätig.",
@@ -465,7 +467,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
         let registry = app.laser_backend.registry.clone();
         let outcome = {
             let state = app.laser_manager.as_mut().unwrap();
-            dialogs::laser_manager_window(ctx, state, &registry)
+            dialogs::laser_manager_window(ui, state, &registry)
         };
         match outcome {
             dialogs::LaserManagerOutcome::None => {}
@@ -481,7 +483,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
 
     if let Some(state) = app.revision_comparison.as_ref() {
         let revision_id = state.comparison.entry.revision_id.clone();
-        match dialogs::revision_comparison_window(ctx, state, &app.asset_thumbnails) {
+        match dialogs::revision_comparison_window(ui, state, &app.asset_thumbnails) {
             dialogs::RevisionComparisonOutcome::None => {}
             dialogs::RevisionComparisonOutcome::Close => app.revision_comparison = None,
             dialogs::RevisionComparisonOutcome::KeepLocal => {
@@ -498,7 +500,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // „Neues Projekt"-Maske: Entwurf als &mut; Anlegen über den validierenden
     // ProjectService (leerer Name → Fehler, Maske bleibt offen).
     if let Some(st) = app.project_save_dialog.as_mut() {
-        match dialogs::project_save_dialog_window(ctx, st) {
+        match dialogs::project_save_dialog_window(ui, st) {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => {
                 if app.commit_project_save_dialog() {
@@ -521,7 +523,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
             PendingProjectAction::OpenVersion(_) => "Version laden",
             PendingProjectAction::DeleteVersion(_) => "Löschen der aktuellen Version",
         };
-        match dialogs::guard_dialog(ctx, label) {
+        match dialogs::guard_dialog(ui, label) {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => app.confirm_pending_project(),
             dialogs::DialogOutcome::Cancel => app.pending_project = None,
@@ -531,7 +533,7 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     // Dirty-Guard beim Schließen: Bestätigung, bevor das Programm mit
     // ungespeicherten Änderungen beendet wird.
     if app.close_pending {
-        match dialogs::guard_dialog(ctx, "Beenden") {
+        match dialogs::guard_dialog(ui, "Beenden") {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => app.confirm_close(),
             dialogs::DialogOutcome::Cancel => app.close_pending = false,
@@ -539,11 +541,11 @@ pub fn build(ctx: &egui::Context, app: &mut App) {
     }
 
     // Toasts zuletzt, damit sie über allen Panels liegen.
-    app.toasts.show(ctx);
+    app.toasts.show(ui);
 
     // Start-Splash zuoberst (Tooltip-Ebene); nach Ablauf wegwerfen.
     if let Some(splash) = app.splash.as_mut() {
-        if !splash.show(ctx, app.ui_settings.splash_ms) {
+        if !splash.show(ui, app.ui_settings.splash_ms) {
             app.splash = None;
         }
     }
@@ -686,8 +688,8 @@ fn scale_rgb(hue: [u8; 3], f: f32) -> Color32 {
 /// Glas/Blur (das kann egui nicht), aber mit denselben Farbwerten.
 /// Akzent- und Buttonfarbe kommen aus den GUI-Settings (ADR 0002); mit den
 /// Default-Settings entspricht das exakt dem bisherigen festen Look.
-fn apply_theme(ctx: &egui::Context, theme: &luxifer_core::Theme) {
-    use egui::{Rounding, Stroke};
+fn apply_theme(ui: &mut egui::Ui, theme: &luxifer_core::Theme) {
+    use egui::{CornerRadius, Stroke};
     let bg = Color32::from_rgb(0x10, 0x12, 0x16); // --bg
     let panel = Color32::from_rgb(0x17, 0x1a, 0x20); // --panel
     let panel2 = Color32::from_rgb(0x1c, 0x1f, 0x26); // --panel-2 (Inputs/Kacheln)
@@ -713,43 +715,42 @@ fn apply_theme(ctx: &egui::Context, theme: &luxifer_core::Theme) {
     v.faint_bg_color = panel2;
     v.override_text_color = Some(text);
     v.window_stroke = Stroke::new(1.0, border);
-    v.window_rounding = Rounding::same(12.0);
+    v.window_corner_radius = CornerRadius::same(12);
     v.selection.bg_fill = accent_sel;
     v.selection.stroke = Stroke::new(1.0, accent);
     v.hyperlink_color = accent;
 
-    let r = Rounding::same(8.0);
+    let r = CornerRadius::same(8);
     // Ruhende Widgets: neutrale Fläche, weiche Kante.
     v.widgets.noninteractive.bg_fill = panel;
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, muted);
-    v.widgets.noninteractive.rounding = r;
+    v.widgets.noninteractive.corner_radius = r;
     v.widgets.inactive.bg_fill = button_fill;
     v.widgets.inactive.weak_bg_fill = button_fill;
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
-    v.widgets.inactive.rounding = r;
+    v.widgets.inactive.corner_radius = r;
     v.widgets.inactive.bg_stroke = Stroke::new(1.0, border);
     // Hover: leicht anheben.
     v.widgets.hovered.bg_fill = button_hover;
     v.widgets.hovered.weak_bg_fill = button_hover;
     v.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.5));
-    v.widgets.hovered.rounding = r;
+    v.widgets.hovered.corner_radius = r;
     // Aktiv/gedrückt: Akzent trägt.
     v.widgets.active.bg_fill = accent_fill;
     v.widgets.active.weak_bg_fill = accent_fill;
     v.widgets.active.fg_stroke = Stroke::new(1.0, text);
     v.widgets.active.bg_stroke = Stroke::new(1.0, accent);
-    v.widgets.active.rounding = r;
+    v.widgets.active.corner_radius = r;
     // „open" (ComboBox aufgeklappt etc.)
     v.widgets.open.bg_fill = button_fill;
-    v.widgets.open.rounding = r;
+    v.widgets.open.corner_radius = r;
 
-    ctx.set_visuals(v);
+    *ui.visuals_mut() = v;
 
     // Etwas mehr Luft in Abständen (näher am Svelte-Spacing).
-    let mut style = (*ctx.style()).clone();
+    let style = ui.style_mut();
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(10.0, 6.0);
-    style.spacing.window_margin = egui::Margin::same(12.0);
-    ctx.set_style(style);
+    style.spacing.window_margin = egui::Margin::same(12);
 }

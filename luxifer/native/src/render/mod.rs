@@ -87,8 +87,11 @@ impl Renderer {
     }
 
     pub fn new(gpu: Gpu, egui_state: egui_winit::State) -> Self {
-        let egui_renderer =
-            egui_wgpu::Renderer::new(&gpu.device, gpu.config.format, None, 1, false);
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &gpu.device,
+            gpu.config.format,
+            egui_wgpu::RendererOptions::default(),
+        );
         Self {
             gpu,
             egui_state,
@@ -298,13 +301,17 @@ impl Renderer {
         self.gpu.upload_overlay(&overlay);
 
         let frame = match self.gpu.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(_) => {
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.gpu
                     .surface
                     .configure(&self.gpu.device, &self.gpu.config);
                 return;
             }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => return,
         };
         let view = frame.texture.create_view(&Default::default());
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
@@ -333,6 +340,7 @@ impl Renderer {
                 label: Some("frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -347,6 +355,7 @@ impl Renderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             // Bettrahmen zuerst, darüber das viewportfüllende Gitter. Danach
             // Bildtexturen — im Preview die verarbeiteten

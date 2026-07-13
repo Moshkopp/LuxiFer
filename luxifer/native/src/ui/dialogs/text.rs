@@ -7,7 +7,7 @@ use super::DialogOutcome;
 /// Anzeigeliste der Systemfonts (Index korrespondiert mit `st.font_idx`).
 /// Meldet über `DialogOutcome`, ob der Nutzer einfügen/abbrechen will.
 pub(in crate::ui) fn text_dialog_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     st: &mut TextDialogState,
     font_names: &[String],
 ) -> DialogOutcome {
@@ -17,7 +17,7 @@ pub(in crate::ui) fn text_dialog_window(
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             ui.set_min_width(340.0);
             ui.label("Text");
             ui.add(

@@ -328,7 +328,7 @@ impl App {
     /// aktives Feld ließe sonst Delete/Werkzeugwechsel/Undo durch und würde die
     /// Szene hinter dem Dialog verändern.
     fn input_blocked(&self) -> bool {
-        self.egui_ctx.wants_keyboard_input() || self.modal_open()
+        self.egui_ctx.egui_wants_keyboard_input() || self.modal_open()
     }
 
     /// Ob gerade ein modaler Dialog offen ist. Solange das gilt, ignoriert der
@@ -543,7 +543,7 @@ impl App {
         // egui-Frame bauen (Panels): die Closure braucht `&mut App`, daher hier
         // im Root. Der egui-Kontext ist ein billiger Arc-Clone.
         let raw = self.renderer.take_egui_input(&self.window);
-        let mut full = self.egui_ctx.clone().run(raw, |ctx| ui::build(ctx, self));
+        let mut full = self.egui_ctx.clone().run_ui(raw, |ui| ui::build(ui, self));
         let shapes = std::mem::take(&mut full.shapes);
         let tris = self.egui_ctx.tessellate(shapes, full.pixels_per_point);
 

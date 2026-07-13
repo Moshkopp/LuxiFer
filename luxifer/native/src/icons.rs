@@ -34,6 +34,7 @@ pub fn draw(p: &Painter, rect: Rect, name: &str, color: Color32) {
             Rect::from_min_size(pt(x, y), Vec2::new(ww * s, hh * s)),
             2.0,
             st,
+            egui::StrokeKind::Inside,
         );
     };
     let circ = |cx: f32, cy: f32, r: f32| {

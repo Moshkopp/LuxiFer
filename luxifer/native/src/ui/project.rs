@@ -92,6 +92,7 @@ pub(super) fn draw_preview(
         egui::Rect::from_min_size(origin, egui::vec2(bw * s, bh * s)),
         0.0,
         egui::Stroke::new(1.0, ui.visuals().weak_text_color()),
+        egui::StrokeKind::Inside,
     );
 
     for image in &preview.images {
@@ -222,14 +223,14 @@ pub(super) fn project_browser(
     }
 
     // Master-Detail: Liste links, Detailbereich rechts.
-    egui::SidePanel::left("project_list")
+    egui::Panel::left("project_list")
         .resizable(true)
-        .default_width(260.0)
-        .width_range(200.0..=380.0)
-        .show_inside(ui, |ui| {
+        .default_size(260.0)
+        .size_range(200.0..=380.0)
+        .show(ui, |ui| {
             project_list(ui, browser, projects, open_name, &mut actions);
         });
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         detail_pane(ui, browser, asset_thumbnails, open_name, &mut actions);
     });
 
@@ -489,7 +490,7 @@ fn project_list(
             } else {
                 p.name.clone()
             };
-            let label = egui::SelectableLabel::new(is_selected, RichText::new(title).strong());
+            let label = egui::Button::selectable(is_selected, RichText::new(title).strong());
             let resp = ui.add_sized([ui.available_width(), 20.0], label);
             if !p.modified_at.is_empty() {
                 ui.weak(RichText::new(&p.modified_at).small());

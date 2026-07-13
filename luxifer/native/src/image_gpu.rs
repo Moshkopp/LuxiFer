@@ -132,15 +132,15 @@ impl ImageStore {
         });
         let pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&uni_layout, &tex_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&uni_layout), Some(&tex_layout)],
+            immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("image"),
             layout: Some(&pl_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs",
+                entry_point: Some("vs"),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<ImgVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -150,7 +150,7 @@ impl ImageStore {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs",
+                entry_point: Some("fs"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -161,7 +161,7 @@ impl ImageStore {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {

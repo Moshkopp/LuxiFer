@@ -19,7 +19,7 @@ pub(in crate::ui) enum ImageDialogOutcome {
 }
 
 pub(in crate::ui) fn image_dialog_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     st: &mut ImageDialogState,
 ) -> ImageDialogOutcome {
     let mut outcome = ImageDialogOutcome::None;
@@ -29,7 +29,7 @@ pub(in crate::ui) fn image_dialog_window(
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             ui.set_min_width(340.0);
             egui::Grid::new("image_cfg")
                 .num_columns(2)

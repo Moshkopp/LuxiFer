@@ -23,13 +23,13 @@ pub(in crate::ui) enum LaserManagerOutcome {
 }
 
 pub(in crate::ui) fn laser_manager_window(
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     state: &mut LaserManagerState,
     registry: &LaserRegistry,
 ) -> LaserManagerOutcome {
     let mut outcome = LaserManagerOutcome::None;
     let mut open = true;
-    let window_size = ctx.screen_rect().size();
+    let window_size = root_ui.max_rect().size();
     let dialog_size = egui::vec2(window_size.x * 0.5, window_size.y * 0.9);
 
     egui::Window::new("Laser verwalten")
@@ -39,7 +39,7 @@ pub(in crate::ui) fn laser_manager_window(
         .fixed_size(dialog_size)
         .open(&mut open)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             let body_height = (ui.available_height() - 46.0).max(380.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(ui.available_width(), body_height),
@@ -72,7 +72,7 @@ pub(in crate::ui) fn laser_manager_window(
                 }
             });
         });
-    if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if !open || root_ui.input(|input| input.key_pressed(egui::Key::Escape)) {
         LaserManagerOutcome::Close
     } else {
         outcome
@@ -111,7 +111,7 @@ fn profile_list(
                     if ui
                         .add_sized(
                             [ui.available_width(), 44.0],
-                            egui::SelectableLabel::new(selected, label),
+                            egui::Button::selectable(selected, label),
                         )
                         .clicked()
                     {
@@ -166,7 +166,7 @@ fn tab(
     enabled: bool,
 ) {
     if ui
-        .add_enabled(enabled, egui::SelectableLabel::new(state.tab == tab, label))
+        .add_enabled(enabled, egui::Button::selectable(state.tab == tab, label))
         .clicked()
     {
         state.tab = tab;
@@ -303,7 +303,7 @@ fn calibration(ui: &mut egui::Ui, state: &mut LaserManagerState) {
     }
 }
 
-fn locale_number(ui: &mut egui::Ui, salt: impl std::hash::Hash, value: &mut f64) {
+fn locale_number(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debug, value: &mut f64) {
     let id = ui.make_persistent_id(salt);
     let mut text = ui
         .data_mut(|data| data.get_temp::<String>(id))

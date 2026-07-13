@@ -37,22 +37,22 @@ fn tick_interval_mm(pt_per_mm: f32) -> f64 {
 /// Zeichnet beide Lineale in den Canvas-Bereich `rect` (Punkte).
 /// `cursor_px` = Mausposition in physischen Pixeln (Canvas-Koordinaten).
 pub(super) fn rulers(
-    ctx: &egui::Context,
+    ui: &mut egui::Ui,
     cam: &Camera,
     cursor_px: [f32; 2],
     accent: [u8; 3],
     origin: luxifer_core::BedOrigin,
     bed: (f64, f64),
 ) {
-    let rect = ctx.available_rect();
+    let rect = ui.available_rect_before_wrap();
     if rect.width() < 2.0 * LEFT_THICKNESS || rect.height() < 2.0 * TOP_THICKNESS {
         return;
     }
-    let painter = ctx.layer_painter(egui::LayerId::new(
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
         egui::Order::Background,
         egui::Id::new("rulers"),
     ));
-    let ppp = ctx.pixels_per_point();
+    let ppp = ui.pixels_per_point();
     let pt_per_mm = cam.scale / ppp;
 
     let bg = Color32::from_rgb(0x17, 0x1a, 0x20);

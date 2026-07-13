@@ -31,6 +31,7 @@ pub(super) fn icon_button(
         7.0,
         bg,
         egui::Stroke::new(1.0, Color32::from_rgb(0x2a, 0x2e, 0x36)),
+        egui::StrokeKind::Inside,
     );
     let fg = if dim {
         Color32::from_rgb(0x9a, 0xa0, 0xa9)

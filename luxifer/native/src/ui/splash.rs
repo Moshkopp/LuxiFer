@@ -43,7 +43,7 @@ impl Splash {
 
     /// Zeichnet den Splash über allem. Liefert false, wenn er abgelaufen ist —
     /// der Root wirft ihn dann weg.
-    pub fn show(&mut self, ctx: &egui::Context, min_ms: u32) -> bool {
+    pub fn show(&mut self, ui: &mut egui::Ui, min_ms: u32) -> bool {
         let elapsed = self.start.elapsed().as_secs_f32();
         let total = (min_ms as f32 / 1000.0).max(RISE_S + FADE_S);
         if elapsed >= total {
@@ -56,11 +56,11 @@ impl Splash {
         let rise = (1.0 - a_in) * 14.0;
 
         // Tooltip-Ebene: liegt über Panels, Dialogen UND Toasts.
-        let painter = ctx.layer_painter(egui::LayerId::new(
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(
             egui::Order::Tooltip,
             egui::Id::new("splash"),
         ));
-        let screen = ctx.screen_rect();
+        let screen = ui.max_rect();
         // Backdrop: deckt die App ab, blendet mit.
         painter.rect_filled(
             screen,
@@ -126,6 +126,7 @@ impl Splash {
                 1.0,
                 faded(Color32::from_rgba_unmultiplied(255, 255, 255, 31), alpha),
             ),
+            egui::StrokeKind::Inside,
         );
         let shine = Rect::from_min_max(
             Pos2::new(card.left() + card.width() * 0.12, card.top()),
@@ -152,7 +153,7 @@ impl Splash {
                 alpha,
             ),
         );
-        let texture = self.logo.get_or_insert_with(|| load_logo(ctx));
+        let texture = self.logo.get_or_insert_with(|| load_logo(ui.ctx()));
         painter.image(
             texture.id(),
             logo_rect,
@@ -206,7 +207,7 @@ impl Splash {
         );
 
         // Animation läuft — weiterzeichnen, bis der Splash vorbei ist.
-        ctx.request_repaint();
+        ui.request_repaint();
         true
     }
 }
