@@ -93,6 +93,10 @@ pub enum UiAction {
     ShowInboxComparison(String),
     /// Haupt-Ansicht (Reiter) wechseln.
     SelectView(View),
+    /// Projektansicht direkt mit dem globalen Asset-Katalog öffnen.
+    OpenAssetLibrary,
+    /// Projektansicht direkt mit den von Charon empfangenen Revisionen öffnen.
+    OpenCharonInbox,
     /// Material-Vorlage der Laser-Vorschau wählen.
     SelectPreviewMaterial(crate::canvas::scene::PreviewMaterial),
     /// Leerfahrten in der Vorschau ein-/ausblenden.

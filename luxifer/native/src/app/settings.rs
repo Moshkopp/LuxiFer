@@ -119,32 +119,21 @@ impl App {
             return false;
         };
         self.charon_status = match result {
+            super::charon::CharonWorkerResult::Syncing(connection) => {
+                CharonTestStatus::Syncing(connection)
+            }
             super::charon::CharonWorkerResult::Connected(connection, sync) => {
                 match sync {
                     Ok(report) => {
                         self.charon_sync_error = None;
-                        if report.uploaded > 0 {
-                            self.toasts.success(format!(
-                                "{} Projektrevision(en) an Charon übertragen.",
-                                report.uploaded
-                            ));
-                        }
                         if report.received > 0 {
                             self.refresh_project_inbox();
-                            self.toasts.success(format!(
-                                "{} neue Projektrevision(en) von Charon empfangen.",
-                                report.received
-                            ));
                         }
                         if report.assets_uploaded > 0 || report.assets_downloaded > 0 {
                             if report.assets_downloaded > 0 {
                                 self.refresh_asset_catalog();
                             }
                             self.image_dirty = true;
-                            self.toasts.success(format!(
-                                "Assets synchronisiert: {} hochgeladen, {} empfangen.",
-                                report.assets_uploaded, report.assets_downloaded
-                            ));
                         }
                     }
                     Err(message) => self.charon_sync_error = Some(message),

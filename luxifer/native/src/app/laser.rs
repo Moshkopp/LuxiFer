@@ -41,7 +41,7 @@ impl App {
             && self.laser_backend.active_uses_network()
             && !matches!(
                 self.charon_status,
-                crate::ui::CharonTestStatus::Connected(_)
+                crate::ui::CharonTestStatus::Connected(_) | crate::ui::CharonTestStatus::Syncing(_)
             )
         {
             self.laser_uncoordinated_confirm = true;

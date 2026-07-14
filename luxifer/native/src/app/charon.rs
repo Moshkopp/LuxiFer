@@ -22,6 +22,7 @@ enum WorkerCommand {
 }
 
 pub(super) enum CharonWorkerResult {
+    Syncing(CharonConnection),
     Connected(
         CharonConnection,
         Result<luxifer_application::CharonSyncReport, String>,
@@ -321,6 +322,15 @@ fn worker(command_rx: Receiver<WorkerCommand>, result_tx: Sender<CharonWorkerRes
                         {
                             event_cursor = 0;
                             server_instance = Some(connection.handshake.instance_id.clone());
+                        }
+                        if result_tx
+                            .send(CharonWorkerResult::Syncing(connection.clone()))
+                            .is_err()
+                        {
+                            return CharonWorkerResult::Connected(
+                                connection,
+                                Err("Charon-Statuskanal wurde geschlossen.".into()),
+                            );
                         }
                         let sync = luxifer_application::sync_assets(&current.url)
                             .and_then(|mut report| {

@@ -197,12 +197,23 @@ fn charon_section(
         CharonTestStatus::Idle => {
             ui.weak("Noch nicht getestet.");
         }
-        CharonTestStatus::Connected(connection) => {
+        CharonTestStatus::Syncing(connection) | CharonTestStatus::Connected(connection) => {
+            let syncing = matches!(state.charon_status, CharonTestStatus::Syncing(_));
             ui.colored_label(
-                egui::Color32::from_rgb(0x34, 0xd3, 0x99),
+                if syncing {
+                    egui::Color32::from_rgb(0xfb, 0x92, 0x3c)
+                } else {
+                    egui::Color32::from_rgb(0x34, 0xd3, 0x99)
+                },
                 format!(
-                    "Verbunden: Charon {} · Protokoll {}",
-                    connection.handshake.server_version, connection.handshake.protocol_version
+                    "{}: Charon {} · Protokoll {}",
+                    if syncing {
+                        "Synchronisiert"
+                    } else {
+                        "Verbunden"
+                    },
+                    connection.handshake.server_version,
+                    connection.handshake.protocol_version
                 ),
             );
             ui.weak(format!("Instanz: {}", connection.handshake.instance_id));

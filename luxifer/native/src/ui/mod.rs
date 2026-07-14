@@ -66,7 +66,14 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
         .count();
     let topbar_actions = egui::Panel::top("topbar")
         .show(ui, |ui| {
-            topbar::topbar(ui, view, &project_name, inbox_count)
+            topbar::topbar(
+                ui,
+                view,
+                &project_name,
+                inbox_count,
+                app.ui_settings.charon_enabled,
+                &app.charon_status,
+            )
         })
         .inner;
     for action in topbar_actions {

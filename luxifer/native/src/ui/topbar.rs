@@ -8,6 +8,7 @@
 use egui::RichText;
 
 use super::action::UiAction;
+use super::CharonTestStatus;
 use crate::tools::View;
 
 /// `view` = aktive Ansicht (Reiter-Markierung); `project_name` = Anzeige rechts.
@@ -16,6 +17,8 @@ pub(super) fn topbar(
     view: View,
     project_name: &str,
     inbox_count: usize,
+    charon_enabled: bool,
+    charon_status: &CharonTestStatus,
 ) -> Vec<UiAction> {
     let mut actions = Vec::new();
     ui.add_space(4.0);
@@ -87,6 +90,46 @@ pub(super) fn topbar(
             columns[2].with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("⚙").on_hover_text("Einstellungen").clicked() {
                     actions.push(UiAction::OpenSettings);
+                }
+                if charon_enabled {
+                    let (color, label, hint) = match charon_status {
+                        CharonTestStatus::Syncing(_) => (
+                            egui::Color32::from_rgb(0xfb, 0x92, 0x3c),
+                            "Charon · Sync",
+                            "Charon synchronisiert gerade",
+                        ),
+                        CharonTestStatus::Connected(_) => (
+                            egui::Color32::from_rgb(0x4a, 0xde, 0x80),
+                            "Charon · verbunden",
+                            "Charon ist verbunden",
+                        ),
+                        CharonTestStatus::Failed(_) => (
+                            ui.visuals().error_fg_color,
+                            "Charon · getrennt",
+                            "Charon ist nicht erreichbar",
+                        ),
+                        CharonTestStatus::Idle => (
+                            ui.visuals().weak_text_color(),
+                            "Charon · wartet",
+                            "Charon wartet auf die erste Verbindung",
+                        ),
+                    };
+                    if ui
+                        .add(egui::Button::new(
+                            RichText::new(format!("● {label}")).color(color),
+                        ))
+                        .on_hover_text(format!("{hint} · Charon-Eingang öffnen"))
+                        .clicked()
+                    {
+                        actions.push(UiAction::OpenCharonInbox);
+                    }
+                }
+                if ui
+                    .button("Assets")
+                    .on_hover_text("Asset-Bibliothek öffnen")
+                    .clicked()
+                {
+                    actions.push(UiAction::OpenAssetLibrary);
                 }
                 ui.label(RichText::new(project_name).weak());
             });

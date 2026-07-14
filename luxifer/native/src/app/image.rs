@@ -345,6 +345,9 @@ impl App {
         self.session_asset_context.insert(meta.id.clone());
         self.tag_asset_for_current_project(&meta.id);
         self.refresh_asset_catalog();
+        self.view = crate::tools::View::Design;
+        self.canvas.laser_editable_layers = None;
+        self.renderer.invalidate_scene();
         true
     }
 

@@ -287,13 +287,14 @@ fn assets_pane(
     }
 
     let card_width = 190.0;
+    let card_height = 250.0;
     let columns = ((ui.available_width() + 8.0) / (card_width + 8.0))
         .floor()
         .max(1.0) as usize;
     let row_count = reusable.len().div_ceil(columns);
     egui::ScrollArea::vertical()
         .id_salt("asset_catalog_cards")
-        .show_rows(ui, 220.0, row_count, |ui, rows| {
+        .show_rows(ui, card_height + 8.0, row_count, |ui, rows| {
             for row in rows {
                 ui.horizontal(|ui| {
                     for column in 0..columns {
@@ -301,19 +302,22 @@ fn assets_pane(
                         let Some(asset) = reusable.get(index) else {
                             break;
                         };
-                        let response = egui::Frame::group(ui.style())
-                            .show(ui, |ui| {
-                                ui.set_width(card_width);
-                                ui.set_height(202.0);
-                                if let Some(texture) = thumbnails.get(&asset.id) {
+                        let mut double_clicked = false;
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.set_min_size(egui::vec2(card_width, card_height));
+                            ui.set_max_height(card_height);
+                            ui.set_max_width(card_width);
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                let preview = if let Some(texture) = thumbnails.get(&asset.id) {
                                     ui.add(
                                         egui::Image::new(texture)
-                                            .fit_to_exact_size(egui::vec2(174.0, 112.0)),
-                                    );
+                                            .fit_to_exact_size(egui::vec2(174.0, 112.0))
+                                            .sense(egui::Sense::click()),
+                                    )
                                 } else {
-                                    let (rect, _) = ui.allocate_exact_size(
+                                    let (rect, response) = ui.allocate_exact_size(
                                         egui::vec2(174.0, 112.0),
-                                        egui::Sense::hover(),
+                                        egui::Sense::click(),
                                     );
                                     ui.painter().rect_filled(
                                         rect,
@@ -321,29 +325,52 @@ fn assets_pane(
                                         ui.visuals().faint_bg_color,
                                     );
                                     actions.push(UiAction::RequestAssetThumbnail(asset.id.clone()));
-                                }
-                                ui.strong(if asset.original_name.is_empty() {
-                                    &asset.id
-                                } else {
-                                    &asset.original_name
-                                });
-                                ui.weak(match asset.kind {
-                                    luxifer_core::AssetKind::Image => "Bild",
-                                    luxifer_core::AssetKind::SvgSource => "SVG",
-                                    luxifer_core::AssetKind::DxfSource => "DXF",
-                                    luxifer_core::AssetKind::Font => "Font",
-                                });
-                                if !asset.tags.is_empty() {
-                                    ui.weak(egui::RichText::new(asset.tags.join(" · ")).small());
-                                }
+                                    response
+                                };
+                                double_clicked |= preview.double_clicked();
+
+                                let metadata = ui
+                                    .allocate_ui_with_layout(
+                                        egui::vec2(174.0, 82.0),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            let display_name = if asset.original_name.is_empty() {
+                                                &asset.id
+                                            } else {
+                                                &asset.original_name
+                                            };
+                                            ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(display_name).strong(),
+                                                )
+                                                .truncate(),
+                                            )
+                                            .on_hover_text(display_name);
+                                            ui.weak(match asset.kind {
+                                                luxifer_core::AssetKind::Image => "Bild",
+                                                luxifer_core::AssetKind::SvgSource => "SVG",
+                                                luxifer_core::AssetKind::DxfSource => "DXF",
+                                                luxifer_core::AssetKind::Font => "Font",
+                                            });
+                                            if !asset.tags.is_empty() {
+                                                let tags = asset.tags.join(" · ");
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        egui::RichText::new(&tags).small().weak(),
+                                                    )
+                                                    .truncate(),
+                                                )
+                                                .on_hover_text(tags);
+                                            }
+                                        },
+                                    )
+                                    .response
+                                    .interact(egui::Sense::click());
+                                double_clicked |= metadata.double_clicked();
+
+                                let button_height = ui.spacing().interact_size.y;
+                                ui.add_space((ui.available_height() - button_height).max(0.0));
                                 ui.horizontal(|ui| {
-                                    if ui
-                                        .add_enabled(!import_pending, egui::Button::new("Einfügen"))
-                                        .clicked()
-                                    {
-                                        actions
-                                            .push(UiAction::ImportCatalogAsset(asset.id.clone()));
-                                    }
                                     if browser.confirm_delete_asset.as_deref()
                                         == Some(asset.id.as_str())
                                     {
@@ -356,19 +383,32 @@ fn assets_pane(
                                         if ui.button("Nein").clicked() {
                                             browser.confirm_delete_asset = None;
                                         }
-                                    } else if ui
-                                        .add_enabled(!import_pending, egui::Button::new("Löschen"))
-                                        .clicked()
-                                    {
-                                        browser.confirm_delete_asset = Some(asset.id.clone());
+                                    } else {
+                                        if ui
+                                            .add_enabled(
+                                                !import_pending,
+                                                egui::Button::new("Einfügen"),
+                                            )
+                                            .clicked()
+                                        {
+                                            actions.push(UiAction::ImportCatalogAsset(
+                                                asset.id.clone(),
+                                            ));
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                !import_pending,
+                                                egui::Button::new("Löschen"),
+                                            )
+                                            .clicked()
+                                        {
+                                            browser.confirm_delete_asset = Some(asset.id.clone());
+                                        }
                                     }
                                 });
-                            })
-                            .response
-                            .interact(egui::Sense::click())
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text("Doppelklick zum Einfügen");
-                        if response.double_clicked() && !import_pending {
+                            });
+                        });
+                        if double_clicked && !import_pending {
                             actions.push(UiAction::ImportCatalogAsset(asset.id.clone()));
                         }
                     }

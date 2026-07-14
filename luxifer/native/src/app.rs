@@ -446,6 +446,20 @@ impl App {
                 }
                 self.renderer.invalidate_scene();
             }
+            A::OpenAssetLibrary => {
+                self.view = crate::tools::View::Projekt;
+                self.project_browser.show_assets = true;
+                self.project_browser.show_inbox = false;
+                self.canvas.laser_editable_layers = None;
+                self.renderer.invalidate_scene();
+            }
+            A::OpenCharonInbox => {
+                self.view = crate::tools::View::Projekt;
+                self.project_browser.show_inbox = true;
+                self.project_browser.show_assets = false;
+                self.canvas.laser_editable_layers = None;
+                self.renderer.invalidate_scene();
+            }
             A::ToggleLaserEditLayer(index) => {
                 if let Some(editable) = self.canvas.laser_editable_layers.as_mut() {
                     if !editable.insert(index) {
