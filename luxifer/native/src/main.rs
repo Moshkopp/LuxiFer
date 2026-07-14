@@ -25,6 +25,15 @@ use winit::window::{Window, WindowId};
 use crate::app::App;
 use crate::gpu::Gpu;
 
+/// App-Icon einbetten und dekodieren — greift unter X11/Windows direkt; unter
+/// Wayland kommt das Icon stattdessen über app_id + .desktop-Datei.
+fn load_window_icon() -> Option<winit::window::Icon> {
+    let bytes = include_bytes!("../assets/icon/luxifer-512.png");
+    let img = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    winit::window::Icon::from_rgba(img.into_raw(), w, h).ok()
+}
+
 #[derive(Default)]
 struct Runner {
     app: Option<App>,
@@ -35,15 +44,23 @@ impl ApplicationHandler for Runner {
         if self.app.is_some() {
             return;
         }
-        let window = Arc::new(
-            el.create_window(
-                Window::default_attributes()
-                    .with_title("LuxiFer")
-                    .with_inner_size(winit::dpi::LogicalSize::new(1400, 880))
-                    .with_active(true),
-            )
-            .unwrap(),
-        );
+        let mut attrs = Window::default_attributes()
+            .with_title("LuxiFer")
+            .with_inner_size(winit::dpi::LogicalSize::new(1400, 880))
+            .with_active(true)
+            .with_window_icon(load_window_icon());
+        #[cfg(target_os = "linux")]
+        {
+            // Wayland zeigt Fenster-Icons nur über die app_id → .desktop-Datei
+            // (luxifer.desktop mit Icon=luxifer); ohne app_id gibt es das
+            // generische Compositor-Icon. Unter X11 entspricht das WM_CLASS.
+            use winit::platform::{
+                wayland::WindowAttributesExtWayland, x11::WindowAttributesExtX11,
+            };
+            attrs = WindowAttributesExtWayland::with_name(attrs, "luxifer", "luxifer");
+            attrs = WindowAttributesExtX11::with_name(attrs, "luxifer", "luxifer");
+        }
+        let window = Arc::new(el.create_window(attrs).unwrap());
         let gpu = pollster::block_on(Gpu::new(window.clone()));
         let mut app = App::new(window, gpu);
         // Ersten Frame sofort präsentieren und Redraw anfordern — sonst bleibt

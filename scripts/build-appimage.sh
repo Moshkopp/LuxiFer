@@ -72,8 +72,11 @@ rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin"
 
 install -Dm755 "$BUILD_DIR/$BINARY" "$APPDIR/usr/bin/$BINARY"
-install -Dm644 "$ROOT_DIR/luxifer/frontend/src-tauri/icons/icon.png" \
-  "$APPDIR/usr/share/icons/hicolor/512x512/apps/luxifer.png"
+# Größenspezifische Icon-Fassungen (16–32 minimal, ab 48 mit Flügeln).
+for size in 16 24 32 48 64 128 256 512; do
+  install -Dm644 "$ROOT_DIR/luxifer/native/assets/icon/luxifer-$size.png" \
+    "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps/luxifer.png"
+done
 
 mkdir -p "$APPDIR/usr/share/applications"
 cat >"$APPDIR/usr/share/applications/luxifer.desktop" <<EOF
@@ -85,7 +88,7 @@ Exec=luxifer-native
 Icon=luxifer
 Terminal=false
 Categories=Graphics;Engineering;
-StartupWMClass=LuxiFer
+StartupWMClass=luxifer
 EOF
 
 rm -f "$OUTPUT"
