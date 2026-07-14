@@ -3,6 +3,7 @@
 
 # --- Rust ---
 target/
+.tools/
 **/*.rs.bk
 Cargo.lock.orig
 

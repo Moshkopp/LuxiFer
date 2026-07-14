@@ -23,6 +23,14 @@ GDK_BACKEND=x11 cargo run -p luxifer-native --release
 GDK_BACKEND=x11 cargo run -p luxifer-native --release -- /pfad/zu/datei.svg
 ```
 
+Ein versioniertes Linux-AppImage inklusive Release-Build entsteht mit:
+
+```bash
+./scripts/build-appimage.sh
+```
+
+Das Ergebnis liegt unter `dist/LuxiFer-<version>-<architektur>.AppImage`.
+
 `GDK_BACKEND=x11` aus demselben Grund wie in `dev.sh` (Wayland-Present-Latenz).
 
 ### Test-Umgebungsvariablen
