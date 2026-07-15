@@ -7,10 +7,15 @@
 //! Buchstaben-Innenräume (Löcher wie im „O") sind eigene Konturen — die
 //! Even-Odd-Füllung spart sie automatisch aus.
 //!
+//! Layout (Ausrichtung, Zeilen-/Zeichenabstand) lebt hier im Core, nicht im
+//! Frontend: `layout_text` nimmt `TextOptions`, `text_to_contours` bleibt als
+//! Wrapper mit Standardwerten für bestehende Aufrufer.
+//!
 //! Nach v3-Analyse neu gebaut (CLAUDE.md Regel 6); dieselbe Bibliothekswahl
-//! (`ttf-parser`), eigene Umsetzung. Mehrzeilig über `\n` (Zeilenhöhe 1,25 em).
+//! (`ttf-parser`), eigene Umsetzung. Mehrzeilig über `\n`.
 
 use crate::geometry::Pt;
+use serde::{Deserialize, Serialize};
 use ttf_parser::{Face, OutlineBuilder};
 
 /// Fehler beim Font-Parsen.
@@ -24,37 +29,100 @@ impl std::fmt::Display for TextError {
 }
 impl std::error::Error for TextError {}
 
+/// Horizontale Ausrichtung der Zeilen innerhalb des Textblocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// Layout-Parameter für `layout_text`. Zeilenhöhe = `size_mm * line_spacing`;
+/// `letter_spacing_mm` wird zwischen (nicht nach) den Zeichen eingefügt.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextOptions {
+    /// Em-Größe in mm (wie Punktgröße).
+    pub size_mm: f64,
+    pub align: TextAlign,
+    /// Zeilenabstand als Faktor der Em-Größe.
+    pub line_spacing: f64,
+    /// Zusätzlicher Abstand zwischen Zeichen in mm (auch negativ erlaubt).
+    pub letter_spacing_mm: f64,
+}
+
+/// Standard-Zeilenabstand (Faktor der Em-Größe).
+pub const DEFAULT_LINE_SPACING: f64 = 1.25;
+
+impl Default for TextOptions {
+    fn default() -> Self {
+        Self {
+            size_mm: 20.0,
+            align: TextAlign::Left,
+            line_spacing: DEFAULT_LINE_SPACING,
+            letter_spacing_mm: 0.0,
+        }
+    }
+}
+
 /// Wandelt `text` mit dem Font (`font_data`: TTF/OTF-Bytes) in geschlossene
-/// Konturen um. `size_mm` = Versalhöhe grob als Em-Größe (wie Punktgröße).
-/// Ursprung (0,0) = linke Oberkante der ersten Zeile; y wächst nach unten.
+/// Konturen um — Wrapper um `layout_text` mit Standard-Layout (linksbündig,
+/// Zeilenabstand 1,25). `size_mm` = Em-Größe (wie Punktgröße).
 pub fn text_to_contours(
     font_data: &[u8],
     text: &str,
     size_mm: f64,
+) -> Result<Vec<(Vec<Pt>, bool)>, TextError> {
+    layout_text(
+        font_data,
+        text,
+        &TextOptions {
+            size_mm,
+            ..TextOptions::default()
+        },
+    )
+}
+
+/// Setzt `text` mit Layout-Parametern in geschlossene Konturen um.
+/// Ursprung (0,0) = linke Oberkante des Blocks; y wächst nach unten.
+/// Bei Center/Right beziehen sich die Zeilen auf die breiteste Zeile.
+pub fn layout_text(
+    font_data: &[u8],
+    text: &str,
+    opts: &TextOptions,
 ) -> Result<Vec<(Vec<Pt>, bool)>, TextError> {
     let face = Face::parse(font_data, 0).map_err(|e| TextError(format!("Font unlesbar: {e}")))?;
     let upm = face.units_per_em() as f64;
     if upm <= 0.0 {
         return Err(TextError("Font ohne units_per_em".into()));
     }
-    let scale = size_mm / upm;
+    let scale = opts.size_mm / upm;
     let ascender = face.ascender() as f64 * scale;
-    let line_height = size_mm * 1.25;
+    let line_height = opts.size_mm * opts.line_spacing;
+
+    // Erst alle Zeilenbreiten messen, damit Center/Right relativ zur
+    // breitesten Zeile ausgerichtet werden können.
+    let lines: Vec<&str> = text.split('\n').collect();
+    let widths: Vec<f64> = lines
+        .iter()
+        .map(|line| line_width(&face, line, scale, opts))
+        .collect();
+    let block_w = widths.iter().cloned().fold(0.0, f64::max);
 
     let mut out: Vec<(Vec<Pt>, bool)> = Vec::new();
     let mut y_line = 0.0_f64;
-    for line in text.split('\n') {
-        let mut x_pen = 0.0_f64;
+    for (line, width) in lines.iter().zip(&widths) {
+        let mut x_pen = match opts.align {
+            TextAlign::Left => 0.0,
+            TextAlign::Center => (block_w - width) / 2.0,
+            TextAlign::Right => block_w - width,
+        };
+        let mut first = true;
         for ch in line.chars() {
-            let Some(gid) = face.glyph_index(ch) else {
-                // Unbekanntes Zeichen: Leerraum in Em-Breite/2.
-                x_pen += size_mm * 0.5;
-                continue;
-            };
-            let advance = face
-                .glyph_hor_advance(gid)
-                .map(|a| a as f64 * scale)
-                .unwrap_or(size_mm * 0.5);
+            if !first {
+                x_pen += opts.letter_spacing_mm;
+            }
+            first = false;
             // Outline sammeln (Leerzeichen haben keine).
             let mut b = Flattener {
                 scale,
@@ -66,17 +134,41 @@ pub fn text_to_contours(
                 contours: Vec::new(),
                 start: (0.0, 0.0),
             };
-            face.outline_glyph(gid, &mut b);
-            for c in b.contours {
-                if c.len() >= 3 {
-                    out.push((c, true));
+            if let Some(gid) = face.glyph_index(ch) {
+                face.outline_glyph(gid, &mut b);
+                for c in b.contours {
+                    if c.len() >= 3 {
+                        out.push((c, true));
+                    }
                 }
             }
-            x_pen += advance;
+            x_pen += char_advance(&face, ch, scale, opts.size_mm);
         }
         y_line += line_height;
     }
     Ok(out)
+}
+
+/// Advance eines Zeichens in mm; unbekannte Zeichen bekommen Em/2 Leerraum.
+fn char_advance(face: &Face, ch: char, scale: f64, size_mm: f64) -> f64 {
+    face.glyph_index(ch)
+        .and_then(|gid| face.glyph_hor_advance(gid))
+        .map(|a| a as f64 * scale)
+        .unwrap_or(size_mm * 0.5)
+}
+
+/// Breite einer Zeile in mm (Advances + Zeichenabstände zwischen den Zeichen).
+fn line_width(face: &Face, line: &str, scale: f64, opts: &TextOptions) -> f64 {
+    let mut w = 0.0;
+    let mut count = 0usize;
+    for ch in line.chars() {
+        w += char_advance(face, ch, scale, opts.size_mm);
+        count += 1;
+    }
+    if count > 1 {
+        w += opts.letter_spacing_mm * (count - 1) as f64;
+    }
+    w
 }
 
 /// Sammelt Glyph-Outlines als geflattete Polylinien. Quadratische und kubische
@@ -195,6 +287,19 @@ mod tests {
         None
     }
 
+    fn bbox(cs: &[(Vec<Pt>, bool)]) -> (f64, f64, f64, f64) {
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for (c, _) in cs {
+            for &(x, y) in c {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+        (x0, y0, x1, y1)
+    }
+
     #[test]
     fn text_liefert_konturen_in_erwarteter_groesse() {
         let Some(font) = any_system_font() else {
@@ -204,12 +309,8 @@ mod tests {
         let out = text_to_contours(&font, "LuxiFer", 20.0).unwrap();
         assert!(!out.is_empty(), "Buchstaben ergeben Konturen");
         // Bounding-Box: Höhe grob in der Größenordnung der Em-Größe.
-        let ys: Vec<f64> = out
-            .iter()
-            .flat_map(|(c, _)| c.iter().map(|p| p.1))
-            .collect();
-        let h = ys.iter().cloned().fold(f64::MIN, f64::max)
-            - ys.iter().cloned().fold(f64::MAX, f64::min);
+        let (_, y0, _, y1) = bbox(&out);
+        let h = y1 - y0;
         assert!(h > 5.0 && h < 30.0, "Texthöhe ~Em-Größe, war {h:.1}");
         // Alle Konturen geschlossen.
         assert!(out.iter().all(|(_, closed)| *closed));
@@ -241,6 +342,82 @@ mod tests {
                 .fold(f64::MIN, f64::max)
         };
         assert!(max_y(&two) > max_y(&one) + 5.0, "zweite Zeile liegt tiefer");
+    }
+
+    #[test]
+    fn zeilenabstand_faktor_wirkt() {
+        let Some(font) = any_system_font() else {
+            return;
+        };
+        let opts = |ls: f64| TextOptions {
+            size_mm: 10.0,
+            line_spacing: ls,
+            ..TextOptions::default()
+        };
+        let tight = layout_text(&font, "A\nA", &opts(1.0)).unwrap();
+        let wide = layout_text(&font, "A\nA", &opts(2.0)).unwrap();
+        let (_, _, _, y_tight) = bbox(&tight);
+        let (_, _, _, y_wide) = bbox(&wide);
+        // Doppelter Faktor → zweite Zeile liegt ~10 mm tiefer.
+        assert!(
+            (y_wide - y_tight - 10.0).abs() < 0.5,
+            "Δ war {:.2}",
+            y_wide - y_tight
+        );
+    }
+
+    #[test]
+    fn zeichenabstand_verbreitert_die_zeile() {
+        let Some(font) = any_system_font() else {
+            return;
+        };
+        let opts = |sp: f64| TextOptions {
+            size_mm: 10.0,
+            letter_spacing_mm: sp,
+            ..TextOptions::default()
+        };
+        let normal = layout_text(&font, "AAA", &opts(0.0)).unwrap();
+        let spaced = layout_text(&font, "AAA", &opts(3.0)).unwrap();
+        let w = |cs: &_| {
+            let (x0, _, x1, _) = bbox(cs);
+            x1 - x0
+        };
+        // 2 Lücken × 3 mm = 6 mm breiter.
+        assert!(
+            (w(&spaced) - w(&normal) - 6.0).abs() < 0.5,
+            "Δ war {:.2}",
+            w(&spaced) - w(&normal)
+        );
+    }
+
+    #[test]
+    fn ausrichtung_verschiebt_kurze_zeile() {
+        let Some(font) = any_system_font() else {
+            return;
+        };
+        let opts = |align: TextAlign| TextOptions {
+            size_mm: 10.0,
+            align,
+            ..TextOptions::default()
+        };
+        // Kurze zweite Zeile: bei Right muss deren linker Rand deutlich
+        // weiter rechts liegen als bei Left; Center liegt dazwischen.
+        let min_x_line2 = |cs: &[(Vec<Pt>, bool)]| {
+            cs.iter()
+                .flat_map(|(c, _)| c.iter())
+                .filter(|p| p.1 > 10.0) // Punkte der zweiten Zeile
+                .map(|p| p.0)
+                .fold(f64::MAX, f64::min)
+        };
+        let left = layout_text(&font, "MMMMM\nA", &opts(TextAlign::Left)).unwrap();
+        let center = layout_text(&font, "MMMMM\nA", &opts(TextAlign::Center)).unwrap();
+        let right = layout_text(&font, "MMMMM\nA", &opts(TextAlign::Right)).unwrap();
+        let (l, c, r) = (
+            min_x_line2(&left),
+            min_x_line2(&center),
+            min_x_line2(&right),
+        );
+        assert!(l < c && c < r, "Left {l:.1} < Center {c:.1} < Right {r:.1}");
     }
 
     #[test]

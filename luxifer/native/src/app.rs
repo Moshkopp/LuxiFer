@@ -115,8 +115,10 @@ pub struct App {
     pub close_pending: bool,
     /// Vom Close-Guard gesetzt: die Eventschleife darf das Programm beenden.
     should_exit: bool,
-    /// Verfügbare System-Fonts (einmalig gescannt, lazy).
-    pub fonts: Vec<crate::fonts::FontEntry>,
+    /// Verfügbare Font-Familien (einmalig gescannt, lazy).
+    pub fonts: Vec<crate::fonts::FontFamily>,
+    /// Gelesene Font-Dateien (Pfad → Bytes) für Vorschau und Commit.
+    pub font_cache: std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<u8>>>,
 }
 
 impl App {
@@ -220,6 +222,7 @@ impl App {
             close_pending: false,
             should_exit: false,
             fonts: Vec::new(),
+            font_cache: std::collections::HashMap::new(),
         };
         if app.view == crate::tools::View::Laser {
             app.canvas.tool = crate::tools::Tool::Select;
@@ -653,12 +656,12 @@ mod tests {
     #[test]
     fn text_wird_zu_pfad_shapes() {
         use luxifer_core::{text::text_to_contours, AppState, TextMeta};
-        let fonts = crate::fonts::list_fonts();
-        let Some(font) = fonts.first() else {
+        let families = crate::fonts::list_font_families();
+        let Some(face) = families.first().and_then(|fam| fam.faces.first()) else {
             eprintln!("Kein System-Font — Test übersprungen");
             return;
         };
-        let data = std::fs::read(&font.path).expect("font lesen");
+        let data = std::fs::read(&face.path).expect("font lesen");
         let contours = text_to_contours(&data, "Hi", 20.0).expect("text_to_contours");
         assert!(!contours.is_empty(), "Text sollte Konturen ergeben");
         let mut s = AppState::new();
@@ -666,9 +669,10 @@ mod tests {
             contours,
             TextMeta {
                 text: "Hi".into(),
-                font_path: font.path.to_string_lossy().to_string(),
+                font_path: face.path.to_string_lossy().to_string(),
                 font_asset: None,
                 size_mm: 20.0,
+                ..Default::default()
             },
         );
         assert!(!idxs.is_empty(), "Text-Block sollte Shapes anlegen");

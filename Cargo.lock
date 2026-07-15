@@ -1941,6 +1941,7 @@ dependencies = [
  "pollster 0.3.0",
  "rfd",
  "serde_json",
+ "ttf-parser",
  "wgpu",
  "winit",
 ]

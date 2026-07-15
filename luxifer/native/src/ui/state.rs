@@ -58,17 +58,31 @@ impl ImageDialogState {
     }
 }
 
-/// Entwurf des Text-Dialogs (Eingabe, Größe, gewählter Font-Index).
+/// Entwurf des Text-Dialogs (Eingabe, Layout, gewählte Familie/Schnitt).
 pub struct TextDialogState {
     pub text: String,
     pub size_mm: f64,
-    /// Index in der Font-Liste, oder None (kein Font gewählt).
-    pub font_idx: Option<usize>,
+    pub align: luxifer_core::text::TextAlign,
+    /// Zeilenabstand als Faktor der Em-Größe.
+    pub line_spacing: f64,
+    /// Zusätzlicher Zeichenabstand in mm.
+    pub letter_spacing_mm: f64,
+    /// Index in der Familien-Liste, oder None (kein Font gewählt).
+    pub family_idx: Option<usize>,
+    /// Index des Schnitts innerhalb der gewählten Familie.
+    pub face_idx: usize,
+    /// Suchfilter über die Familiennamen.
+    pub search: String,
     /// Shape-Index des editierten Textblocks, oder None (neuer Text).
     pub edit_index: Option<usize>,
     /// Nutzer will eine Font-Datei importieren; der App-Root öffnet den
     /// Datei-Dialog (der Dialog selbst bleibt reine Zeichnung).
     pub request_font_import: bool,
+    /// Live-Vorschau: Konturen (mm) zum aktuellen Entwurf, vom App-Root über
+    /// den Core berechnet und gecacht (der Dialog zeichnet nur).
+    pub preview: Vec<(Vec<(f64, f64)>, bool)>,
+    /// Cache-Schlüssel des Vorschau-Stands (Hash über Entwurf + Fontpfad).
+    pub preview_key: Option<u64>,
 }
 
 impl Default for TextDialogState {
@@ -76,9 +90,16 @@ impl Default for TextDialogState {
         Self {
             text: "Text".into(),
             size_mm: 20.0,
-            font_idx: None,
+            align: luxifer_core::text::TextAlign::Left,
+            line_spacing: luxifer_core::text::DEFAULT_LINE_SPACING,
+            letter_spacing_mm: 0.0,
+            family_idx: None,
+            face_idx: 0,
+            search: String::new(),
             edit_index: None,
             request_font_import: false,
+            preview: Vec::new(),
+            preview_key: None,
         }
     }
 }

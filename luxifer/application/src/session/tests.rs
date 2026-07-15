@@ -251,6 +251,7 @@ fn textblock_ersetzen_erzeugt_genau_einen_undo_schritt() {
         font_path: "font.ttf".into(),
         font_asset: None,
         size_mm: 10.0,
+        ..Default::default()
     };
     let indices = session.add_text_block(old, meta);
     session.mark_saved();
@@ -260,6 +261,7 @@ fn textblock_ersetzen_erzeugt_genau_einen_undo_schritt() {
         font_path: "font.ttf".into(),
         font_asset: None,
         size_mm: 10.0,
+        ..Default::default()
     };
 
     session.replace_text_block(indices[0], new, meta).unwrap();

@@ -22,6 +22,10 @@ env_logger = "0.11"
 log = "0.4"
 
 # egui-Stack für die Panels, gerendert über wgpu in denselben Frame.
+# Familien-/Schnittnamen aus der Font-name-Tabelle (Font-Liste des Text-Tools);
+# die Glyph-Umsetzung selbst bleibt im Core.
+ttf-parser = { workspace = true }
+
 egui = "0.35"
 egui-wgpu = "0.35"
 egui-winit = "0.35"

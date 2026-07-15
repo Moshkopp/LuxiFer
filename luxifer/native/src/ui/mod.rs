@@ -347,11 +347,12 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
         dialogs::modal_backdrop(ui, alpha);
     }
 
-    // Text-Dialog: Entwurf als &mut, Font-Namen als reine Anzeigeliste.
+    // Text-Dialog: Vorschau-Konturen vorm Zeichnen aktualisieren (Cache im
+    // Entwurf), dann Entwurf als &mut und die Familien-Liste nur lesend.
     if app.text_dialog.is_some() {
-        let font_names: Vec<String> = app.fonts.iter().map(|f| f.name.clone()).collect();
-        let state = app.text_dialog.as_mut().unwrap();
-        match dialogs::text_dialog_window(ui, state, &font_names) {
+        app.update_text_preview();
+        let (state, families) = (app.text_dialog.as_mut().unwrap(), &app.fonts);
+        match dialogs::text_dialog_window(ui, state, families) {
             dialogs::DialogOutcome::None => {}
             dialogs::DialogOutcome::Commit => {
                 if app.commit_text() {

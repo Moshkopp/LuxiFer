@@ -884,6 +884,7 @@ mod tests {
                 font_path: font.into(),
                 font_asset: None,
                 size_mm: 10.0,
+                ..Default::default()
             });
             sh
         };
@@ -920,6 +921,7 @@ mod tests {
             font_path: "/fonts/a.ttf".into(),
             font_asset: Some("font-hash".into()),
             size_mm: 10.0,
+            ..Default::default()
         });
         state.shapes.push(shape);
 

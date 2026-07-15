@@ -170,6 +170,32 @@ pub struct TextMeta {
     #[serde(default)]
     pub font_asset: Option<String>,
     pub size_mm: f64,
+    /// Layout-Parameter (Defaults = Verhalten vor deren Einführung, damit
+    /// alte Projekte unverändert laden).
+    #[serde(default)]
+    pub align: crate::text::TextAlign,
+    #[serde(default = "default_line_spacing")]
+    pub line_spacing: f64,
+    #[serde(default)]
+    pub letter_spacing_mm: f64,
+}
+
+fn default_line_spacing() -> f64 {
+    crate::text::DEFAULT_LINE_SPACING
+}
+
+impl Default for TextMeta {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            font_path: String::new(),
+            font_asset: None,
+            size_mm: 20.0,
+            align: crate::text::TextAlign::default(),
+            line_spacing: crate::text::DEFAULT_LINE_SPACING,
+            letter_spacing_mm: 0.0,
+        }
+    }
 }
 
 /// Eine gezeichnete Form. Gehört über `layer_id` zu einem Layer.
@@ -422,6 +448,7 @@ mod tests {
             font_path: "font.ttf".into(),
             font_asset: None,
             size_mm: 10.0,
+            ..Default::default()
         });
         s.set_bbox(0.0, 0.0, 20.0, 40.0);
         assert_eq!(s.text_meta.unwrap().size_mm, 20.0);
@@ -435,6 +462,7 @@ mod tests {
                 font_path: "font.ttf".into(),
                 font_asset: None,
                 size_mm: 10.0,
+                ..Default::default()
             })
         };
         let mut stretched = Shape::new(
