@@ -373,6 +373,7 @@ impl App {
             S::Cancel => {
                 self.canvas.poly_pts.clear();
                 self.canvas.bezier_nodes.clear();
+                self.cancel_bridge();
                 if self.session.edit_active() {
                     self.session.cancel_edit();
                     self.canvas.drag = Drag::None;
@@ -389,7 +390,7 @@ impl App {
             S::Redo => self.redo(),
             S::SelectAll => self.session.select_all(),
             S::FitView => self.fit_view(),
-            S::SelectTool(tool) => self.canvas.tool = tool,
+            S::SelectTool(tool) => self.select_tool(tool),
             S::PanModifier(down) => self.canvas.space_down = down,
         }
     }
@@ -414,7 +415,7 @@ impl App {
             A::NestFill(gap) => self.nest_fill(gap),
             A::PickColor(color) => self.pick_color(color),
             A::SelectShape(shape) => self.canvas.active_shape = shape,
-            A::SelectTool(tool) => self.canvas.tool = tool,
+            A::SelectTool(tool) => self.select_tool(tool),
             A::ToolAction(a) => self.begin_action(a),
             A::OpenTextDialog => self.open_text_dialog(),
             A::MirrorH => self.mirror_h(),
@@ -496,6 +497,14 @@ impl App {
             A::LaserHome => self.laser_home(),
             A::OpenLaserManager { create_new } => self.open_laser_manager(create_new),
         }
+    }
+
+    /// Werkzeugwechsel; ein schwebender Haltesteg-Entwurf verfällt dabei.
+    fn select_tool(&mut self, tool: crate::tools::Tool) {
+        if tool != crate::tools::Tool::Bridge {
+            self.cancel_bridge();
+        }
+        self.canvas.tool = tool;
     }
 
     /// F-Shortcut: Kamera auf die Auswahl einpassen, sonst auf alle Objekte.
@@ -591,6 +600,7 @@ impl App {
                 active_shape: self.canvas.active_shape,
                 poly_pts: &self.canvas.poly_pts,
                 bezier_nodes: &self.canvas.bezier_nodes,
+                bridge: self.canvas.bridge,
                 world_cursor: self.canvas.world(),
                 cam_scale: self.canvas.cam.scale,
                 // Startmarker nur im Laser-Tab: Dort wird der Job platziert.

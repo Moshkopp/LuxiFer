@@ -13,6 +13,9 @@ pub enum Tool {
     Bezier,
     Measure,
     Node,
+    /// Haltesteg: Linie über eine Kontur ziehen, Breite einstellen, bestätigen
+    /// → die Kontur wird im Steg-Band aufgetrennt und quer wieder geschlossen.
+    Bridge,
 }
 
 /// Haupt-Ansicht (Reiterleiste oben), analog zur Tauri-App.
@@ -72,6 +75,7 @@ impl Tool {
             Tool::Bezier => "Bézier",
             Tool::Measure => "Messen",
             Tool::Node => "Knoten",
+            Tool::Bridge => "Haltesteg",
         }
     }
 
@@ -88,6 +92,7 @@ impl Tool {
             Tool::Bezier => "bezier",
             Tool::Measure => "measure",
             Tool::Node => "node",
+            Tool::Bridge => "bridge",
         }
     }
 }
@@ -100,7 +105,6 @@ pub enum ToolAction {
     Fillet,
     Offset,
     PatternFill,
-    Bridge,
 }
 
 /// Typisierte Tastatur-Aktion des Canvas. Die Zuordnung Taste→Aktion ist reine
@@ -224,6 +228,10 @@ pub enum Drag {
     /// Tangente des zuletzt gesetzten Bézier-Ankers aufziehen.
     BezierHandle {
         node: usize,
+    },
+    /// Endpunkt der Haltesteg-Linie ziehen (0 = Start, 1 = Ende).
+    BridgeEnd {
+        end: usize,
     },
     /// Auswahl über ein Handle skalieren. `handle` = gezogene Ecke/Kante,
     /// `start_box` = Auswahl-BBox bei Drag-Beginn, `orig` = Snapshot der

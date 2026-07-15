@@ -324,6 +324,47 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
         );
     }
 
+    // Haltesteg-Entwurf: schwebendes Eingabefeld am Linienende — Breite live
+    // anpassen (Bandkanten wachsen im Overlay mit), Einfügen bestätigt.
+    if app.view == View::Design && app.canvas.tool == crate::tools::Tool::Bridge {
+        if let Some(mut draft) = app.canvas.bridge {
+            let ppp = ui.ctx().pixels_per_point();
+            let end = app.canvas.cam.world_to_screen(draft.p1);
+            let pos = egui::pos2(end[0] / ppp + 14.0, end[1] / ppp + 10.0);
+            let mut commit = false;
+            let mut cancel = false;
+            egui::Area::new(egui::Id::new("bridge_input"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(pos)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Breite");
+                            ui.add(
+                                egui::DragValue::new(&mut draft.width)
+                                    .range(0.1..=100.0)
+                                    .speed(0.1)
+                                    .fixed_decimals(1)
+                                    .suffix(" mm"),
+                            );
+                            if ui.button("Einfügen").clicked() {
+                                commit = true;
+                            }
+                            if ui.button("✕").on_hover_text("Verwerfen (Esc)").clicked() {
+                                cancel = true;
+                            }
+                        });
+                    });
+                });
+            app.canvas.bridge = Some(draft);
+            if commit {
+                app.commit_bridge();
+            } else if cancel {
+                app.cancel_bridge();
+            }
+        }
+    }
+
     // Ein gemeinsames Backdrop für alle echten Dialoge. Beim Einstellen wird
     // direkt der Draft gelesen, damit der Alpha-Regler live reagiert.
     let has_dialog = app.text_dialog.is_some()

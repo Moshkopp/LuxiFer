@@ -6,6 +6,16 @@
 use crate::camera::Camera;
 use crate::tools::{Drag, Tool};
 
+/// Schwebender Haltesteg-Entwurf: Linie (Welt-mm) + Steg-Breite. Bleibt nach
+/// dem Ziehen stehen (Endpunkte nachfassbar, Breite über das Eingabefeld am
+/// Linienende), bis der Nutzer bestätigt oder abbricht.
+#[derive(Clone, Copy)]
+pub struct BridgeDraft {
+    pub p0: [f64; 2],
+    pub p1: [f64; 2],
+    pub width: f64,
+}
+
 pub struct CanvasState {
     pub cam: Camera,
     pub tool: Tool,
@@ -20,6 +30,10 @@ pub struct CanvasState {
     pub shift_down: bool,
     /// Punkt-Zug (Welt-Punkte), bis Doppelklick/Enter schließt.
     pub poly_pts: Vec<(f64, f64)>,
+    /// Schwebender Haltesteg-Entwurf (nur beim Bridge-Werkzeug).
+    pub bridge: Option<BridgeDraft>,
+    /// Zuletzt genutzte Steg-Breite (mm) — Vorbelegung des nächsten Entwurfs.
+    pub bridge_width: f64,
     /// Native Bézier-Feder: Anker samt beim Ziehen erzeugten Tangenten.
     pub bezier_nodes: Vec<luxifer_core::bezier::BezierNode>,
     /// Nur im Laser-Tab: Layer, deren Shapes vorübergehend transformierbar sind.
@@ -41,6 +55,8 @@ impl CanvasState {
             ctrl_down: false,
             shift_down: false,
             poly_pts: Vec::new(),
+            bridge: None,
+            bridge_width: 2.0,
             bezier_nodes: Vec::new(),
             laser_editable_layers: None,
             last_click: None,

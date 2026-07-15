@@ -110,6 +110,24 @@ impl CanvasState {
                     Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Line | Tool::Measure => {
                         self.drag = Drag::DrawBox { start: w }
                     }
+                    // Haltesteg: nahe einem Endpunkt → diesen nachfassen,
+                    // sonst neue Steg-Linie beginnen (ersetzt den Entwurf).
+                    Tool::Bridge => {
+                        let grab = 10.0 / self.cam.scale as f64;
+                        let near = |p: [f64; 2]| (p[0] - w[0]).hypot(p[1] - w[1]) <= grab;
+                        match self.bridge {
+                            Some(d) if near(d.p0) => self.drag = Drag::BridgeEnd { end: 0 },
+                            Some(d) if near(d.p1) => self.drag = Drag::BridgeEnd { end: 1 },
+                            _ => {
+                                self.bridge = Some(super::state::BridgeDraft {
+                                    p0: w,
+                                    p1: w,
+                                    width: self.bridge_width,
+                                });
+                                self.drag = Drag::BridgeEnd { end: 1 };
+                            }
+                        }
+                    }
                     // Punkt-für-Punkt-Werkzeuge sammeln in poly_pts.
                     Tool::Polyline | Tool::Spline => self.poly_pts.push((w[0], w[1])),
                     // Bézier-Feder: Drücken setzt den Anker, Ziehen formt eine
@@ -251,6 +269,17 @@ impl CanvasState {
                 self.cursor = new;
                 return;
             }
+            Drag::BridgeEnd { end } => {
+                if let Some(d) = self.bridge.as_mut() {
+                    if *end == 0 {
+                        d.p0 = w;
+                    } else {
+                        d.p1 = w;
+                    }
+                }
+                self.cursor = new;
+                return;
+            }
             _ => {}
         }
         // Resize/Rotate: immer vom Snapshot (Ausgangszustand) rechnen, damit sich
@@ -307,6 +336,9 @@ impl CanvasState {
             }
             Drag::DrawBox { start } => self.finish_box(session, start, w),
             Drag::BezierHandle { .. } => false,
+            // Der Steg-Entwurf bleibt stehen — bestätigt wird über das
+            // Eingabefeld am Linienende (App::commit_bridge).
+            Drag::BridgeEnd { .. } => false,
             Drag::MoveShapes { .. } | Drag::Resize { .. } | Drag::Rotate { .. } => {
                 session.commit_edit();
                 false
@@ -397,6 +429,42 @@ mod tests {
             Some((15.0, 12.0))
         );
         assert!(session.shapes[0].bezier.as_ref().unwrap().closed);
+    }
+
+    #[test]
+    fn haltesteg_geste_legt_entwurf_an_und_endpunkte_sind_nachfassbar() {
+        let mut canvas = CanvasState::new(Camera::new());
+        canvas.tool = Tool::Bridge;
+        let mut session = EditorSession::default();
+
+        // Ziehen: neue Steg-Linie von (0,10) nach (30,10); nichts wird erzeugt.
+        canvas.cursor = canvas.cam.world_to_screen([0.0, 10.0]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_cursor_move(&mut session, canvas.cam.world_to_screen([30.0, 10.0]));
+        canvas.on_mouse(&mut session, MouseButton::Left, false);
+        let d = canvas.bridge.expect("Entwurf bleibt stehen");
+        assert_eq!(d.p0, [0.0, 10.0]);
+        assert_eq!(d.p1, [30.0, 10.0]);
+        assert!(
+            session.shapes.is_empty(),
+            "Commit erst über das Eingabefeld"
+        );
+
+        // Endpunkt nachfassen: Press nahe p1 zieht ihn statt neu zu beginnen.
+        canvas.cursor = canvas.cam.world_to_screen([30.5, 10.5]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_cursor_move(&mut session, canvas.cam.world_to_screen([30.0, 25.0]));
+        canvas.on_mouse(&mut session, MouseButton::Left, false);
+        let d = canvas.bridge.expect("Entwurf bleibt erhalten");
+        assert_eq!(d.p0, [0.0, 10.0], "Start bleibt");
+        assert_eq!(d.p1, [30.0, 25.0], "Ende folgt der Maus");
+
+        // Press abseits ersetzt den Entwurf durch eine neue Linie.
+        canvas.cursor = canvas.cam.world_to_screen([100.0, 100.0]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_mouse(&mut session, MouseButton::Left, false);
+        let d = canvas.bridge.expect("neuer Entwurf");
+        assert_eq!(d.p0, [100.0, 100.0]);
     }
 
     #[test]

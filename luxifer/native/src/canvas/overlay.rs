@@ -25,6 +25,8 @@ pub struct OverlayInput<'a> {
     /// Job-Startpunkt (mm) für den Laser-Tab: der Anker der Job-BBox bei
     /// relativem Startmodus. None = kein Marker (Absolut/leerer Job).
     pub job_start: Option<[f64; 2]>,
+    /// Schwebender Haltesteg-Entwurf (nur beim Bridge-Werkzeug sichtbar).
+    pub bridge: Option<super::state::BridgeDraft>,
 }
 
 /// Halbe Handle-Kantenlänge in Welt-mm, damit sie am Bildschirm konstant
@@ -184,6 +186,51 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
                 let w = (start[0] - cur[0]).abs() as f32;
                 let h = (start[1] - cur[1]).abs() as f32;
                 v.extend(scene_geo::rect_outline(x, y, w, h, preview));
+            }
+        }
+    }
+
+    // Haltesteg-Entwurf: rote Steg-Linie, grüne Bandkanten (dort wird die
+    // Kontur quer geschlossen) und nachfassbare Endpunkt-Griffe.
+    if input.tool == Tool::Bridge {
+        if let Some(d) = input.bridge {
+            const RED: [f32; 4] = [0.92, 0.15, 0.15, 1.0];
+            const GREEN: [f32; 4] = [0.25, 0.85, 0.35, 0.95];
+            let a = [d.p0[0] as f32, d.p0[1] as f32];
+            let b = [d.p1[0] as f32, d.p1[1] as f32];
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let len = (dx * dx + dy * dy).sqrt();
+            if len > 1e-4 {
+                scene_geo::push_seg(&mut v, a, b, RED);
+                // Bandkanten: parallel im Abstand ±Breite/2.
+                let n = [-dy / len, dx / len];
+                let off = (d.width / 2.0) as f32;
+                for s in [-1.0_f32, 1.0] {
+                    let o = [n[0] * off * s, n[1] * off * s];
+                    scene_geo::push_seg(
+                        &mut v,
+                        [a[0] + o[0], a[1] + o[1]],
+                        [b[0] + o[0], b[1] + o[1]],
+                        GREEN,
+                    );
+                }
+            } else {
+                // Klick (Null-Länge): Kreuz-Marker — der Commit legt die Linie
+                // automatisch senkrecht über die nächste Konturkante.
+                let r = 6.0 / input.cam_scale;
+                scene_geo::push_seg(&mut v, [a[0] - r, a[1]], [a[0] + r, a[1]], RED);
+                scene_geo::push_seg(&mut v, [a[0], a[1] - r], [a[0], a[1] + r], RED);
+            }
+            // Endpunkt-Griffe (bildschirmkonstant, wie Transform-Handles).
+            let hw = handle_hw(input.cam_scale);
+            for p in [a, b] {
+                v.extend(scene_geo::rect_outline(
+                    p[0] - hw,
+                    p[1] - hw,
+                    hw * 2.0,
+                    hw * 2.0,
+                    RED,
+                ));
             }
         }
     }

@@ -133,8 +133,15 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, cur: Tool, selection: usize) -> Vec
         .spacing([gap, gap])
         .show(ui, |ui| {
             icon_button(ui, side, "trim", "Trimmen (Vorschau)", false, true);
-            if icon_button(ui, side, "bridge", "Haltesteg (Klick+Ziehen)", false, false) {
-                actions.push(UiAction::ToolAction(A::Bridge));
+            if icon_button(
+                ui,
+                side,
+                "bridge",
+                "Haltesteg (Linie über die Kontur ziehen)",
+                cur == Tool::Bridge,
+                false,
+            ) {
+                actions.push(UiAction::SelectTool(Tool::Bridge));
             }
             ui.end_row();
             if icon_button(ui, side, "boolean", "Boolean (Auswahl)", false, false) {

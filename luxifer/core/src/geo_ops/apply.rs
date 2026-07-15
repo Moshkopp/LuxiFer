@@ -5,7 +5,10 @@
 use crate::geometry::{rotate_point, Geo, Pt};
 use crate::state::AppState;
 
-use super::{boolean, bridge_line, fillet, fillet_corners, offset, unit, BoolOp};
+use super::{
+    boolean, bridge_contours, bridge_line, fillet, fillet_corners, line_crosses, offset, unit,
+    BoolOp,
+};
 
 impl AppState {
     /// Weltkontur einer Shape (Rotation angewandt). `None` bei offenen
@@ -196,16 +199,14 @@ impl AppState {
         } else {
             (p0, p1)
         };
-        // Betroffene Shapes vorab bestimmen (Index + Teilstücke), dann anwenden.
-        type Cut = (usize, Vec<(Vec<Pt>, bool)>);
-        let mut cuts: Vec<Cut> = Vec::new();
-        for (i, s) in self.shapes.iter().enumerate() {
+        // Weltkontur (Rotation eingerechnet) einer Vektor-Shape.
+        let world = |s: &crate::model::Shape| -> Option<(Vec<Pt>, bool)> {
             if matches!(s.geo, Geo::Image { .. }) {
-                continue;
+                return None;
             }
             let (mut pts, closed) = s.geo.outline_points();
             if pts.len() < 2 {
-                continue;
+                return None;
             }
             if s.rotation != 0.0 {
                 let (cx, cy) = s.bbox().center();
@@ -213,21 +214,53 @@ impl AppState {
                     *p = rotate_point(p.0, p.1, cx, cy, s.rotation);
                 }
             }
-            if let Some(pieces) = bridge_line(&pts, closed, p0, p1, width) {
-                cuts.push((i, pieces));
+            Some((pts, closed))
+        };
+
+        // Geschlossene, gekreuzte Konturen werden je (Layer, Gruppe) als
+        // Even-Odd-Verbund GEMEINSAM geschnitten — nur so verbinden die
+        // Querstücke Material mit Material statt quer durch Löcher zu laufen
+        // (z. B. „O" = Außenrand + Innenloch). Offene Polylinien einzeln.
+        type Cut = (Vec<usize>, usize, Option<u32>, Vec<(Vec<Pt>, bool)>);
+        /// Verbund-Schlüssel (Layer, Gruppe) → gekreuzte Konturen (Index, Punkte).
+        type Pool = std::collections::BTreeMap<(usize, Option<u32>), Vec<(usize, Vec<Pt>)>>;
+        let mut cuts: Vec<Cut> = Vec::new();
+        let mut pooled: Pool = Default::default();
+        for (i, s) in self.shapes.iter().enumerate() {
+            let Some((pts, closed)) = world(s) else {
+                continue;
+            };
+            if closed {
+                if line_crosses(&pts, true, p0, p1) {
+                    pooled
+                        .entry((s.layer_id, s.group_id))
+                        .or_default()
+                        .push((i, pts));
+                }
+            } else if let Some(pieces) = bridge_line(&pts, false, p0, p1, width) {
+                cuts.push((vec![i], s.layer_id, s.group_id, pieces));
+            }
+        }
+        for ((layer_id, group_id), list) in pooled {
+            let idxs: Vec<usize> = list.iter().map(|(i, _)| *i).collect();
+            let contours: Vec<(Vec<Pt>, bool)> = list.into_iter().map(|(_, c)| (c, true)).collect();
+            if let Some(pieces) = bridge_contours(&contours, p0, p1, width) {
+                cuts.push((idxs, layer_id, group_id, pieces));
             }
         }
         if cuts.is_empty() {
             return false;
         }
         self.push_undo();
-        // Von hinten anwenden, damit die Indizes gültig bleiben.
-        cuts.sort_by_key(|c| std::cmp::Reverse(c.0));
+        // Alle ersetzten Shapes entfernen (absteigend, Indizes bleiben
+        // gültig), dann die Teilstücke einfügen.
+        let mut remove: Vec<usize> = cuts.iter().flat_map(|c| c.0.iter().copied()).collect();
+        remove.sort_unstable();
+        for &i in remove.iter().rev() {
+            self.shapes.remove(i);
+        }
         self.selected.clear();
-        for (idx, pieces) in cuts {
-            let layer_id = self.shapes[idx].layer_id;
-            let group_id = self.shapes[idx].group_id;
-            self.shapes.remove(idx);
+        for (_, layer_id, group_id, pieces) in cuts {
             for (piece, closed) in pieces {
                 let i = self.shapes.len();
                 let mut sh =

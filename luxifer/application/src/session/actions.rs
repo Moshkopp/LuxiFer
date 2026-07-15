@@ -79,6 +79,26 @@ impl EditorSession {
         Ok(())
     }
 
+    /// Haltesteg (v3-Modell): trennt alle Konturen, die die Steg-Linie
+    /// `p0`→`p1` kreuzen, im Band der Breite `width` auf und verbindet die
+    /// Schnittkanten quer (ein Core-Undo). Kreuzt die Linie nichts, kommt ein
+    /// stabiler Fehler ohne Mutation.
+    pub fn bridge(&mut self, p0: (f64, f64), p1: (f64, f64), width: f64) -> Result<(), AppError> {
+        if !width.is_finite() || width <= 0.0 {
+            return Err(AppError::new(
+                "bridge_width",
+                "Die Steg-Breite muss größer als 0 mm sein.",
+            ));
+        }
+        if !self.state.bridge_stroke(p0, p1, width) {
+            return Err(AppError::new(
+                "bridge_no_hit",
+                "Die Steg-Linie kreuzt keine Kontur.",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn offset(&mut self, distance: f64) -> Result<(), AppError> {
         self.require_selection("Offset")?;
         self.state.offset_selected(distance);

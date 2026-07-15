@@ -296,15 +296,7 @@ pub(super) fn unit(from: Pt, to: Pt) -> Option<((f64, f64), f64)> {
     Some(((dx / l, dy / l), l))
 }
 
-/// Haltesteg nach v3-Modell: der Nutzer zieht eine **Steg-Linie** `p0`→`p1`
-/// der Breite `width` (mm) über eine Kontur. Wo die Linie die Kontur kreuzt,
-/// wird die Kontur aufgeschnitten und die Teilstücke **innerhalb des
-/// Steg-Bandes** (Abstand ≤ width/2 zur Linie) entfernt — dort bleibt beim
-/// Schneiden Material stehen. Die neuen Grenzpunkte werden wie in ThorBurn auf
-/// beiden Seiten verbunden und die resultierenden Pfade neu verkettet.
-///
-/// Ergebnis: die neu verketteten Teilkonturen, oder `None`, wenn die Linie die
-/// Kontur nicht kreuzt.
+/// Haltesteg nach v3-Modell für EINE Kontur — Wrapper um [`bridge_contours`].
 pub fn bridge_line(
     points: &[Pt],
     closed: bool,
@@ -312,68 +304,78 @@ pub fn bridge_line(
     p1: Pt,
     width: f64,
 ) -> Option<Vec<(Vec<Pt>, bool)>> {
+    bridge_contours(&[(points.to_vec(), closed)], p0, p1, width)
+}
+
+/// Ob die Strecke `p0`–`p1` die Kontur kreuzt.
+pub(super) fn line_crosses(points: &[Pt], closed: bool, p0: Pt, p1: Pt) -> bool {
     let n = points.len();
-    if n < 2 || width <= 0.0 {
-        return None;
+    if n < 2 {
+        return false;
     }
     let edges = if closed { n } else { n - 1 };
+    (0..edges).any(|i| seg_seg_t(points[i], points[(i + 1) % n], p0, p1).is_some())
+}
+
+/// Haltesteg nach v3-Modell über einen **Even-Odd-Verbund** von Konturen
+/// (z. B. „O" = Außenrand + Loch): der Nutzer zieht eine **Steg-Linie**
+/// `p0`→`p1` der Breite `width` (mm) über die Konturen. Wo die Linie kreuzt,
+/// werden die Konturen aufgeschnitten und die Teilstücke **innerhalb des
+/// Steg-Bandes** (Abstand ≤ width/2 zur Linie) entfernt — dort bleibt beim
+/// Schneiden Material stehen.
+///
+/// Die Grenzpunkte werden je Steg-Seite entlang der Linie sortiert und
+/// **paarweise** verbunden: Nach Even-Odd liegt zwischen Punkt 2k und 2k+1
+/// immer Material — die Querstücke schließen also genau die Materialschnitte
+/// (beim Rechteck quer durchs Innere, beim „O" Außenrand↔Loch über den Ring)
+/// und laufen nie quer durch Löcher. Der Steg ist der uncut Materialstreifen
+/// zwischen den beiden Querstück-Wänden (ThorBurn-Verhalten, vom Nutzer an
+/// Rechteck UND Schrift bestätigt). Zusammengehörige Konturen müssen dafür
+/// GEMEINSAM in einem Aufruf landen; einzeln geschnitten würden die
+/// Querstücke Löcher überspannen.
+///
+/// Offene Polylinien bekommen nur die Lücke (ein Grenzpunkt je Seite —
+/// keine Paare, keine Querstücke).
+///
+/// Ergebnis: die neu verketteten Teilkonturen, oder `None`, wenn die Linie
+/// keine der Konturen kreuzt.
+pub fn bridge_contours(
+    contours: &[(Vec<Pt>, bool)],
+    p0: Pt,
+    p1: Pt,
+    width: f64,
+) -> Option<Vec<(Vec<Pt>, bool)>> {
+    if width <= 0.0 {
+        return None;
+    }
     let r = width / 2.0;
 
-    // 1. Jede Kontur-Kante an den Schnittpunkten mit der Steg-Linie UND an den
-    //    Ein-/Austrittspunkten des Steg-Bandes (Kreise um die Schnittpunkte,
-    //    Radius r) unterteilen — 1:1 die v3-Logik.
+    // 1. Schnittpunkte der Steg-Linie mit ALLEN Konturen — zugleich die
+    //    Zentren der Band-Kreise für die Unterteilung (v3-Logik).
     let mut crossings: Vec<Pt> = Vec::new();
-    for i in 0..edges {
-        if let Some(pt) = seg_seg_point(points[i], points[(i + 1) % n], p0, p1) {
-            crossings.push(pt);
+    for (points, closed) in contours {
+        let n = points.len();
+        if n < 2 {
+            continue;
+        }
+        let edges = if *closed { n } else { n - 1 };
+        for i in 0..edges {
+            if let Some(pt) = seg_seg_point(points[i], points[(i + 1) % n], p0, p1) {
+                crossings.push(pt);
+            }
         }
     }
     if crossings.is_empty() {
         return None;
     }
 
-    // 2. Kontur in Mikro-Segmente zerlegen, die entweder ganz „drin" (Band)
-    //    oder ganz „draußen" sind.
-    let mut sub: Vec<(Pt, Pt)> = Vec::new();
-    for i in 0..edges {
-        let a = points[i];
-        let b = points[(i + 1) % n];
-        // Teilungsparameter: Schnitt mit der Linie + Ein/Austritt der Bänder.
-        let mut ts: Vec<f64> = vec![0.0, 1.0];
-        if let Some(t) = seg_seg_t(a, b, p0, p1) {
-            ts.push(t);
-        }
-        for &c in &crossings {
-            ts.extend(seg_circle_ts(a, b, c, r));
-        }
-        ts.retain(|&t| (0.0..=1.0).contains(&t));
-        ts.sort_by(|x, y| x.partial_cmp(y).unwrap());
-        ts.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
-        let lerp = |t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-        for w in ts.windows(2) {
-            sub.push((lerp(w[0]), lerp(w[1])));
-        }
-    }
-
-    // 3. Segmente „drin" markieren (Mittelpunkt im Band eines Schnittpunkts).
+    // Segment „drin" = Mittelpunkt im Band eines Schnittpunkts.
     let inside = |seg: &(Pt, Pt)| -> bool {
         let mid = ((seg.0 .0 + seg.1 .0) / 2.0, (seg.0 .1 + seg.1 .1) / 2.0);
         crossings
             .iter()
             .any(|c| (mid.0 - c.0).hypot(mid.1 - c.1) <= r + 1e-5)
     };
-
-    // 4. Zusammenhängende „draußen"-Ketten und ihre Grenzpunkte sammeln.
-    let total = sub.len();
-    let mut start = 0;
-    if closed {
-        for i in 0..total {
-            if !inside(&sub[i]) && inside(&sub[(i + total - 1) % total]) {
-                start = i;
-                break;
-            }
-        }
-    }
     let add = |path: &mut Vec<Pt>, pt: Pt| {
         if path
             .last()
@@ -382,37 +384,91 @@ pub fn bridge_line(
             path.push(pt);
         }
     };
-    let mut out: Vec<(Vec<Pt>, bool)> = Vec::new();
-    let mut cur: Vec<Pt> = Vec::new();
-    for step in 0..total {
-        let idx = if closed { (start + step) % total } else { step };
-        let seg = &sub[idx];
-        if inside(seg) {
-            if cur.len() >= 2 {
-                out.push((std::mem::take(&mut cur), false));
-            } else {
-                cur.clear();
-            }
-        } else {
-            add(&mut cur, seg.0);
-            add(&mut cur, seg.1);
+
+    let mut paths: Vec<Vec<Pt>> = Vec::new();
+    let mut boundary: Vec<Pt> = Vec::new();
+    for (points, closed) in contours {
+        let n = points.len();
+        if n < 2 {
+            continue;
         }
-    }
-    if cur.len() >= 2 {
-        out.push((cur, false));
+        let edges = if *closed { n } else { n - 1 };
+
+        // 2. Kontur in Mikro-Segmente zerlegen, die entweder ganz „drin"
+        //    (Band) oder ganz „draußen" sind.
+        let mut sub: Vec<(Pt, Pt)> = Vec::new();
+        for i in 0..edges {
+            let a = points[i];
+            let b = points[(i + 1) % n];
+            // Teilung: Schnitt mit der Linie + Ein/Austritt der Bänder.
+            let mut ts: Vec<f64> = vec![0.0, 1.0];
+            if let Some(t) = seg_seg_t(a, b, p0, p1) {
+                ts.push(t);
+            }
+            for &c in &crossings {
+                ts.extend(seg_circle_ts(a, b, c, r));
+            }
+            ts.retain(|&t| (0.0..=1.0).contains(&t));
+            ts.sort_by(|x, y| x.partial_cmp(y).unwrap());
+            ts.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
+            let lerp = |t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            for w in ts.windows(2) {
+                sub.push((lerp(w[0]), lerp(w[1])));
+            }
+        }
+        let total = sub.len();
+        if total == 0 {
+            continue;
+        }
+
+        // 3. Zusammenhängende „draußen"-Ketten sammeln; bei geschlossenen
+        //    Konturen an einer drin→draußen-Kante beginnen, damit die Kette
+        //    nicht mitten im Band startet.
+        let mut start = 0;
+        if *closed {
+            for i in 0..total {
+                if !inside(&sub[i]) && inside(&sub[(i + total - 1) % total]) {
+                    start = i;
+                    break;
+                }
+            }
+        }
+        let mut cur: Vec<Pt> = Vec::new();
+        for step in 0..total {
+            let idx = if *closed {
+                (start + step) % total
+            } else {
+                step
+            };
+            let seg = &sub[idx];
+            if inside(seg) {
+                if cur.len() >= 2 {
+                    paths.push(std::mem::take(&mut cur));
+                } else {
+                    cur.clear();
+                }
+            } else {
+                add(&mut cur, seg.0);
+                add(&mut cur, seg.1);
+            }
+        }
+        if cur.len() >= 2 {
+            paths.push(cur);
+        }
+
+        // 4. Grenzpunkte (drin↔draußen-Wechsel) in den gemeinsamen Pool.
+        for i in 0..total {
+            let prev = &sub[(i + total - 1) % total];
+            if (*closed || i > 0) && inside(&sub[i]) != inside(prev) {
+                boundary.push(sub[i].0);
+            }
+        }
     }
 
-    // 5. Die Grenzpunkte auf jeder Seite der gezogenen Linie paarweise
-    // verbinden. Diese Querstücke sind der in der ersten Portierung fehlende
-    // Teil der ThorBurn-Logik: Ohne sie entstehen nur voneinander getrennte
-    // offene Konturfragmente statt einer zusammenhängenden Steggeometrie.
-    let mut boundary = Vec::new();
-    for i in 0..total {
-        let prev = &sub[(i + total - 1) % total];
-        if (closed || i > 0) && inside(&sub[i]) != inside(prev) {
-            boundary.push(sub[i].0);
-        }
-    }
+    // 5. Die Grenzpunkte ALLER Konturen je Steg-Seite entlang der Linie
+    // sortieren und paarweise verbinden (Even-Odd, siehe Doku oben). Diese
+    // Querstücke sind der in der ersten Portierung fehlende Teil der
+    // ThorBurn-Logik.
     let (dir, _) = unit(p0, p1)?;
     let normal = (-dir.1, dir.0);
     let mut left: Vec<(f64, Pt)> = Vec::new();
@@ -430,11 +486,10 @@ pub fn bridge_line(
     for side in [&mut left, &mut right] {
         side.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         for pair in side.chunks_exact(2) {
-            out.push((vec![pair[0].1, pair[1].1], false));
+            paths.push(vec![pair[0].1, pair[1].1]);
         }
     }
 
-    let paths: Vec<Vec<Pt>> = out.into_iter().map(|(p, _)| p).collect();
     let chained = chain_paths(paths);
     let result = chained
         .into_iter()
@@ -676,14 +731,16 @@ mod tests {
     }
 
     #[test]
-    fn bridge_line_verbindet_stegrander_zu_einer_kontur() {
+    fn bridge_line_verbindet_stegrander_zu_geschlossenen_haelften() {
         // 20mm-Quadrat, Steg-Linie waagerecht mitten durch (y=10), Breite 4.
+        // ThorBurn-Verhalten (Nutzer-verifiziert): die Querstücke schließen
+        // beide Hälften; der Steg ist der Materialstreifen dazwischen.
         let sq = rect(0.0, 0.0, 20.0, 20.0);
         let pieces = bridge_line(&sq, true, (-5.0, 10.0), (25.0, 10.0), 4.0).unwrap();
-        assert_eq!(pieces.len(), 2, "beide Stegseiten werden wieder verkettet");
+        assert_eq!(pieces.len(), 2, "obere und untere Hälfte");
         assert!(
             pieces.iter().all(|(_, closed)| *closed),
-            "beide resultierenden Konturen sind geschlossen"
+            "beide Hälften sind über die Querstücke geschlossen"
         );
         // Kein Punkt liegt im Steg-Band (|y-10| < 2 an den linken/rechten Kanten
         // bei x=0 und x=20 — dort schneidet die Linie).
@@ -695,6 +752,66 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn bridge_contours_ring_verbindet_material_statt_loch() {
+        // Ring aus Außenrand (0..30) + Innenloch (10..20), Steg quer durch
+        // die Mitte. Erwartung: obere + untere Ringhälfte, und die Querstücke
+        // schließen NUR die Materialschnitte (Ringbreite 10 mm) — kein Steg
+        // überspannt das Loch (der Fehler der Einzelkontur-Fassung).
+        let outer = rect(0.0, 0.0, 30.0, 30.0);
+        let inner = rect(10.0, 10.0, 10.0, 10.0);
+        let pieces = bridge_contours(
+            &[(outer, true), (inner, true)],
+            (-5.0, 15.0),
+            (35.0, 15.0),
+            4.0,
+        )
+        .unwrap();
+        assert_eq!(pieces.len(), 2, "oberer und unterer Ring-Teil");
+        assert!(pieces.iter().all(|(_, closed)| *closed));
+        // Querstücke liegen auf den Bandkanten y=13/y=17: keines länger als
+        // die Ringbreite.
+        for (pts, _) in &pieces {
+            let n = pts.len();
+            for i in 0..n {
+                let a = pts[i];
+                let b = pts[(i + 1) % n];
+                let on_band = (a.1 - b.1).abs() < 1e-6
+                    && ((a.1 - 13.0).abs() < 1e-6 || (a.1 - 17.0).abs() < 1e-6);
+                if on_band {
+                    assert!(
+                        (a.0 - b.0).abs() <= 10.0 + 1e-6,
+                        "Quersteg {a:?}→{b:?} überspannt das Loch"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bridge_stroke_ring_wird_als_verbund_geschnitten() {
+        // Zwei Shapes (Außen + Loch) auf demselben Layer ohne Gruppe → der
+        // Steg muss sie als Verbund behandeln: zwei Teilstücke, ein Undo.
+        let mut s = AppState::new();
+        s.add_shape(Geo::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 30.0,
+            h: 30.0,
+        });
+        s.add_shape(Geo::Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 10.0,
+            h: 10.0,
+        });
+        assert!(s.bridge_stroke((-5.0, 15.0), (35.0, 15.0), 4.0));
+        assert_eq!(s.shapes.len(), 2, "Ring → obere + untere Hälfte");
+        s.undo();
+        assert_eq!(s.shapes.len(), 2, "Undo stellt Außenrand + Loch her");
+        assert!(matches!(s.shapes[0].geo, Geo::Rect { .. }));
     }
 
     #[test]
@@ -710,6 +827,21 @@ mod tests {
         let pieces = bridge_line(&sq, true, (-5.0, -5.0), (25.0, 25.0), 2.0).unwrap();
         assert_eq!(pieces.len(), 2);
         assert!(pieces.iter().all(|(_, closed)| *closed));
+    }
+
+    #[test]
+    fn bridge_line_offene_linie_bekommt_luecke() {
+        // Offene 2-Punkt-Linie quer zum Steg → zwei Teilstücke mit Lücke.
+        let line = vec![(0.0, 0.0), (20.0, 0.0)];
+        let pieces = bridge_line(&line, false, (10.0, -5.0), (10.0, 5.0), 4.0).unwrap();
+        assert_eq!(pieces.len(), 2, "Linie wird aufgetrennt");
+        assert!(pieces.iter().all(|(_, closed)| !*closed));
+        // Die Lücke ist band-breit: kein Punkt im Bereich |x-10| < 2.
+        for (pts, _) in &pieces {
+            for &(x, _) in pts {
+                assert!((x - 10.0).abs() >= 2.0 - 1e-6, "Lücke fehlt bei x={x}");
+            }
+        }
     }
 
     #[test]

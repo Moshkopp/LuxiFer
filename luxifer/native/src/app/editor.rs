@@ -139,8 +139,8 @@ impl App {
     }
 
     /// Sofort-Aktion aus der Werkzeugleiste. Boolean/Fillet/Offset/Muster
-    /// öffnen einen Parameterdialog; Bridge braucht eine eigene Geste und
-    /// meldet das vorerst.
+    /// öffnen einen Parameterdialog; der Haltesteg ist ein eigenes
+    /// Canvas-Werkzeug (`Tool::Bridge`).
     pub fn begin_action(&mut self, a: crate::tools::ToolAction) {
         use crate::tools::ToolAction as A;
         match a {
@@ -150,13 +150,34 @@ impl App {
             A::PatternFill => {
                 self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::PatternFill))
             }
-            A::Bridge => {
-                self.app_error = Some(AppError::new(
-                    "not_migrated",
-                    "Haltestege sind noch nicht migriert.",
-                ))
-            }
         }
+    }
+
+    /// Bestätigt den schwebenden Haltesteg-Entwurf: trennt die gekreuzten
+    /// Konturen im Steg-Band auf (Core) und schließt die Schnittkanten quer.
+    /// Bei Fehlschlag (Linie kreuzt nichts) bleibt der Entwurf zum Nachfassen
+    /// stehen.
+    pub fn commit_bridge(&mut self) {
+        let Some(d) = self.canvas.bridge else {
+            return;
+        };
+        self.canvas.bridge_width = d.width;
+        match self
+            .session
+            .bridge((d.p0[0], d.p0[1]), (d.p1[0], d.p1[1]), d.width)
+        {
+            Ok(()) => {
+                self.canvas.bridge = None;
+                self.refresh_accent();
+                self.toasts.success("Haltesteg eingefügt");
+            }
+            Err(error) => self.toasts.error(error.message().to_string()),
+        }
+    }
+
+    /// Verwirft den schwebenden Haltesteg-Entwurf.
+    pub fn cancel_bridge(&mut self) {
+        self.canvas.bridge = None;
     }
 
     /// Führt die im Geometrie-Dialog parametrierte Operation über die Session

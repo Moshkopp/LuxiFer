@@ -879,3 +879,34 @@ fn muster_fuellung_wandert_beim_verschieben_der_quelle_mit() {
         "Muster wandert mit"
     );
 }
+
+#[test]
+fn haltesteg_trennt_kontur_und_meldet_fehlschlag_ohne_mutation() {
+    let mut session = EditorSession::default();
+    session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [20.0, 20.0]);
+    session.mark_saved();
+
+    // Linie kreuzt nichts → stabiler Fehler, Szene unverändert.
+    assert!(session.bridge((50.0, 50.0), (60.0, 60.0), 2.0).is_err());
+    assert_eq!(session.shapes.len(), 1);
+    assert!(!session.is_dirty(), "Fehlschlag darf nichts mutieren");
+
+    // Ungültige Breite → Fehler ohne Mutation.
+    assert!(session.bridge((-5.0, 10.0), (25.0, 10.0), 0.0).is_err());
+    assert_eq!(session.shapes.len(), 1);
+
+    // Quer durch das Rechteck → zwei über die Querstücke geschlossene
+    // Hälften (ThorBurn-Verhalten), EIN Undo.
+    session.bridge((-5.0, 10.0), (25.0, 10.0), 4.0).unwrap();
+    assert_eq!(session.shapes.len(), 2, "Steg trennt in zwei Teile");
+    assert!(session
+        .shapes
+        .iter()
+        .all(|s| matches!(s.geo, Geo::Polyline { closed: true, .. })));
+    assert!(session.undo());
+    assert_eq!(
+        session.shapes.len(),
+        1,
+        "Undo stellt das Rechteck wieder her"
+    );
+}
