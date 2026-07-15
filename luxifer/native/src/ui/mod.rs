@@ -350,7 +350,7 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
                             if ui.button("Einfügen").clicked() {
                                 commit = true;
                             }
-                            if ui.button("✕").on_hover_text("Verwerfen (Esc)").clicked() {
+                            if ui.button("✖").on_hover_text("Verwerfen (Esc)").clicked() {
                                 cancel = true;
                             }
                         });

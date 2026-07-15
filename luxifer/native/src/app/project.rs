@@ -389,7 +389,8 @@ impl App {
                 if self.project_browser.selected.as_deref() == Some(from) {
                     self.project_browser.selected = Some(to.to_string());
                 }
-                self.toasts.success(format!("Umbenannt: {from} → {to}"));
+                self.toasts
+                    .success(format!("Umbenannt: „{from}“ heißt jetzt „{to}“"));
             }
             Err(error) => self.app_error = Some(error),
         }

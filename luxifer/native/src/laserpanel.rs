@@ -124,9 +124,9 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     if !view.profiles.is_empty() {
         ui.horizontal(|ui| {
             let (color, label) = if view.connected {
-                (Color32::from_rgb(0x34, 0xd3, 0x99), "● Verbunden")
+                (Color32::from_rgb(0x34, 0xd3, 0x99), "⏺ Verbunden")
             } else {
-                (ui.visuals().weak_text_color(), "● Getrennt")
+                (ui.visuals().weak_text_color(), "⏺ Getrennt")
             };
             ui.colored_label(color, label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

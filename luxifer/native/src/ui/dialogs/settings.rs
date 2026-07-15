@@ -226,7 +226,7 @@ fn charon_section(
                     (ui.visuals().weak_text_color(), "offline")
                 };
                 ui.horizontal(|ui| {
-                    ui.colored_label(color, "●");
+                    ui.colored_label(color, "⏺");
                     ui.label(&workplace.name);
                     ui.weak(status);
                 });

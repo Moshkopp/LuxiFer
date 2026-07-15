@@ -77,7 +77,7 @@ pub(super) fn topbar(
             columns[1].horizontal_centered(|ui| {
                 for target in [View::Projekt, View::Design, View::Laser, View::Preview] {
                     let label = if target == View::Projekt && inbox_count > 0 {
-                        format!("  {}  ● {}  ", target.label(), inbox_count)
+                        format!("  {}  • {}  ", target.label(), inbox_count)
                     } else {
                         format!("  {}  ", target.label())
                     };
@@ -116,7 +116,7 @@ pub(super) fn topbar(
                     };
                     if ui
                         .add(egui::Button::new(
-                            RichText::new(format!("● {label}")).color(color),
+                            RichText::new(format!("⏺ {label}")).color(color),
                         ))
                         .on_hover_text(format!("{hint} · Charon-Eingang öffnen"))
                         .clicked()

@@ -112,7 +112,14 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, cur: Tool, selection: usize) -> Vec
     egui::Grid::new("tg_textnode")
         .spacing([gap, gap])
         .show(ui, |ui| {
-            if icon_button(ui, side, "text", "Text einfügen (Text→Pfad)", false, false) {
+            if icon_button(
+                ui,
+                side,
+                "text",
+                "Text einfügen (Text zu Pfad)",
+                false,
+                false,
+            ) {
                 actions.push(UiAction::OpenTextDialog);
             }
             if icon_button(

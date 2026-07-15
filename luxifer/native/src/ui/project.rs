@@ -202,7 +202,7 @@ pub(super) fn project_browser(
                 actions.push(UiAction::SaveProjectVersion);
             }
             if dirty {
-                ui.colored_label(ui.visuals().warn_fg_color, "● ungespeichert");
+                ui.colored_label(ui.visuals().warn_fg_color, "⏺ ungespeichert");
             }
         });
     });
@@ -469,7 +469,7 @@ fn inbox_pane(
                     ui.horizontal(|ui| {
                         ui.strong(&entry.project_name);
                         if entry.status == InboxStatus::PendingReview {
-                            ui.colored_label(ui.visuals().warn_fg_color, "● neu");
+                            ui.colored_label(ui.visuals().warn_fg_color, "⏺ neu");
                         } else {
                             ui.weak("später");
                         }

@@ -50,12 +50,12 @@ pub(in crate::ui) fn text_dialog_window(
                     .hint_text("Suchen…")
                     .desired_width(ui.available_width() - 60.0);
                 ui.add(search);
-                if !st.search.is_empty() && ui.button("✕").on_hover_text("Suche leeren").clicked()
+                if !st.search.is_empty() && ui.button("✖").on_hover_text("Suche leeren").clicked()
                 {
                     st.search.clear();
                 }
                 if ui
-                    .button("＋")
+                    .button("✚")
                     .on_hover_text("Font-Datei importieren (TTF/OTF)")
                     .clicked()
                 {

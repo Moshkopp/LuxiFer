@@ -29,8 +29,10 @@ pub(in crate::ui) fn geo_op_dialog_window(
             match st.kind {
                 GeoOpKind::Boolean => {
                     let label = |op: BoolOp| match op {
-                        BoolOp::Union => "Vereinigen (A ∪ B)",
-                        BoolOp::Intersect => "Schneiden (A ∩ B)",
+                        // Mengensymbole (∪/∩) fehlen in egui-Proportionalfonts
+                        // und würden als Tofu-Boxen rendern — daher Worte.
+                        BoolOp::Union => "Vereinigen (A + B)",
+                        BoolOp::Intersect => "Schneiden (nur Überlappung)",
                         BoolOp::Difference => "Abziehen (A − B)",
                     };
                     egui::ComboBox::from_label("Variante")

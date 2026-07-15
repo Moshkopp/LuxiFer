@@ -116,8 +116,8 @@ pub(in crate::ui) fn revision_comparison_window(
 
 fn change_badge(ui: &mut egui::Ui, label: &str, changed: bool) {
     if changed {
-        ui.colored_label(ui.visuals().warn_fg_color, format!("● {label} geändert"));
+        ui.colored_label(ui.visuals().warn_fg_color, format!("⏺ {label} geändert"));
     } else {
-        ui.weak(format!("✓ {label} gleich"));
+        ui.weak(format!("✔ {label} gleich"));
     }
 }

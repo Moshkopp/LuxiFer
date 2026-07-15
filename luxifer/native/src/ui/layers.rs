@@ -71,10 +71,10 @@ pub(super) fn layers_panel(ui: &mut egui::Ui, rows: &[LayerRow]) -> Vec<UiAction
                         );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("↓").clicked() && i > 0 {
+                        if ui.small_button("⬇").clicked() && i > 0 {
                             actions.push(UiAction::MoveLayer { from: i, to: i - 1 });
                         }
-                        if ui.small_button("↑").clicked() && i + 1 < n {
+                        if ui.small_button("⬆").clicked() && i + 1 < n {
                             actions.push(UiAction::MoveLayer { from: i, to: i + 1 });
                         }
                     });
