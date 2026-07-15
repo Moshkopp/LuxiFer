@@ -39,7 +39,68 @@ impl App {
             size_mm: meta.size_mm,
             font_idx,
             edit_index: Some(index),
+            request_font_import: false,
         });
+    }
+
+    /// Importiert eine Font-Datei (TTF/OTF) in den Asset-Katalog und wählt sie
+    /// im offenen Text-Dialog aus. Der Katalog liegt vor den System-Fonts,
+    /// damit importierte Fonts auch ohne Systeminstallation verfügbar bleiben.
+    pub fn import_font_dialog(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Font (TTF/OTF)", &["ttf", "otf"])
+            .pick_file()
+        else {
+            return;
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.toasts.error(format!("Font lesen: {error}"));
+                return;
+            }
+        };
+        // Vor dem Ablegen prüfen, ob die Datei überhaupt ein brauchbarer Font
+        // ist — sonst landet Datenmüll dauerhaft im Katalog.
+        if let Err(error) = luxifer_core::text::text_to_contours(&bytes, "Ag", 20.0) {
+            self.toasts.error(format!("Font unbrauchbar: {error}"));
+            return;
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("font.ttf");
+        let ext = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("ttf");
+        let meta = match luxifer_core::import_source(
+            &luxifer_core::assets_dir(),
+            &bytes,
+            name,
+            ext,
+            luxifer_core::AssetKind::Font,
+        ) {
+            Ok(meta) => meta,
+            Err(error) => {
+                self.toasts.error(format!("Font importieren: {error}"));
+                return;
+            }
+        };
+        self.refresh_asset_catalog();
+        self.fonts = crate::fonts::list_fonts();
+        // Den frisch importierten Font direkt auswählen (Anzeigename = Stem des
+        // Originalnamens, wie in `list_fonts`).
+        let stem = std::path::Path::new(&meta.original_name)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or(&meta.original_name)
+            .to_string();
+        let idx = self.fonts.iter().position(|font| font.name == stem);
+        if let Some(state) = self.text_dialog.as_mut() {
+            state.font_idx = idx.or(state.font_idx);
+        }
+        self.toasts.success(format!("Font „{stem}“ importiert"));
     }
 
     pub fn commit_text(&mut self) -> bool {

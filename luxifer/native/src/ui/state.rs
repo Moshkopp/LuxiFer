@@ -66,6 +66,9 @@ pub struct TextDialogState {
     pub font_idx: Option<usize>,
     /// Shape-Index des editierten Textblocks, oder None (neuer Text).
     pub edit_index: Option<usize>,
+    /// Nutzer will eine Font-Datei importieren; der App-Root öffnet den
+    /// Datei-Dialog (der Dialog selbst bleibt reine Zeichnung).
+    pub request_font_import: bool,
 }
 
 impl Default for TextDialogState {
@@ -75,6 +78,7 @@ impl Default for TextDialogState {
             size_mm: 20.0,
             font_idx: None,
             edit_index: None,
+            request_font_import: false,
         }
     }
 }

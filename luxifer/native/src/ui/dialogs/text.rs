@@ -31,20 +31,29 @@ pub(in crate::ui) fn text_dialog_window(
                 .spacing([8.0, 8.0])
                 .show(ui, |ui| {
                     ui.label("Font");
-                    let current = st
-                        .font_idx
-                        .and_then(|i| font_names.get(i).cloned())
-                        .unwrap_or_else(|| "—".into());
-                    egui::ComboBox::from_id_salt("font")
-                        .selected_text(current)
-                        .width(220.0)
-                        .show_ui(ui, |ui| {
-                            for (i, name) in font_names.iter().enumerate() {
-                                if ui.selectable_label(st.font_idx == Some(i), name).clicked() {
-                                    st.font_idx = Some(i);
+                    ui.horizontal(|ui| {
+                        let current = st
+                            .font_idx
+                            .and_then(|i| font_names.get(i).cloned())
+                            .unwrap_or_else(|| "—".into());
+                        egui::ComboBox::from_id_salt("font")
+                            .selected_text(current)
+                            .width(190.0)
+                            .show_ui(ui, |ui| {
+                                for (i, name) in font_names.iter().enumerate() {
+                                    if ui.selectable_label(st.font_idx == Some(i), name).clicked() {
+                                        st.font_idx = Some(i);
+                                    }
                                 }
-                            }
-                        });
+                            });
+                        if ui
+                            .button("＋")
+                            .on_hover_text("Font-Datei importieren (TTF/OTF)")
+                            .clicked()
+                        {
+                            st.request_font_import = true;
+                        }
+                    });
                     ui.end_row();
                     ui.label("Größe (mm)");
                     ui.add(

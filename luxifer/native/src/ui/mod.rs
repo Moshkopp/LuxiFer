@@ -360,6 +360,16 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             }
             dialogs::DialogOutcome::Cancel => app.text_dialog = None,
         }
+        // Font-Import wurde im Dialog angefordert; der Root öffnet den
+        // (blockierenden) Datei-Dialog außerhalb des &mut-Borrows.
+        if app
+            .text_dialog
+            .as_mut()
+            .map(|state| std::mem::take(&mut state.request_font_import))
+            .unwrap_or(false)
+        {
+            app.import_font_dialog();
+        }
     }
 
     // Layer-Dialog: der Entwurf wird als &mut gereicht, der Root behandelt das
