@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::{collections::hash_map::DefaultHasher, hash::Hash, hash::Hasher};
 
 use luxifer_application::{AppError, AssetService, PreparedAsset};
 use luxifer_core::Geo;
@@ -299,6 +300,83 @@ impl App {
         }
     }
 
+    /// Aktualisiert die Dialogvorschau nur bei geändertem Entwurf. Die
+    /// Bildverarbeitung selbst bleibt im Core/Application-Pfad.
+    pub fn update_image_dialog_preview(&mut self) {
+        let Some(state) = self.image_dialog.as_ref() else {
+            return;
+        };
+        let Some(asset) =
+            self.session
+                .state()
+                .shapes
+                .get(state.index)
+                .and_then(|shape| match &shape.geo {
+                    Geo::Image { asset, .. } => Some(asset.clone()),
+                    _ => None,
+                })
+        else {
+            return;
+        };
+        let params = state.params;
+        let mut hasher = DefaultHasher::new();
+        asset.hash(&mut hasher);
+        (params.mode as u8).hash(&mut hasher);
+        params.threshold.hash(&mut hasher);
+        params.brightness.hash(&mut hasher);
+        params.contrast.hash(&mut hasher);
+        params.gamma.to_bits().hash(&mut hasher);
+        params.invert_editor.hash(&mut hasher);
+        (state.page as u8).hash(&mut hasher);
+        if state.page == crate::ui::ImageDialogPage::Trace {
+            state.trace_threshold.hash(&mut hasher);
+            state.trace_invert.hash(&mut hasher);
+        } else if state.page == crate::ui::ImageDialogPage::Crop {
+            for value in state.crop_rect {
+                value.to_bits().hash(&mut hasher);
+            }
+        }
+        let key = hasher.finish();
+        if state.preview_key == Some(key) {
+            return;
+        }
+
+        let result = match state.page {
+            crate::ui::ImageDialogPage::Trace => AssetService::trace_preview(
+                &asset,
+                &params,
+                state.trace_threshold,
+                state.trace_invert,
+            ),
+            crate::ui::ImageDialogPage::Crop => {
+                AssetService::crop_preview(&asset, &params, state.crop_rect)
+            }
+            crate::ui::ImageDialogPage::Settings => AssetService::image_preview(&asset, &params),
+        };
+        let Some(state) = self.image_dialog.as_mut() else {
+            return;
+        };
+        state.preview_key = Some(key);
+        match result {
+            Ok(image) => {
+                let color = egui::ColorImage::from_rgba_unmultiplied(
+                    [image.width as usize, image.height as usize],
+                    &image.rgba,
+                );
+                state.preview = Some(self.egui_ctx.load_texture(
+                    format!("image-dialog-{asset}"),
+                    color,
+                    egui::TextureOptions::LINEAR,
+                ));
+                state.preview_error = None;
+            }
+            Err(error) => {
+                state.preview = None;
+                state.preview_error = Some(error.to_string());
+            }
+        }
+    }
+
     /// Übernimmt den Bildparameter-Entwurf über die Session (validiert, ein
     /// Undo-Schritt). Erfolg → Dialog schließen; Fehler → offen + Fehlerkanal.
     pub fn commit_image_dialog(&mut self) -> bool {
@@ -324,14 +402,56 @@ impl App {
         let Some(st) = self.image_dialog.as_ref() else {
             return;
         };
-        let (index, threshold, invert) = (st.index, st.trace_threshold, st.trace_invert);
-        match self.session.trace_image(index, threshold, invert) {
+        let (index, params, threshold, invert) =
+            (st.index, st.params, st.trace_threshold, st.trace_invert);
+        match self
+            .session
+            .trace_image_with_params(index, params, threshold, invert)
+        {
             Ok(indices) => {
                 self.refresh_accent();
                 self.toasts
                     .success(format!("{} Konturen erzeugt.", indices.len()));
             }
             Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Übernimmt den Crop als abgeleitetes Asset und einen Core-Undo-Schritt.
+    pub fn crop_image_dialog(&mut self) -> bool {
+        let Some(st) = self.image_dialog.as_ref() else {
+            return false;
+        };
+        let (index, crop) = (st.index, st.crop_rect);
+        let Some(asset) =
+            self.session
+                .state()
+                .shapes
+                .get(index)
+                .and_then(|shape| match &shape.geo {
+                    Geo::Image { asset, .. } => Some(asset.clone()),
+                    _ => None,
+                })
+        else {
+            return false;
+        };
+        let meta = match AssetService::crop_image(&asset, crop) {
+            Ok(meta) => meta,
+            Err(error) => {
+                self.app_error = Some(error);
+                return false;
+            }
+        };
+        match self.session.crop_image(index, meta.id, crop) {
+            Ok(()) => {
+                self.image_dirty = true;
+                self.toasts.success("Bild zugeschnitten.");
+                true
+            }
+            Err(error) => {
+                self.app_error = Some(error);
+                false
+            }
         }
     }
 

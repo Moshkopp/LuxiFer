@@ -45,6 +45,23 @@ pub struct ImageDialogState {
     pub trace_threshold: u8,
     /// Motiv/Hintergrund beim Trace tauschen (helles Motiv auf dunklem Grund).
     pub trace_invert: bool,
+    /// Gecachte Live-Vorschau des aktuellen Parameterentwurfs.
+    pub preview: Option<egui::TextureHandle>,
+    pub preview_key: Option<u64>,
+    pub preview_error: Option<String>,
+    /// Reiner Ansichts-Zustand der Vorschau; verändert das Bildobjekt nicht.
+    pub preview_zoom: f32,
+    pub preview_pan: egui::Vec2,
+    pub page: ImageDialogPage,
+    /// Normalisierte Schnittkanten im Quellbild: links, oben, rechts, unten.
+    pub crop_rect: [f32; 4],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ImageDialogPage {
+    Settings,
+    Trace,
+    Crop,
 }
 
 impl ImageDialogState {
@@ -54,6 +71,13 @@ impl ImageDialogState {
             params,
             trace_threshold: 128,
             trace_invert: false,
+            preview: None,
+            preview_key: None,
+            preview_error: None,
+            preview_zoom: 1.0,
+            preview_pan: egui::Vec2::ZERO,
+            page: ImageDialogPage::Settings,
+            crop_rect: [0.0, 0.0, 1.0, 1.0],
         }
     }
 }

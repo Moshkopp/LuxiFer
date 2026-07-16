@@ -112,7 +112,7 @@ Quelle: `frontend/src-tauri/src/commands/image.rs` sowie Projekt-Assets.
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
 | `import_image_file` | Application/Core | über Session/Asset-Store | Asset-Anlage und Textur-Invalidierung (`image_dirty`); auch per `import_path` (CLI/Schnellknopf, Vorarbeit F1) |
-| `image_render` | Core/Application | teilweise Renderer | **offen:** Live-Vorschau im Dialog; Wirkung erst nach Übernahme (C2) |
+| `image_render` | Core/Application | vollständig | Live-Dialogvorschau über dieselbe `rendered_png`-Pipeline inklusive Dithering; Übernahme bleibt nicht-destruktiv |
 | `set_image_params` | Core/Application | über `EditorSession::set_image_params` | Modus/Schwelle/Helligkeit/Kontrast/Gamma/Invert validiert; Dialog per Doppelklick |
 | `project_assets` | Application/Core | über Core-`ProjectFile` | Assets laufen durch die kanonische Projektkette; keine Base64-Dauerablage |
 

@@ -355,15 +355,16 @@ Ziel: Vollständige Erzeugungs- und Bearbeitungsworkflows statt Import-Demos.
 - [x] Bildimport mit Asset-Anlage und Textur-Invalidierung (`image_dirty`).
 - [x] Bildparameter: Modus, Schwelle, Helligkeit, Kontrast, Gamma und Invert
       (`EditorSession::set_image_params`, validiert; Dialog per Doppelklick).
-- [ ] Live-Bildvorschau/Dithering im Dialog (aktuell wirkt der Parameterwechsel
-      erst nach Übernahme über die Textur-Neuberechnung; Live-Vorschau offen).
+- [x] Live-Bildvorschau/Dithering im Dialog über die kanonische Core-Pipeline;
+      Parameteränderungen aktualisieren eine gecachte Native-Textur, ohne den
+      Editorzustand vor „Speichern“ zu mutieren.
 - [x] Systemfonts auflisten, Text anlegen und Text editieren (Doppelklick →
       `replace_text_block`).
 - [x] Fehlende/ungültige Fonts und nicht unterstützte Dateien werden als
       stabile `AppError`s behandelt und durch Application getestet.
 - [x] Trace-Workflow (Bild → Vektor): `EditorSession::trace_image` mit
       LUT-Vorverarbeitung; UI im Bild-Dialog (Schwelle/Invert); Fehlerpfade
-      getestet. (Bild-Zuschneiden bleibt eigenes offenes Feature.)
+      getestet. Bild-Zuschneiden läuft in einem eigenen Dialog mit Live-Vorschau.
 
 Abnahme Phase 4:
 
@@ -437,7 +438,7 @@ Doppelklick. Dirty-Guard schützt Neu/Öffnen/Beenden. 42 Application-Tests grü
 Offen als bewusste Feinarbeit (blockiert Phase 8 nicht): Job-/GPU-Vorschau
 (Cut/Fill/Raster/Image), Trace, Pattern-Fill, Bézier-Node-Editing, Laser-Ping/
 Position, UI-Deaktivierung ungeeigneter Aktionen, Projekt-Umbenennen-Dialog/
-Versionsliste, Live-Bildvorschau.
+Versionsliste. Die Live-Bildvorschau ist inzwischen umgesetzt.
 
 ## Phase 7 — Native-Struktur und Bedienqualität
 
@@ -626,13 +627,12 @@ Ausdrücklich **offen** (nicht als fertig behandeln):
 - Preview-Simulation (Scrubber/Abspielen): der Reiter selbst ist fertig
   (Cut/Fill/Travel, verarbeitete Rastertexturen, Legende — D2 abgeschlossen).
 - Bridge/Haltesteg (Stub) und Ecken-Fillet.
-- Bild-Zuschneiden (C3-Rest).
+- [x] Bild-Zuschneiden als eigener Dialog mit abgeleitetem Asset und Undo.
 - Bézier-Node-Editing: Knoten löschen und glatt/eckig umschalten bleiben offen;
   Hit-Test, Ziehen und Teilen sind bereits im Core vorhanden.
 - Projektbrowser: PNG-Thumbnails pro Version (Master-Detail-Browser mit
   Versionen/Umbenennen/Live-Miniatur ist seit dem E4-Schnitt umgesetzt).
 - Laser Ping/Verbindungsstatus/Position.
-- Live-Bildvorschau im Bildparameter-Dialog.
 
 Nächste sinnvolle Schnitte in dieser Reihenfolge: Bridge (eigene Geste),
 dann Bézier-Node-Editing. Arbeitsgrundlage ist

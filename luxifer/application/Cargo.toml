@@ -12,8 +12,4 @@ luxifer-driver-ruida = { path = "../drivers/ruida" }
 luxifer-driver-grbl = { path = "../drivers/grbl" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-[dev-dependencies]
-# Nur für Tests: PNG-Testbilder erzeugen (Trace/Raster). Gleiche Version wie
-# der Core, verursacht also keinen zusätzlichen Build.
 image = { workspace = true }

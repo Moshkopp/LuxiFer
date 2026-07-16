@@ -28,8 +28,8 @@ pub use action::UiAction;
 pub(crate) use project::preview_from_state;
 pub use splash::Splash;
 pub use state::{
-    CachedProjectDetail, CharonTestStatus, GeoOpDialogState, GeoOpKind, ImageDialogState,
-    LaserManagerState, LaserManagerTab, LayerDialogState, PendingProjectAction,
+    CachedProjectDetail, CharonTestStatus, GeoOpDialogState, GeoOpKind, ImageDialogPage,
+    ImageDialogState, LaserManagerState, LaserManagerTab, LayerDialogState, PendingProjectAction,
     ProjectBrowserState, ProjectSaveDialogState, RevisionComparisonState, SelectionSizeState,
     SettingsDialogState, SettingsSection, TextDialogState,
 };
@@ -439,7 +439,9 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
 
     // Bildparameter-Dialog: Entwurf als &mut; Speichern über die validierende
     // Session, Abbrechen verwirft.
-    if let Some(state) = app.image_dialog.as_mut() {
+    if app.image_dialog.is_some() {
+        app.update_image_dialog_preview();
+        let state = app.image_dialog.as_mut().unwrap();
         match dialogs::image_dialog_window(ui, state) {
             dialogs::ImageDialogOutcome::None => {}
             dialogs::ImageDialogOutcome::Save => {
@@ -450,6 +452,11 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             // Trace lässt den Dialog offen: Regler nachziehen und erneut
             // vektorisieren ist der übliche Arbeitsfluss.
             dialogs::ImageDialogOutcome::Trace => app.trace_image_dialog(),
+            dialogs::ImageDialogOutcome::Crop => {
+                if app.crop_image_dialog() {
+                    app.image_dialog = None;
+                }
+            }
             dialogs::ImageDialogOutcome::Cancel => app.image_dialog = None,
         }
     }

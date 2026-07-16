@@ -9,6 +9,55 @@ use crate::AppError;
 use super::EditorSession;
 
 impl EditorSession {
+    /// Ersetzt das Bild durch ein abgeleitetes Crop-Asset und passt seine
+    /// Box an den sichtbaren Ausschnitt an. Ein einzelner Undo-Schritt.
+    pub fn crop_image(
+        &mut self,
+        index: usize,
+        asset: String,
+        crop: [f32; 4],
+    ) -> Result<(), AppError> {
+        if asset.trim().is_empty()
+            || crop.iter().any(|value| !value.is_finite())
+            || crop[0] < 0.0
+            || crop[1] < 0.0
+            || crop[2] > 1.0
+            || crop[3] > 1.0
+            || crop[2] - crop[0] < 0.01
+            || crop[3] - crop[1] < 0.01
+        {
+            return Err(AppError::new(
+                "image_crop_bounds",
+                "Der Bildausschnitt ist zu klein oder ungültig.",
+            ));
+        }
+        if !matches!(
+            self.state.shapes.get(index).map(|shape| &shape.geo),
+            Some(Geo::Image { .. })
+        ) {
+            return Err(Self::no_image_shape(index));
+        }
+        self.state.push_undo();
+        if let Geo::Image {
+            asset: current,
+            x,
+            y,
+            w,
+            h,
+            ..
+        } = &mut self.state.shapes[index].geo
+        {
+            let (old_x, old_y, old_w, old_h) = (*x, *y, *w, *h);
+            *current = asset;
+            *x = old_x + old_w * crop[0] as f64;
+            *y = old_y + old_h * crop[1] as f64;
+            *w = old_w * (crop[2] - crop[0]) as f64;
+            *h = old_h * (crop[3] - crop[1]) as f64;
+        }
+        self.state.dirty = true;
+        Ok(())
+    }
+
     /// Setzt die Bildverarbeitungs-Parameter eines Image-Shapes in genau einem
     /// Undo-Schritt. Fehlerfälle (kein solcher Index, kein Bild-Shape, ungültige
     /// Werte) mutieren nichts.
@@ -41,21 +90,34 @@ impl EditorSession {
         threshold: u8,
         invert: bool,
     ) -> Result<Vec<usize>, AppError> {
+        let params = match self.state.shapes.get(index).map(|shape| &shape.geo) {
+            Some(Geo::Image { params, .. }) => *params,
+            _ => return Err(Self::no_image_shape(index)),
+        };
+        self.trace_image_with_params(index, params, threshold, invert)
+    }
+
+    /// Trace mit einem noch nicht gespeicherten Bildparameter-Entwurf. Damit
+    /// entspricht das erzeugte Ergebnis exakt der Live-Vorschau im Dialog.
+    pub fn trace_image_with_params(
+        &mut self,
+        index: usize,
+        draft_params: ImageParams,
+        threshold: u8,
+        invert: bool,
+    ) -> Result<Vec<usize>, AppError> {
         use luxifer_core::trace::{trace, TraceParams};
         use luxifer_core::ImageMode;
 
+        Self::validate_image_params(&draft_params)?;
+
         let Some(Geo::Image {
-            asset,
-            x,
-            y,
-            w,
-            h,
-            params,
+            asset, x, y, w, h, ..
         }) = self.state.shapes.get(index).map(|s| &s.geo)
         else {
             return Err(Self::no_image_shape(index));
         };
-        let (asset, bx, by, bw, bh, params) = (asset.clone(), *x, *y, *w, *h, *params);
+        let (asset, bx, by, bw, bh) = (asset.clone(), *x, *y, *w, *h);
 
         let (px, pw, ph) = luxifer_core::load_asset_luma(&luxifer_core::assets_dir(), &asset)
             .map_err(|e| {
@@ -68,7 +130,7 @@ impl EditorSession {
         // Nur die Tonwert-LUT anwenden (kein Dithering), dann tracen.
         let lut = ImageParams {
             mode: ImageMode::Grayscale,
-            ..params
+            ..draft_params
         };
         let gray = luxifer_core::apply_params(&px, &lut, false);
         let contours = trace(

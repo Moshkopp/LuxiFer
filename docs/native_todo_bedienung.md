@@ -38,7 +38,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
 |----|--------|------|--------------|
 | C1 | ERLEDIGT | P1 | Bildtexturen werden nicht mehr von Scanlines der pinken Bild-Layer-Kennfarbe überzeichnet. |
 | C2 | UX | P2 | Bild-Doppelklick-Dialog hat keine Live-Vorschau der Einstellungen. |
-| C3 | TEILWEISE | P2 | Vektorisieren (Trace) ist im Bild-Dialog (Schwelle/Invert, Konturen auf aktivem Zeichen-Layer, ein Undo je Lauf). Zuschneiden fehlt weiterhin. |
+| C3 | FERTIG | P2 | Bildparameter, Crop und Trace besitzen getrennte kompakte Arbeitsbereiche mit Live-Vorschau. Crop erzeugt ein abgeleitetes Asset und bleibt per Undo reversibel. |
 
 ## D. Fills / Vorschau
 
@@ -119,7 +119,7 @@ Priorität: P1 = blockiert normales Arbeiten, P2 = wichtig, P3 = Politur.
   eine „Vektorisieren"-Sektion im Bild-Dialog (Schwelle 0–255, Invertieren);
   der Dialog bleibt nach dem Trace offen, damit man die Schwelle nachziehen
   und erneut tracen kann. Fehlerpfade (kein Bild, fehlendes Asset, keine
-  Konturen) sind stabile `AppError`s ohne Mutation. Zuschneiden bleibt offen.
+  Konturen) sind stabile `AppError`s ohne Mutation. Crop validiert die Schnittkanten und passt Asset, Position und Bildbox in einem Undo-Schritt an.
 - B1 (erledigt): `cavalier_contours` erzeugte standardmäßig runde Außen-Joins.
   Geschlossene konvexe Linienkonturen nutzen nun im Core Schnittpunkte
   benachbarter Parallelkanten (Miter); kollabierte Innenoffsets bleiben leer.

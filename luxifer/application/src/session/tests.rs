@@ -774,6 +774,37 @@ fn trace_image_erzeugt_geschlossene_konturen_in_mm() {
 }
 
 #[test]
+fn crop_image_passt_asset_und_box_in_einem_undo_schritt_an() {
+    let mut state = AppState::new();
+    let index = state.add_image("quelle".into(), 10.0, 20.0, 100.0, 80.0);
+    let mut session = EditorSession::new(state);
+
+    session
+        .crop_image(index, "ausschnitt".into(), [0.1, 0.25, 0.8, 0.75])
+        .expect("Crop");
+    let Geo::Image {
+        asset, x, y, w, h, ..
+    } = &session.state().shapes[index].geo
+    else {
+        panic!("Bild erwartet");
+    };
+    assert_eq!(asset, "ausschnitt");
+    for (actual, expected) in [(*x, 20.0), (*y, 40.0), (*w, 70.0), (*h, 40.0)] {
+        assert!((actual - expected).abs() < 1e-5);
+    }
+
+    assert!(session.undo());
+    let Geo::Image {
+        asset, x, y, w, h, ..
+    } = &session.state().shapes[index].geo
+    else {
+        panic!("Bild erwartet");
+    };
+    assert_eq!(asset, "quelle");
+    assert_eq!((*x, *y, *w, *h), (10.0, 20.0, 100.0, 80.0));
+}
+
+#[test]
 fn trace_image_meldet_fehler_stabil() {
     let _g = crate::test_env::with_temp_dir("trace_fehler");
     let asset = import_test_square();

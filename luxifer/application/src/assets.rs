@@ -188,6 +188,171 @@ impl AssetService {
         )
     }
 
+    /// Erzeugt die nicht-destruktive Editor-Vorschau mit derselben Core-
+    /// Verarbeitung wie die Canvas-Darstellung, einschließlich Dithering.
+    pub fn image_preview(
+        id: &str,
+        params: &luxifer_core::ImageParams,
+    ) -> Result<PreparedImage, AppError> {
+        let png = luxifer_core::rendered_png(
+            &luxifer_core::assets_dir(),
+            &id.to_owned(),
+            params,
+            params.invert_editor,
+        )
+        .map_err(|error| {
+            AppError::wrap(
+                "image_preview",
+                "Bildvorschau konnte nicht erzeugt werden.",
+                error.to_string(),
+            )
+        })?;
+        let image = image::load_from_memory(&png).map_err(|error| {
+            AppError::wrap(
+                "image_preview_decode",
+                "Bildvorschau konnte nicht gelesen werden.",
+                error.to_string(),
+            )
+        })?;
+        let rgba = image.to_rgba8();
+        Ok(PreparedImage {
+            width: rgba.width(),
+            height: rgba.height(),
+            rgba: rgba.into_raw(),
+        })
+    }
+
+    /// Binäre Vorschau der Pixel, die der Trace als Vordergrund erfasst.
+    /// Nutzt wie `EditorSession::trace_image` nur die Tonwert-LUT vor der
+    /// separaten Trace-Schwelle.
+    pub fn trace_preview(
+        id: &str,
+        params: &luxifer_core::ImageParams,
+        threshold: u8,
+        invert: bool,
+    ) -> Result<PreparedImage, AppError> {
+        let (pixels, width, height) =
+            luxifer_core::load_asset_luma(&luxifer_core::assets_dir(), &id.to_owned()).map_err(
+                |error| {
+                    AppError::wrap(
+                        "trace_preview",
+                        "Trace-Vorschau konnte nicht erzeugt werden.",
+                        error.to_string(),
+                    )
+                },
+            )?;
+        let lut = luxifer_core::ImageParams {
+            mode: luxifer_core::ImageMode::Grayscale,
+            ..*params
+        };
+        let gray = luxifer_core::apply_params(&pixels, &lut, false);
+        let mut rgba = Vec::with_capacity(gray.len() * 4);
+        for pixel in gray {
+            let captured = (pixel < threshold) != invert;
+            let color = if captured { 20 } else { 245 };
+            rgba.extend_from_slice(&[color, color, color, 255]);
+        }
+        Ok(PreparedImage {
+            rgba,
+            width,
+            height,
+        })
+    }
+
+    /// Rendert einen Quellbild-Ausschnitt mit den aktuellen Bildparametern.
+    pub fn crop_preview(
+        id: &str,
+        params: &luxifer_core::ImageParams,
+        crop: [f32; 4],
+    ) -> Result<PreparedImage, AppError> {
+        let cropped = Self::cropped_luma(id, crop)?;
+        let (width, height) = cropped.dimensions();
+        let mut processed =
+            luxifer_core::apply_params(cropped.as_raw(), params, params.invert_editor);
+        if luxifer_core::dither::is_dither(params.mode) {
+            processed = luxifer_core::dither::dither(
+                &processed,
+                width as usize,
+                height as usize,
+                params.mode,
+            );
+        }
+        let mut rgba = Vec::with_capacity(processed.len() * 4);
+        for pixel in processed {
+            rgba.extend_from_slice(&[pixel, pixel, pixel, 255]);
+        }
+        Ok(PreparedImage {
+            rgba,
+            width,
+            height,
+        })
+    }
+
+    /// Legt den Ausschnitt als abgeleitetes Asset ab. Das Quellasset bleibt
+    /// unverändert und kann von Undo oder anderen Bildern weiter genutzt werden.
+    pub fn crop_image(id: &str, crop: [f32; 4]) -> Result<luxifer_core::AssetMeta, AppError> {
+        let cropped = Self::cropped_luma(id, crop)?;
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(cropped)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .map_err(|error| {
+                AppError::wrap(
+                    "image_crop_encode",
+                    "Bildausschnitt konnte nicht gespeichert werden.",
+                    error.to_string(),
+                )
+            })?;
+        luxifer_core::import_image(&luxifer_core::assets_dir(), &png, "Bildausschnitt.png").map_err(
+            |error| {
+                AppError::wrap(
+                    "image_crop_store",
+                    "Bildausschnitt konnte nicht abgelegt werden.",
+                    error.to_string(),
+                )
+            },
+        )
+    }
+
+    fn cropped_luma(id: &str, crop: [f32; 4]) -> Result<image::GrayImage, AppError> {
+        let valid = crop.iter().all(|value| value.is_finite())
+            && crop[0] >= 0.0
+            && crop[1] >= 0.0
+            && crop[2] <= 1.0
+            && crop[3] <= 1.0
+            && crop[2] - crop[0] >= 0.01
+            && crop[3] - crop[1] >= 0.01;
+        if !valid {
+            return Err(AppError::new(
+                "image_crop_bounds",
+                "Der Bildausschnitt ist zu klein oder ungültig.",
+            ));
+        }
+        let bytes = luxifer_core::load_asset(&luxifer_core::assets_dir(), &id.to_owned()).map_err(
+            |error| {
+                AppError::wrap(
+                    "image_crop_read",
+                    "Quellbild konnte nicht gelesen werden.",
+                    error.to_string(),
+                )
+            },
+        )?;
+        let image = image::load_from_memory(&bytes)
+            .map_err(|error| {
+                AppError::wrap(
+                    "image_crop_decode",
+                    "Quellbild konnte nicht dekodiert werden.",
+                    error.to_string(),
+                )
+            })?
+            .to_luma8();
+        let (width, height) = image.dimensions();
+        let left = (crop[0] * width as f32).floor() as u32;
+        let top = (crop[1] * height as f32).floor() as u32;
+        let right = ((crop[2] * width as f32).ceil() as u32).clamp(left + 1, width);
+        let bottom = ((crop[3] * height as f32).ceil() as u32).clamp(top + 1, height);
+        Ok(image::imageops::crop_imm(&image, left, top, right - left, bottom - top).to_image())
+    }
+
     pub fn delete_or_hide(id: &str, referenced_in_session: bool) -> Result<bool, AppError> {
         let projects = luxifer_core::projects_dir();
         let referenced = referenced_in_session
@@ -332,5 +497,30 @@ mod tests {
 
         assert_eq!(error.code(), "font_invalid");
         assert!(AssetService::list_visible().expect("Katalog").is_empty());
+    }
+
+    #[test]
+    fn bildvorschau_nutzt_die_core_parameterpipeline() {
+        let _guard = crate::test_env::with_temp_dir("image_preview");
+        let mut source = image::GrayImage::new(2, 1);
+        source.put_pixel(0, 0, image::Luma([40]));
+        source.put_pixel(1, 0, image::Luma([220]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(source)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("Test-PNG");
+        let meta = luxifer_core::import_image(&luxifer_core::assets_dir(), &png, "preview.png")
+            .expect("Bild importieren");
+        let params = luxifer_core::ImageParams {
+            mode: luxifer_core::ImageMode::Threshold,
+            threshold: 128,
+            ..Default::default()
+        };
+
+        let preview = AssetService::image_preview(&meta.id, &params).expect("Vorschau");
+
+        assert_eq!((preview.width, preview.height), (2, 1));
+        assert_eq!(&preview.rgba[0..4], &[0, 0, 0, 255]);
+        assert_eq!(&preview.rgba[4..8], &[255, 255, 255, 255]);
     }
 }
