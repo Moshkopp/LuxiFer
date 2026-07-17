@@ -30,6 +30,97 @@ pub struct GrblDriver {
     pub config: GrblConfig,
 }
 
+#[derive(Clone, Copy)]
+struct GrblMotion {
+    from: (f64, f64),
+    to: (f64, f64),
+    kind: luxifer_core::ExecutionKind,
+}
+
+fn push_grbl_travel(head: &mut (f64, f64), to: (f64, f64), motions: &mut Vec<GrblMotion>) {
+    motions.push(GrblMotion {
+        from: *head,
+        to,
+        kind: luxifer_core::ExecutionKind::Travel,
+    });
+    *head = to;
+}
+
+fn grbl_motion_program(plan: &JobPlan) -> Vec<(usize, f64, f64, Vec<GrblMotion>)> {
+    use luxifer_core::ExecutionKind as K;
+    let mut head = (0.0, 0.0);
+    let mut program = Vec::new();
+    for layer in &plan.layers {
+        let mut motions = Vec::new();
+        for _ in 0..layer.passes.max(1) {
+            match &layer.work {
+                LayerWork::Cut { paths } => {
+                    for path in paths {
+                        let Some(&start) = path.points.first() else {
+                            continue;
+                        };
+                        push_grbl_travel(&mut head, start, &mut motions);
+                        for pair in path.points.windows(2) {
+                            motions.push(GrblMotion {
+                                from: pair[0],
+                                to: pair[1],
+                                kind: K::Cut,
+                            });
+                            head = pair[1];
+                        }
+                        if path.closed {
+                            let last = *path.points.last().unwrap();
+                            motions.push(GrblMotion {
+                                from: last,
+                                to: start,
+                                kind: K::Cut,
+                            });
+                            head = start;
+                        }
+                    }
+                }
+                LayerWork::Fill { segments } => {
+                    for segment in segments {
+                        let from = (segment.x0, segment.y);
+                        let to = (segment.x1, segment.y);
+                        push_grbl_travel(&mut head, from, &mut motions);
+                        motions.push(GrblMotion {
+                            from,
+                            to,
+                            kind: K::Fill,
+                        });
+                        head = to;
+                    }
+                }
+                LayerWork::Raster { rows, .. } => {
+                    for row in rows {
+                        for &(x0, x1) in &row.runs {
+                            let from = (x0, row.y);
+                            let to = (x1, row.y);
+                            push_grbl_travel(&mut head, from, &mut motions);
+                            motions.push(GrblMotion {
+                                from,
+                                to,
+                                kind: K::Raster,
+                            });
+                            head = to;
+                        }
+                    }
+                }
+            }
+        }
+        program.push((layer.layer_id, layer.speed_mm_s, layer.power_pct, motions));
+    }
+    if let Some(last) = program.last_mut() {
+        last.3.push(GrblMotion {
+            from: head,
+            to: (0.0, 0.0),
+            kind: luxifer_core::ExecutionKind::Travel,
+        });
+    }
+    program
+}
+
 impl GrblDriver {
     pub fn new(config: GrblConfig) -> Self {
         Self { config }
@@ -51,61 +142,34 @@ impl GrblDriver {
         g.push_str("M5\n"); // Laser aus (sicher)
         g.push_str("G0 X0 Y0\n");
 
-        for jl in &plan.layers {
-            let s = (jl.power_pct / 100.0 * self.config.max_power_s).round();
-            let feed = (jl.speed_mm_s * 60.0).round(); // mm/s → mm/min
+        for (layer_id, speed, power, motions) in grbl_motion_program(plan) {
+            let s = (power / 100.0 * self.config.max_power_s).round();
+            let feed = (speed * 60.0).round();
 
             g.push_str(&format!(
                 "; Ebene {} — {} mm/s, {} %\n",
-                jl.layer_id, jl.speed_mm_s, jl.power_pct
+                layer_id, speed, power
             ));
             g.push_str(&format!("F{feed}\n"));
 
-            let passes = jl.passes.max(1);
-            for _pass in 0..passes {
-                match &jl.work {
-                    LayerWork::Cut { paths } => {
-                        for path in paths {
-                            if path.points.is_empty() {
-                                continue;
-                            }
-                            // Zum Startpunkt fahren (Laser aus), dann Kontur brennen.
-                            let (x0, y0) = path.points[0];
-                            g.push_str("M5\n");
-                            g.push_str(&format!("G0 X{} Y{}\n", num(x0), num(y0)));
-                            g.push_str(&format!("{laser_on} S{}\n", num(s)));
-                            for &(x, y) in &path.points[1..] {
-                                g.push_str(&format!("G1 X{} Y{}\n", num(x), num(y)));
-                            }
-                            if path.closed {
-                                g.push_str(&format!("G1 X{} Y{}\n", num(x0), num(y0)));
-                            }
-                            g.push_str("M5\n"); // Laser nach jedem Pfad aus
-                        }
+            let mut laser_active = false;
+            for motion in motions {
+                if motion.kind == luxifer_core::ExecutionKind::Travel {
+                    if laser_active {
+                        g.push_str("M5\n");
+                        laser_active = false;
                     }
-                    LayerWork::Fill { segments } => {
-                        // Jedes horizontale Segment: anfahren, brennen, aus.
-                        for seg in segments {
-                            g.push_str("M5\n");
-                            g.push_str(&format!("G0 X{} Y{}\n", num(seg.x0), num(seg.y)));
-                            g.push_str(&format!("{laser_on} S{}\n", num(s)));
-                            g.push_str(&format!("G1 X{} Y{}\n", num(seg.x1), num(seg.y)));
-                            g.push_str("M5\n");
-                        }
+                    g.push_str(&format!("G0 X{} Y{}\n", num(motion.to.0), num(motion.to.1)));
+                } else {
+                    if !laser_active {
+                        g.push_str(&format!("{laser_on} S{}\n", num(s)));
+                        laser_active = true;
                     }
-                    LayerWork::Raster { rows, .. } => {
-                        // Bild-Raster: jeder An-Run einer Zeile wie ein Fill-Segment.
-                        for row in rows {
-                            for &(x0, x1) in &row.runs {
-                                g.push_str("M5\n");
-                                g.push_str(&format!("G0 X{} Y{}\n", num(x0), num(row.y)));
-                                g.push_str(&format!("{laser_on} S{}\n", num(s)));
-                                g.push_str(&format!("G1 X{} Y{}\n", num(x1), num(row.y)));
-                                g.push_str("M5\n");
-                            }
-                        }
-                    }
+                    g.push_str(&format!("G1 X{} Y{}\n", num(motion.to.0), num(motion.to.1)));
                 }
+            }
+            if laser_active {
+                g.push_str("M5\n");
             }
         }
 
@@ -119,6 +183,34 @@ impl GrblDriver {
 impl MachineDriver for GrblDriver {
     fn name(&self) -> &str {
         "GRBL"
+    }
+
+    fn execution_trace(
+        &self,
+        plan: &JobPlan,
+        _layers: &[Layer],
+        _params: &JobParams,
+    ) -> Result<luxifer_core::ExecutionTrace, String> {
+        use luxifer_core::TraceBuilder;
+        let mut trace = TraceBuilder::new(false);
+        trace.set_head((0.0, 0.0));
+        for (layer_id, _, _, motions) in grbl_motion_program(plan) {
+            for motion in motions {
+                if motion.kind == luxifer_core::ExecutionKind::Travel {
+                    trace.travel_to(motion.to, layer_id);
+                } else {
+                    trace.work(
+                        motion.from,
+                        motion.to,
+                        motion.from,
+                        motion.to,
+                        motion.kind,
+                        layer_id,
+                    );
+                }
+            }
+        }
+        Ok(trace.finish())
     }
 
     fn compile_with(

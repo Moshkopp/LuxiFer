@@ -52,8 +52,8 @@ impl PreviewMove {
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobPreview {
     pub moves: Vec<PreviewMove>,
-    /// Bild-Layer als Texturen (ADR 0008 §2) — NICHT als Moves, sonst wären es
-    /// Hunderttausende Segmente. Das Frontend zeichnet sie als GPU-Textur.
+    /// Reserve für kompakte Rastertexturen außerhalb der Jobpfadansicht.
+    /// Die Laser-Vorschau verwendet die echten Raster-Runs als Moves.
     pub rasters: Vec<RasterTexture>,
     /// Bounding-Box aller Geometrie (mm), aus dem Plan übernommen.
     pub bbox: Option<(f64, f64, f64, f64)>,
@@ -68,7 +68,7 @@ impl JobPreview {
     /// dessen Startpunkt nicht schon der aktuellen Kopf-Position entspricht.
     pub fn from_plan(plan: &JobPlan) -> JobPreview {
         let mut moves: Vec<PreviewMove> = Vec::new();
-        let mut rasters: Vec<RasterTexture> = Vec::new();
+        let rasters: Vec<RasterTexture> = Vec::new();
         let mut seq: u32 = 0;
         // Aktuelle Kopf-Position; None = noch nichts gefahren (kein Anfahr-Travel
         // ab dem Ursprung, das erste Arbeitssegment beginnt einfach dort).
@@ -139,24 +139,103 @@ impl JobPreview {
                     }
                 }
                 LayerWork::Fill { segments } => {
-                    for s in segments {
-                        emit(
-                            &mut moves,
-                            &mut head,
-                            &mut seq,
-                            (s.x0, s.y),
-                            (s.x1, s.y),
-                            MoveKind::Fill,
-                            jl.layer_id,
-                        );
+                    let mut scan = segments.clone();
+                    scan.sort_by(|a, b| b.y.total_cmp(&a.y).then(a.x0.total_cmp(&b.x0)));
+                    let mut start = 0;
+                    let mut row_index = 0;
+                    while start < scan.len() {
+                        let mut end = start + 1;
+                        while end < scan.len() && scan[end].y == scan[start].y {
+                            end += 1;
+                        }
+                        let reverse = jl.bidirectional && row_index % 2 == 1;
+                        let mut emit_segment = |s: &crate::scanline::FillSegment| {
+                            let (from, to) = if reverse {
+                                ((s.x1, s.y), (s.x0, s.y))
+                            } else {
+                                ((s.x0, s.y), (s.x1, s.y))
+                            };
+                            if jl.bidirectional {
+                                moves.push(PreviewMove {
+                                    from,
+                                    to,
+                                    kind: MoveKind::Fill,
+                                    layer_id: jl.layer_id,
+                                    seq,
+                                });
+                                seq += 1;
+                                head = Some(to);
+                            } else {
+                                emit(
+                                    &mut moves,
+                                    &mut head,
+                                    &mut seq,
+                                    from,
+                                    to,
+                                    MoveKind::Fill,
+                                    jl.layer_id,
+                                );
+                            }
+                        };
+                        if reverse {
+                            for segment in scan[start..end].iter().rev() {
+                                emit_segment(segment);
+                            }
+                        } else {
+                            for segment in &scan[start..end] {
+                                emit_segment(segment);
+                            }
+                        }
+                        start = end;
+                        row_index += 1;
                     }
                 }
-                LayerWork::Raster { texture, .. } => {
-                    // Bild-Layer NICHT als Moves (das wären Hunderttausende, ADR
-                    // 0008 §2), sondern als Textur — das Frontend zeichnet sie als
-                    // GPU-Textur. `head` bleibt unverändert (kein Move-Cursor).
-                    if let Some(tex) = texture {
-                        rasters.push(tex.clone());
+                LayerWork::Raster { rows, .. } => {
+                    // Genau die Runs darstellen, die der Treiber später fährt.
+                    // Damit bleiben Zeilenabstand, Lücken und Dithering in der
+                    // Preview sichtbar, statt zu einer geschlossenen Textur zu
+                    // verschmelzen.
+                    for (row_index, row) in rows.iter().rev().enumerate() {
+                        let reverse = jl.bidirectional && row_index % 2 == 1;
+                        if reverse {
+                            for &(x0, x1) in row.runs.iter().rev() {
+                                let (from, to) = ((x1, row.y), (x0, row.y));
+                                moves.push(PreviewMove {
+                                    from,
+                                    to,
+                                    kind: MoveKind::Raster,
+                                    layer_id: jl.layer_id,
+                                    seq,
+                                });
+                                seq += 1;
+                                head = Some(to);
+                            }
+                        } else {
+                            for &(x0, x1) in &row.runs {
+                                let (from, to) = ((x0, row.y), (x1, row.y));
+                                if jl.bidirectional {
+                                    moves.push(PreviewMove {
+                                        from,
+                                        to,
+                                        kind: MoveKind::Raster,
+                                        layer_id: jl.layer_id,
+                                        seq,
+                                    });
+                                    seq += 1;
+                                    head = Some(to);
+                                } else {
+                                    emit(
+                                        &mut moves,
+                                        &mut head,
+                                        &mut seq,
+                                        from,
+                                        to,
+                                        MoveKind::Raster,
+                                        jl.layer_id,
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -310,9 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn bild_layer_wird_textur_nicht_moves() {
-        // Ein Raster-Layer mit Textur → landet in `rasters`, erzeugt KEINE Moves
-        // (ADR 0008 §2: Bilder als Textur, nicht Hunderttausende Segmente).
+    fn bild_layer_wird_als_tatsaechliche_raster_runs_gezeigt() {
         use crate::job::{JobLayer, JobPlan, LayerWork};
         use crate::raster::{RasterRow, RasterTexture};
         let plan = JobPlan {
@@ -344,10 +421,58 @@ mod tests {
             bbox: Some((0.0, 0.0, 4.0, 4.0)),
         };
         let preview = JobPreview::from_plan(&plan);
-        assert!(preview.moves.is_empty(), "Bild erzeugt keine Moves");
-        assert_eq!(preview.rasters.len(), 1, "Bild landet als Textur");
-        assert_eq!(preview.rasters[0].width, 2);
-        assert!(!preview.is_empty(), "Textur zählt als Inhalt");
+        assert_eq!(preview.moves.len(), 1);
+        assert_eq!(preview.moves[0].kind, MoveKind::Raster);
+        assert_eq!(preview.moves[0].from, (0.0, 0.0));
+        assert_eq!(preview.moves[0].to, (4.0, 0.0));
+        assert!(preview.rasters.is_empty());
+        assert!(!preview.is_empty(), "Raster-Run zählt als Inhalt");
+    }
+
+    #[test]
+    fn bidirektionales_raster_wechselt_richtung_ohne_leerfahrten() {
+        use crate::job::{JobLayer, JobPlan, LayerWork};
+        use crate::raster::RasterRow;
+        let plan = JobPlan {
+            layers: vec![JobLayer {
+                layer_id: 0,
+                color: [0, 0, 0],
+                speed_mm_s: 100.0,
+                power_pct: 50.0,
+                min_power_pct: 0.0,
+                passes: 1,
+                air_assist: false,
+                bidirectional: true,
+                work: LayerWork::Raster {
+                    rows: vec![
+                        RasterRow {
+                            y: 0.0,
+                            runs: vec![(1.0, 4.0)],
+                        },
+                        RasterRow {
+                            y: 1.0,
+                            runs: vec![(2.0, 5.0)],
+                        },
+                    ],
+                    texture: None,
+                },
+            }],
+            bbox: Some((1.0, 0.0, 5.0, 1.0)),
+        };
+        let preview = JobPreview::from_plan(&plan);
+        assert_eq!(preview.moves.len(), 2);
+        assert_eq!(
+            (preview.moves[0].from, preview.moves[0].to),
+            ((2.0, 1.0), (5.0, 1.0))
+        );
+        assert_eq!(
+            (preview.moves[1].from, preview.moves[1].to),
+            ((4.0, 0.0), (1.0, 0.0))
+        );
+        assert!(preview
+            .moves
+            .iter()
+            .all(|movement| movement.kind == MoveKind::Raster));
     }
 
     #[test]

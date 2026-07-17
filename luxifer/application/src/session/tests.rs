@@ -649,12 +649,13 @@ fn job_preview_rastert_bild_assets() {
     let session = EditorSession::new(state);
     let preview = session.job_preview(false);
 
-    // Der Bild-Layer liefert die verarbeitete Rastertextur an der mm-Position —
-    // keine Moves (Bilder sind Texturen, ADR 0008 §2).
-    assert_eq!(preview.rasters.len(), 1);
-    let tex = &preview.rasters[0];
-    assert!(tex.width > 0 && tex.height > 0);
-    assert_eq!((tex.x, tex.y, tex.w, tex.h), (0.0, 0.0, 10.0, 10.0));
+    // Der Bild-Layer liefert genau die gefahrenen Raster-Runs als sichtbare
+    // Preview-Moves; die frühere geschlossene Textur bleibt leer.
+    assert!(preview
+        .moves
+        .iter()
+        .any(|movement| movement.kind == luxifer_core::preview::MoveKind::Raster));
+    assert!(preview.rasters.is_empty());
 }
 
 #[test]

@@ -101,6 +101,8 @@ pub enum UiAction {
     SelectPreviewMaterial(crate::canvas::scene::PreviewMaterial),
     /// Leerfahrten in der Vorschau ein-/ausblenden.
     SetPreviewTravel(bool),
+    SetPreviewLaserPath(bool),
+    SetPreviewScanOffset(bool),
     /// Einen Layer im Laser-Tab vorübergehend für Transformationen freigeben.
     ToggleLaserEditLayer(usize),
     /// Rückgängig.

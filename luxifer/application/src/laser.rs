@@ -43,6 +43,36 @@ pub struct LaserService {
 }
 
 impl LaserService {
+    /// Baut die maschinenspezifische Bewegungsspur mit denselben Profil- und
+    /// Startparametern wie Export/Start.
+    pub fn execution_trace(
+        &self,
+        shapes: &[Shape],
+        layers: &[Layer],
+        start_mode: StartMode,
+        anchor_idx: usize,
+    ) -> Result<luxifer_core::ExecutionTrace, AppError> {
+        let profile = self
+            .active_profile()
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
+        let plan = JobPlan::from_shapes_with_assets(shapes, layers, crate::assets::resolve_luma)
+            .transformed_for_bed(profile.origin, profile.bed_mm);
+        let params = JobParams {
+            start_mode,
+            anchor: profile
+                .origin
+                .transform_anchor(Anchor::from_index(anchor_idx)),
+        };
+        driver_for(profile)
+            .execution_trace(&plan, layers, &params)
+            .map_err(|error| {
+                AppError::wrap(
+                    "execution_trace",
+                    "Laserpfad konnte nicht aufgebaut werden.",
+                    error,
+                )
+            })
+    }
     /// Liest bekannte und rohe Maschinenregister eines Ruida-Controllers.
     pub fn read_machine_settings(
         &mut self,

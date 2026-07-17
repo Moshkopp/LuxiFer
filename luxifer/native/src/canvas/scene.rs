@@ -111,12 +111,13 @@ pub struct PreviewLegend {
     pub work_len_mm: f64,
     /// Leerfahrten in mm.
     pub travel_len_mm: f64,
+    pub scan_offset_active: bool,
     /// Bounding-Box der Job-Geometrie (mm).
     pub bbox: Option<(f64, f64, f64, f64)>,
 }
 
 /// Vollständiger Preview-Aufbau: Vertices für die Bewegungen plus die
-/// verarbeiteten Rastertexturen der Bild-Layer und die Legende.
+/// Raster-Runs der Bild-Layer und die Legende.
 pub struct PreviewGeometry {
     pub vertices: Vec<Vertex>,
     pub background_end: u32,
@@ -126,13 +127,16 @@ pub struct PreviewGeometry {
 }
 
 /// Read-only Jobpfad auf der Material-Bühne: Arbeitsbewegungen in Brennfarbe,
-/// Leerfahrten dezent, Bild-Layer als verarbeitete Rastertextur. Grundlage ist
+/// Leerfahrten dezent, Bild-Layer als ihre tatsächlich gefahrenen Scanlinien. Grundlage ist
 /// ausschließlich die Application-Preview (derselbe JobPlan wie Export/Treiber).
 pub fn preview_vertices(
     session: &EditorSession,
-    selection_only: bool,
+    preview: &luxifer_core::ExecutionTrace,
     material: PreviewMaterial,
     show_travel: bool,
+    show_laser_path: bool,
+    show_scan_offset: bool,
+    bed_origin: luxifer_core::BedOrigin,
 ) -> PreviewGeometry {
     let mut v = scene_geo::bed_material(
         session.bed_w_mm as f32,
@@ -140,18 +144,39 @@ pub fn preview_vertices(
         srgb_to_linear(material.bed()),
     );
     let background_end = v.len() as u32;
-    let preview = session.job_preview(selection_only);
+    // Die Trace liegt absichtlich in Maschinenkoordinaten vor. Der Canvas ist
+    // dagegen immer oben-links orientiert. BedOrigin::transform ist eine
+    // Spiegelung und damit ihre eigene Umkehrfunktion; so bleibt die Anzeige
+    // aufrecht, ohne die an den Laser gesendete Bewegung zu verändern.
+    let display_point = |point: luxifer_core::Pt| {
+        bed_origin.transform(point.0, point.1, (session.bed_w_mm, session.bed_h_mm))
+    };
+    let bbox = preview
+        .moves
+        .iter()
+        .flat_map(|movement| [display_point(movement.from), display_point(movement.to)])
+        .fold(None, |bbox: Option<(f64, f64, f64, f64)>, point| {
+            Some(match bbox {
+                None => (point.0, point.1, point.0, point.1),
+                Some((x0, y0, x1, y1)) => (
+                    x0.min(point.0),
+                    y0.min(point.1),
+                    x1.max(point.0),
+                    y1.max(point.1),
+                ),
+            })
+        });
     let mut legend = PreviewLegend {
         material,
-        bbox: preview.bbox,
-        has_content: !preview.rasters.is_empty(),
+        scan_offset_active: preview.scan_offset_active,
+        bbox,
         ..Default::default()
     };
     let burn = srgb_to_linear(material.burn());
     let travel = srgb_to_linear(material.travel());
     for movement in &preview.moves {
         let color = match movement.kind {
-            luxifer_core::preview::MoveKind::Travel => {
+            luxifer_core::ExecutionKind::Travel => {
                 legend.has_travel = true;
                 legend.travel_len_mm += movement.len_mm();
                 // Bei vielen Objekten übertünchen die Leerfahrten das Motiv —
@@ -165,20 +190,31 @@ pub fn preview_vertices(
             _ => {
                 legend.has_content = true;
                 legend.work_len_mm += movement.len_mm();
-                burn
+                if show_laser_path {
+                    [0.05, 0.9, 0.25, 0.5]
+                } else {
+                    burn
+                }
             }
         };
+        let (from, to) = if show_scan_offset {
+            (movement.from, movement.to)
+        } else {
+            (movement.ideal_from, movement.ideal_to)
+        };
+        let from = display_point(from);
+        let to = display_point(to);
         scene_geo::push_seg(
             &mut v,
-            [movement.from.0 as f32, movement.from.1 as f32],
-            [movement.to.0 as f32, movement.to.1 as f32],
+            [from.0 as f32, from.1 as f32],
+            [to.0 as f32, to.1 as f32],
             color,
         );
     }
     PreviewGeometry {
         vertices: v,
         background_end,
-        rasters: preview.rasters,
+        rasters: Vec::new(),
         legend,
     }
 }
@@ -186,6 +222,36 @@ pub fn preview_vertices(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_spiegelt_maschinenkoordinaten_zurueck_in_den_canvas() {
+        let mut session = EditorSession::default();
+        session.bed_w_mm = 200.0;
+        session.bed_h_mm = 100.0;
+        let mut builder = luxifer_core::TraceBuilder::new(false);
+        builder.set_head((190.0, 90.0));
+        builder.work(
+            (190.0, 90.0),
+            (180.0, 80.0),
+            (190.0, 90.0),
+            (180.0, 80.0),
+            luxifer_core::ExecutionKind::Cut,
+            0,
+        );
+
+        let geometry = preview_vertices(
+            &session,
+            &builder.finish(),
+            PreviewMaterial::Schiefer,
+            false,
+            false,
+            false,
+            luxifer_core::BedOrigin::BottomRight,
+        );
+        let path = &geometry.vertices[geometry.background_end as usize..];
+        assert_eq!(path.len(), 6, "eine Linie wird als zwei Dreiecke erzeugt");
+        assert_eq!(geometry.legend.bbox, Some((10.0, 10.0, 20.0, 20.0)));
+    }
 
     #[test]
     fn fill_scanlines_folgen_dem_verschieben() {

@@ -86,6 +86,8 @@ pub(super) fn preview_panel(
     ui: &mut egui::Ui,
     current: PreviewMaterial,
     show_travel: bool,
+    show_laser_path: bool,
+    show_scan_offset: bool,
     legend: Option<&PreviewLegend>,
 ) -> Vec<UiAction> {
     let mut actions = Vec::new();
@@ -107,6 +109,20 @@ pub(super) fn preview_panel(
     {
         actions.push(UiAction::SetPreviewTravel(travel));
     }
+    let mut laser_path = show_laser_path;
+    if ui
+        .checkbox(&mut laser_path, "Laserpfad grün hervorheben")
+        .changed()
+    {
+        actions.push(UiAction::SetPreviewLaserPath(laser_path));
+    }
+    let mut scan_offset = show_scan_offset;
+    if ui
+        .checkbox(&mut scan_offset, "Scan-Offset anzeigen")
+        .changed()
+    {
+        actions.push(UiAction::SetPreviewScanOffset(scan_offset));
+    }
 
     ui.add_space(6.0);
     ui.separator();
@@ -117,6 +133,9 @@ pub(super) fn preview_panel(
         ui.weak("Wird berechnet …");
         return actions;
     };
+    if legend.scan_offset_active && !show_scan_offset {
+        ui.weak("Scan-Offset aktiv, in der Darstellung ausgeblendet.");
+    }
     if !legend.has_content {
         ui.weak("Keine aktiven Job-Inhalte.");
         ui.weak("Layer aktivieren oder Formen anlegen.");
@@ -131,10 +150,14 @@ pub(super) fn preview_panel(
         row(ui, scene_color(legend.material.travel()), "Leerfahrt");
     }
     ui.add_space(6.0);
-    ui.label(format!("Arbeitsweg: {}", len_label(legend.work_len_mm)));
+    ui.label(format!("Laserweg: {}", len_label(legend.work_len_mm)));
     if legend.has_travel {
         ui.label(format!("Leerfahrt: {}", len_label(legend.travel_len_mm)));
     }
+    ui.label(format!(
+        "Gesamtfahrweg: {}",
+        len_label(legend.work_len_mm + legend.travel_len_mm)
+    ));
     if let Some((x0, y0, x1, y1)) = legend.bbox {
         ui.label(format!("Job-Fläche: {:.1} × {:.1} mm", x1 - x0, y1 - y0));
     }

@@ -182,7 +182,6 @@ impl RuidaDriver {
     }
 
     fn compile_geometry(&self, layers: &[JobLayer], offset: (i32, i32)) -> Vec<u8> {
-        let (ox, oy) = offset;
         let mut j = Vec::new();
         for (k, jl) in layers.iter().enumerate() {
             let idx = k as u8;
@@ -199,20 +198,12 @@ impl RuidaDriver {
             let passes = jl.passes.max(1);
             match &jl.work {
                 LayerWork::Cut { paths } => {
-                    for _ in 0..passes {
-                        for path in paths {
-                            if path.points.is_empty() {
-                                continue;
-                            }
-                            let (x0, y0) = path.points[0];
-                            j.extend(cmd_move_abs(mm_to_um(x0) + ox, mm_to_um(y0) + oy));
-                            for &(x, y) in &path.points[1..] {
-                                j.extend(cmd_cut_abs(mm_to_um(x) + ox, mm_to_um(y) + oy));
-                            }
-                            if path.closed {
-                                j.extend(cmd_cut_abs(mm_to_um(x0) + ox, mm_to_um(y0) + oy));
-                            }
+                    let _ = paths;
+                    for motion in ruida_cut_motions(jl, offset) {
+                        if motion.travel_before {
+                            j.extend(cmd_move_abs(motion.from.0, motion.from.1));
                         }
+                        j.extend(cmd_cut_abs(motion.to.0, motion.to.1));
                     }
                 }
                 // Fill und Raster fahren beide bidirektionale Scanlinien —
@@ -235,60 +226,139 @@ impl RuidaDriver {
     /// kompensiert. Bei `bidirectional = false` fährt jede Zeile links→rechts;
     /// dann greift kein Offset.
     fn compile_scan(&self, j: &mut Vec<u8>, jl: &JobLayer, offset: (i32, i32)) {
-        let (ox, oy) = offset;
-        // Nur bei bidirektionalem Scan korrigieren; interpoliert zur Layer-Speed.
-        let off = if jl.bidirectional {
-            self.config.scan_offset.offset_um(jl.speed_mm_s)
-        } else {
-            0
-        };
-
-        // An-Strecken nach Zeile (y) gruppieren, Zeilen von oben nach unten.
-        // Anker-Offset (ox, oy) wird auf jede Koordinate addiert. Fill liefert
-        // Scanline-Segmente, Raster die Bild-Runs — beide werden zu (lo, hi).
-        let mut by_y: std::collections::BTreeMap<i32, Vec<(i32, i32)>> =
-            std::collections::BTreeMap::new();
-        let mut add = |y_mm: f64, x0_mm: f64, x1_mm: f64| {
-            let y = mm_to_um(y_mm) + oy;
-            let (lo, hi) = (mm_to_um(x0_mm) + ox, mm_to_um(x1_mm) + ox);
-            let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
-            by_y.entry(y).or_default().push((lo, hi));
-        };
-        match &jl.work {
-            LayerWork::Fill { segments } => {
-                for seg in segments {
-                    add(seg.y, seg.x0, seg.x1);
-                }
-            }
-            LayerWork::Raster { rows, .. } => {
-                for row in rows {
-                    for &(x0, x1) in &row.runs {
-                        add(row.y, x0, x1);
-                    }
-                }
-            }
-            LayerWork::Cut { .. } => return,
+        for motion in ruida_scan_motions(jl, offset, &self.config.scan_offset) {
+            j.extend(cmd_move_abs(motion.from.0, motion.from.1));
+            j.extend(cmd_cut_abs(motion.to.0, motion.to.1));
         }
+    }
+}
 
-        let mut left_to_right = true;
-        // Von oben (größtes y) nach unten.
-        for (&y, segs) in by_y.iter().rev() {
-            let mut segs = segs.clone();
-            segs.sort_by_key(|s| s.0);
-            if left_to_right {
-                for (lo, hi) in segs {
-                    j.extend(cmd_move_abs(lo + off, y));
-                    j.extend(cmd_cut_abs(hi + off, y));
+#[derive(Clone, Copy)]
+struct ScanMotion {
+    ideal_from: (i32, i32),
+    ideal_to: (i32, i32),
+    from: (i32, i32),
+    to: (i32, i32),
+}
+
+#[derive(Clone, Copy)]
+struct CutMotion {
+    from: (i32, i32),
+    to: (i32, i32),
+    travel_before: bool,
+}
+
+fn ruida_cut_motions(jl: &JobLayer, offset: (i32, i32)) -> Vec<CutMotion> {
+    let LayerWork::Cut { paths } = &jl.work else {
+        return Vec::new();
+    };
+    let (ox, oy) = offset;
+    let q = |p: (f64, f64)| (mm_to_um(p.0) + ox, mm_to_um(p.1) + oy);
+    let mut motions = Vec::new();
+    for _ in 0..jl.passes.max(1) {
+        for path in paths {
+            let Some(&start) = path.points.first() else {
+                continue;
+            };
+            for (index, pair) in path.points.windows(2).enumerate() {
+                motions.push(CutMotion {
+                    from: q(pair[0]),
+                    to: q(pair[1]),
+                    travel_before: index == 0,
+                });
+            }
+            if path.closed {
+                let last = *path.points.last().unwrap();
+                motions.push(CutMotion {
+                    from: q(last),
+                    to: q(start),
+                    travel_before: path.points.len() == 1,
+                });
+            }
+        }
+    }
+    motions
+}
+
+fn ruida_scan_motions(
+    jl: &JobLayer,
+    offset: (i32, i32),
+    scan_offset: &ScanOffset,
+) -> Vec<ScanMotion> {
+    let (ox, oy) = offset;
+    let off = if jl.bidirectional {
+        scan_offset.offset_um(jl.speed_mm_s)
+    } else {
+        0
+    };
+    let mut rows = std::collections::BTreeMap::<i32, Vec<(i32, i32)>>::new();
+    let mut add = |y: f64, x0: f64, x1: f64| {
+        let (x0, x1) = (mm_to_um(x0) + ox, mm_to_um(x1) + ox);
+        rows.entry(mm_to_um(y) + oy)
+            .or_default()
+            .push((x0.min(x1), x0.max(x1)));
+    };
+    match &jl.work {
+        LayerWork::Fill { segments } => {
+            for segment in segments {
+                add(segment.y, segment.x0, segment.x1);
+            }
+        }
+        LayerWork::Raster { rows, .. } => {
+            for row in rows {
+                for &(x0, x1) in &row.runs {
+                    add(row.y, x0, x1);
                 }
+            }
+        }
+        LayerWork::Cut { .. } => return Vec::new(),
+    }
+    let mut motions = Vec::new();
+    for (row_index, (&y, segments)) in rows.iter().rev().enumerate() {
+        let reverse = jl.bidirectional && row_index % 2 == 1;
+        let mut segments = segments.clone();
+        segments.sort_by_key(|segment| segment.0);
+        let iter: Box<dyn Iterator<Item = (i32, i32)>> = if reverse {
+            Box::new(segments.into_iter().rev())
+        } else {
+            Box::new(segments.into_iter())
+        };
+        for (lo, hi) in iter {
+            let (ideal_from, ideal_to, from, to) = if reverse {
+                ((hi, y), (lo, y), (hi - off, y), (lo - off, y))
             } else {
-                for (lo, hi) in segs.into_iter().rev() {
-                    j.extend(cmd_move_abs(hi - off, y));
-                    j.extend(cmd_cut_abs(lo - off, y));
-                }
-            }
-            if jl.bidirectional {
-                left_to_right = !left_to_right;
-            }
+                ((lo, y), (hi, y), (lo + off, y), (hi + off, y))
+            };
+            motions.push(ScanMotion {
+                ideal_from,
+                ideal_to,
+                from,
+                to,
+            });
+        }
+    }
+    motions
+}
+
+fn append_ruida_scan_trace(
+    trace: &mut luxifer_core::TraceBuilder,
+    layer: &JobLayer,
+    kind: luxifer_core::ExecutionKind,
+    offset: (i32, i32),
+    scan_offset: &ScanOffset,
+) {
+    for _ in 0..layer.passes.max(1) {
+        for motion in ruida_scan_motions(layer, offset, scan_offset) {
+            let mm = |point: (i32, i32)| (point.0 as f64 / 1000.0, point.1 as f64 / 1000.0);
+            trace.travel_to(mm(motion.from), layer.layer_id);
+            trace.work(
+                mm(motion.ideal_from),
+                mm(motion.ideal_to),
+                mm(motion.from),
+                mm(motion.to),
+                kind,
+                layer.layer_id,
+            );
         }
     }
 }
@@ -296,6 +366,67 @@ impl RuidaDriver {
 impl MachineDriver for RuidaDriver {
     fn name(&self) -> &str {
         "Ruida"
+    }
+
+    fn execution_trace(
+        &self,
+        plan: &JobPlan,
+        _layers: &[Layer],
+        params: &JobParams,
+    ) -> Result<luxifer_core::ExecutionTrace, String> {
+        use luxifer_core::{ExecutionKind as K, TraceBuilder};
+        let bbox = plan.bbox.unwrap_or_default();
+        let (ox, oy) = if params.start_mode == StartMode::Absolut {
+            (0.0, 0.0)
+        } else {
+            let p = params.anchor.point(bbox);
+            (-p.0, -p.1)
+        };
+        let offset_um = ((ox * 1000.0).round() as i32, (oy * 1000.0).round() as i32);
+        let mut trace = TraceBuilder::new(
+            self.config.scan_offset.enabled && !self.config.scan_offset.points.is_empty(),
+        );
+        for layer in &plan.layers {
+            match &layer.work {
+                LayerWork::Cut { paths } => {
+                    let _ = paths;
+                    for motion in ruida_cut_motions(layer, offset_um) {
+                        let mm =
+                            |point: (i32, i32)| (point.0 as f64 / 1000.0, point.1 as f64 / 1000.0);
+                        if motion.travel_before {
+                            trace.travel_to(mm(motion.from), layer.layer_id);
+                        }
+                        trace.work(
+                            mm(motion.from),
+                            mm(motion.to),
+                            mm(motion.from),
+                            mm(motion.to),
+                            K::Cut,
+                            layer.layer_id,
+                        );
+                    }
+                }
+                LayerWork::Fill { .. } => {
+                    append_ruida_scan_trace(
+                        &mut trace,
+                        layer,
+                        K::Fill,
+                        offset_um,
+                        &self.config.scan_offset,
+                    );
+                }
+                LayerWork::Raster { .. } => {
+                    append_ruida_scan_trace(
+                        &mut trace,
+                        layer,
+                        K::Raster,
+                        offset_um,
+                        &self.config.scan_offset,
+                    );
+                }
+            }
+        }
+        Ok(trace.finish())
     }
 
     fn compile_with(

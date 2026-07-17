@@ -87,6 +87,10 @@ pub struct App {
     pub preview_material: crate::canvas::scene::PreviewMaterial,
     /// Leerfahrten in der Vorschau zeichnen (Präsentationszustand).
     pub preview_show_travel: bool,
+    pub preview_show_laser_path: bool,
+    pub preview_show_scan_offset: bool,
+    preview_trace_key: Option<String>,
+    preview_trace: Option<luxifer_core::ExecutionTrace>,
     pub laser: LaserUi,
     pub laser_backend: luxifer_application::LaserService,
     /// Zentraler, nutzerlesbarer Fehlerkanal der Anwendungsschicht.
@@ -207,6 +211,10 @@ impl App {
             revision_comparison: None,
             preview_material: Default::default(),
             preview_show_travel: false,
+            preview_show_laser_path: false,
+            preview_show_scan_offset: false,
+            preview_trace_key: None,
+            preview_trace: None,
             laser: LaserUi::default(),
             laser_backend,
             app_error: None,
@@ -482,6 +490,14 @@ impl App {
                 self.preview_show_travel = show;
                 self.renderer.invalidate_scene();
             }
+            A::SetPreviewLaserPath(show) => {
+                self.preview_show_laser_path = show;
+                self.renderer.invalidate_scene();
+            }
+            A::SetPreviewScanOffset(show) => {
+                self.preview_show_scan_offset = show;
+                self.renderer.invalidate_scene();
+            }
             A::Undo => self.undo(),
             A::Redo => self.redo(),
             A::Import => self.import_dialog(),
@@ -585,6 +601,38 @@ impl App {
         // Szenenzustand (nur lesend) an den Renderer übergeben; er baut/lädt die
         // Caches und zeichnet Canvas + Overlay + egui.
         let image_dirty = std::mem::take(&mut self.image_dirty);
+        if self.view == crate::tools::View::Preview {
+            let trace_key = format!(
+                "{}:{}:{:?}:{}:{:?}",
+                self.session.render_rev(),
+                self.laser.selection_only,
+                self.laser.start_mode,
+                self.laser.anchor,
+                self.laser_backend.active_profile()
+            );
+            if self.preview_trace_key.as_deref() != Some(trace_key.as_str()) {
+                let shapes: Vec<_> = if self.laser.selection_only {
+                    self.session
+                        .state()
+                        .selected
+                        .iter()
+                        .filter_map(|&i| self.session.state().shapes.get(i).cloned())
+                        .collect()
+                } else {
+                    self.session.state().shapes.clone()
+                };
+                self.preview_trace = self
+                    .laser_backend
+                    .execution_trace(
+                        &shapes,
+                        &self.session.state().layers,
+                        self.laser.start_mode,
+                        self.laser.anchor,
+                    )
+                    .ok();
+                self.preview_trace_key = Some(trace_key);
+            }
+        }
         let scene = crate::render::FrameScene {
             session: &self.session,
             bed_origin: self
@@ -622,6 +670,9 @@ impl App {
             selection_only: self.laser.selection_only,
             preview_material: self.preview_material,
             preview_show_travel: self.preview_show_travel,
+            preview_show_laser_path: self.preview_show_laser_path,
+            preview_show_scan_offset: self.preview_show_scan_offset,
+            preview_trace: self.preview_trace.as_ref(),
             grid_mm: self.ui_settings.grid_size_mm as f32,
         };
         self.renderer.draw_frame(&self.window, scene, full, tris);

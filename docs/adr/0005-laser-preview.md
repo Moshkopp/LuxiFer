@@ -226,8 +226,15 @@ Der Reiter reserviert dafür bereits den Platz einer Steuerleiste.
 - **Animierte Wiedergabe** (Play/Pause/Scrubber, fahrender Laserkopf) — Typ ist
   vorbereitet (`seq`, Segmentlänge/Kind), umgesetzt wird sie später mit einem
   Zeitmodell (Weg ÷ `speed_mm_s`, inkl. Beschleunigung optional).
-- **Raster-Segmente** — `MoveKind::Raster` ist angelegt, aber erst befüllbar, wenn
-  der Bild-Job (`LayerWork::Raster`, ADR 0004 §5) existiert.
+- **Raster-Segmente** wurden am 2026-07-17 ergänzt: Die Preview übernimmt die
+  bereits vom `JobPlan` erzeugten `RasterRow.runs` unmittelbar als
+  `MoveKind::Raster`. Image-Layer zeigen dadurch die tatsächlich gefahrenen
+  Scanlinien samt Lücken und Dither-Muster statt einer geschlossenen
+  Rastertextur. Bei aktiviertem bidirektionalem Scan werden Fill- und
+  Image-Rasterzeilen wie im Ruida-Treiber abwechselnd vorwärts und rückwärts
+  aufgebaut; die fortlaufende Rasterbewegung wird nicht als Vektor-Leerfahrt
+  gezählt oder gezeichnet. Vorschau, Kennzahlen und Treiber verwenden dieselben
+  Runs.
 - **Fahrweg-Optimierung** (Pfad-Sortierung für kürzeste Leerfahrten) — gehört in
   den `JobPlan`, nicht in die Preview; die Preview zeigt dann automatisch die
   optimierte Reihenfolge.

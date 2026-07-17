@@ -24,6 +24,9 @@ struct PreviewKey {
     selection_only: bool,
     material: PreviewMaterial,
     show_travel: bool,
+    show_laser_path: bool,
+    show_scan_offset: bool,
+    bed_origin: luxifer_core::BedOrigin,
 }
 
 /// Nur-lesender Szenenzustand, den der Root pro Frame an den Renderer übergibt.
@@ -39,6 +42,9 @@ pub struct FrameScene<'a> {
     pub preview_material: PreviewMaterial,
     /// Leerfahrten in der Vorschau zeichnen (Kennzahlen zählen immer).
     pub preview_show_travel: bool,
+    pub preview_show_laser_path: bool,
+    pub preview_show_scan_offset: bool,
+    pub preview_trace: Option<&'a luxifer_core::ExecutionTrace>,
     /// Feinraster-Abstand des Tisch-Gitters in mm (GUI-Settings).
     pub grid_mm: f32,
     /// Maschinen-Nullpunkt des aktiven Laserprofils.
@@ -198,19 +204,26 @@ impl Renderer {
                 selection_only: scene.selection_only,
                 material: scene.preview_material,
                 show_travel: scene.preview_show_travel,
+                show_laser_path: scene.preview_show_laser_path,
+                show_scan_offset: scene.preview_show_scan_offset,
+                bed_origin: scene.bed_origin,
             };
             if self.preview_key != Some(key)
                 && self.preview_pending.as_ref().map(|(k, _)| *k) != Some(key)
             {
                 let state = scene.session.state().clone();
+                let trace = scene.preview_trace.cloned().unwrap_or_default();
                 let (tx, rx) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
                     let session = EditorSession::new(state);
                     let geometry = preview_vertices(
                         &session,
-                        key.selection_only,
+                        &trace,
                         key.material,
                         key.show_travel,
+                        key.show_laser_path,
+                        key.show_scan_offset,
+                        key.bed_origin,
                     );
                     let _ = tx.send(geometry);
                 });

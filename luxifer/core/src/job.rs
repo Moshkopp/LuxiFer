@@ -571,6 +571,14 @@ pub trait MachineDriver {
         params: &JobParams,
     ) -> Result<Vec<u8>, String>;
 
+    /// Dieselbe geordnete Bewegungsspur, aus der der Treiber seinen Job baut.
+    fn execution_trace(
+        &self,
+        plan: &JobPlan,
+        layers: &[Layer],
+        params: &JobParams,
+    ) -> Result<crate::ExecutionTrace, String>;
+
     /// Verbindung zur Maschine aufbauen (IP/Port bzw. serieller Anschluss).
     fn connect(&mut self, _target: &str) -> Result<(), DriverError> {
         Err(DriverError::NotSupported)

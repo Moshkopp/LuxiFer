@@ -17,6 +17,7 @@ pub mod assets;
 pub mod bezier;
 pub mod datetime;
 pub mod dither;
+pub mod execution;
 pub mod geo_ops;
 pub mod geometry;
 pub mod import;
@@ -43,6 +44,7 @@ pub use assets::{
     import_source, list_assets, load_asset, load_asset_luma, load_asset_luma_alpha,
     load_asset_rgba, rendered_png, store_asset, AssetId, AssetKind, AssetMeta,
 };
+pub use execution::{ExecutionKind, ExecutionMove, ExecutionTrace, TraceBuilder};
 pub use geo_ops::BoolOp;
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
 pub use interact::{keep_aspect, resize_to_cursor, Handle};

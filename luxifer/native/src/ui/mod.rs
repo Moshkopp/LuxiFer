@@ -170,12 +170,21 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             }
             let material = app.preview_material;
             let show_travel = app.preview_show_travel;
+            let show_laser_path = app.preview_show_laser_path;
+            let show_scan_offset = app.preview_show_scan_offset;
             let right = egui::Panel::right("preview_panel")
                 .default_size(240.0)
                 .size_range(200.0..=320.0)
                 .resizable(true)
                 .show(ui, |ui| {
-                    preview::preview_panel(ui, material, show_travel, app.preview_legend())
+                    preview::preview_panel(
+                        ui,
+                        material,
+                        show_travel,
+                        show_laser_path,
+                        show_scan_offset,
+                        app.preview_legend(),
+                    )
                 });
             app.right_w = right.response.rect.width();
             for action in right.inner {
