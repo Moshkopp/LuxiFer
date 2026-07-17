@@ -330,7 +330,7 @@ impl CanvasState {
         match std::mem::replace(&mut self.drag, Drag::None) {
             Drag::Marquee { start } => {
                 if (start[0] - w[0]).abs() > 1.0 || (start[1] - w[1]).abs() > 1.0 {
-                    session.select_rect(start, w);
+                    session.select_rect(start, w, self.invert_marquee_direction);
                 }
                 false
             }
@@ -484,6 +484,21 @@ mod tests {
         };
         assert!(*closed);
         assert_eq!(pts.len(), 3);
+    }
+
+    #[test]
+    fn marquee_kann_im_inneren_eines_ausgewaehlten_vektors_starten() {
+        let mut canvas = CanvasState::new(Camera::new());
+        canvas.tool = Tool::Select;
+        let mut session = EditorSession::default();
+        session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [100.0, 100.0]);
+        assert_eq!(session.selected, vec![0]);
+
+        canvas.cursor = canvas.cam.world_to_screen([50.0, 50.0]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+
+        assert!(matches!(canvas.drag, Drag::Marquee { .. }));
+        assert!(session.selected.is_empty());
     }
 
     #[test]

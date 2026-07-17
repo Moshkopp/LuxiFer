@@ -25,7 +25,7 @@ impl super::AppState {
             if px < b.x - tol || px > b.x + b.w + tol || py < b.y - tol || py > b.y + b.h + tol {
                 continue;
             }
-            if s.hit_test(px, py, tol) {
+            if s.selection_hit_test(px, py, tol) {
                 return Some(i);
             }
         }

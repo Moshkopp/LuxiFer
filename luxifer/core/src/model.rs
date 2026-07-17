@@ -356,6 +356,36 @@ impl Shape {
         let (rx, ry) = crate::geometry::rotate_point(px, py, cx, cy, -self.rotation);
         self.geo.hit_test(rx, ry, tol)
     }
+
+    /// Editor-Auswahl trifft Vektoren nur an ihrer sichtbaren Kontur. So kann
+    /// innerhalb einer großen Form eine Marquee-Auswahl begonnen werden.
+    /// Bilder bleiben als flächige Objekte über ihre gesamte Box anklickbar.
+    pub fn selection_hit_test(&self, px: f64, py: f64, tol: f64) -> bool {
+        if matches!(self.geo, Geo::Image { .. }) {
+            return self.hit_test(px, py, tol);
+        }
+        let (px, py) = if self.rotation == 0.0 {
+            (px, py)
+        } else {
+            let (cx, cy) = self.geo.bbox().center();
+            crate::geometry::rotate_point(px, py, cx, cy, -self.rotation)
+        };
+        let (points, closed) = self.geo.outline_points();
+        if points
+            .windows(2)
+            .any(|edge| crate::geometry::point_segment_distance(px, py, edge[0], edge[1]) <= tol)
+        {
+            return true;
+        }
+        closed
+            && points.len() >= 2
+            && crate::geometry::point_segment_distance(
+                px,
+                py,
+                *points.last().unwrap(),
+                points[0],
+            ) <= tol
+    }
 }
 
 #[cfg(test)]
@@ -416,6 +446,21 @@ mod tests {
         assert!(!s.hit_test(50.0, 45.0, 0.0)); // ungedreht außerhalb
         s.rotation = 90.0;
         assert!(s.hit_test(50.0, 45.0, 0.0)); // gedreht: ragt vertikal
+    }
+
+    #[test]
+    fn selection_hit_test_trifft_vektor_nur_an_der_kontur() {
+        let shape = Shape::new(
+            0,
+            Geo::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
+        );
+        assert!(shape.selection_hit_test(0.5, 50.0, 1.0));
+        assert!(!shape.selection_hit_test(50.0, 50.0, 1.0));
     }
 
     #[test]

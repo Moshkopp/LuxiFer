@@ -327,8 +327,8 @@ mod tests {
         let mut canvas = CanvasState::new(cam);
         canvas.tool = crate::tools::Tool::Select;
 
-        // Klick mitten aufs Rechteck (Weltpunkt (20,20) → Screen).
-        let press = canvas.cam.world_to_screen([20.0, 20.0]);
+        // Vektoren werden an der Kontur gegriffen: linke Kante bei (10,20).
+        let press = canvas.cam.world_to_screen([10.0, 20.0]);
         canvas.cursor = press;
         let mut last_rev = session.render_rev();
         canvas.on_mouse(&mut session, winit::event::MouseButton::Left, true);
@@ -337,7 +337,7 @@ mod tests {
         for step in 1..=3 {
             let target = canvas
                 .cam
-                .world_to_screen([20.0 + step as f64 * 10.0, 20.0]);
+                .world_to_screen([10.0 + step as f64 * 10.0, 20.0]);
             canvas.on_cursor_move(&mut session, target);
             let rev = session.render_rev();
             assert_ne!(rev, last_rev, "Frame {step}: render_rev muss steigen");

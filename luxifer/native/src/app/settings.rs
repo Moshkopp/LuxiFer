@@ -38,6 +38,7 @@ impl App {
                         self.renderer.invalidate_scene();
                     }
                     settings.save()?;
+                    self.canvas.invert_marquee_direction = settings.invert_marquee_direction;
                     self.ui_settings = settings.clone();
                     if let Some(dialog) = self.settings_dialog.as_mut() {
                         dialog.draft = settings;
@@ -105,6 +106,7 @@ impl App {
         if draft.grid_size_mm != self.ui_settings.grid_size_mm {
             self.renderer.invalidate_scene();
         }
+        self.canvas.invert_marquee_direction = draft.invert_marquee_direction;
         self.ui_settings = draft;
         self.charon_runtime
             .configure(&self.ui_settings, &self.laser_backend.registry);

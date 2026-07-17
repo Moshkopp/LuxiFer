@@ -31,7 +31,7 @@ und gehören nicht mehr zur Restliste.
 
 | ID | Klasse | Prio | Beschreibung |
 |----|--------|------|--------------|
-| A1 | ERLEDIGT | P1 | Auswahl-Werkzeug zeichnet einen bildschirmkonstant gestrichelten Marquee-Rahmen. |
+| A1 | ERLEDIGT | P1 | Richtungsabhängige Marquee-Auswahl: rechts→links grün/umschlossen, links→rechts rot/schneidend. |
 | A2 | ERLEDIGT | P1 | Bézier-Feder: Drücken setzt Anker, Ziehen erzeugt symmetrische Tangenten; Enter schließt den Entwurf ab. |
 | A3 | ERLEDIGT | P2 | Spline/Polyline/Bézier rasten nahe dem Startknoten ein; Klick oder Enter schließt den Pfad, der Startknoten signalisiert die Fangzone farbig. |
 | A4 | ERLEDIGT | P1 | Strg+Z = Undo, Strg+Shift+Z und Strg+Y = Redo. |
@@ -102,8 +102,14 @@ und gehören nicht mehr zur Restliste.
 
 ## Analyse-Notizen (wird ergänzt)
 
-- A1 (erledigt): `Drag::Marquee` wird als gestricheltes, jeden Frame neu
-  aufgebautes Overlay gezeichnet; der Geometrie-Cache bleibt auswahlfrei.
+- A1 (erledigt): `Drag::Marquee` wird als transparent gefülltes, gestricheltes
+  Overlay gezeichnet; rechts→links wählt grün nur vollständig umschlossene,
+  links→rechts rot auch schneidende Objekte. Der Geometrie-Cache bleibt
+  auswahlfrei. Vektorformen reagieren beim direkten Klick nur an ihrer Kontur,
+  sodass eine Marquee-Geste auch innerhalb einer großen Form beginnen kann;
+  Bilder bleiben flächig anklickbar. Die Zuordnung der Zugrichtungen kann in
+  den Oberflächen-Einstellungen invertiert werden; Farbe und Auswahlregel
+  wechseln dabei gemeinsam.
 - A4 (erledigt): `Strg+Shift+Z` wird vor `Strg+Z` ausgewertet und löst Redo
   aus. `Strg+Y` bleibt als Alias erhalten; Fokus-/Modal-Gate bleibt wirksam.
 - A2 (erledigt): Der Canvas hält während des Zeichnens echte `BezierNode`-Drafts.

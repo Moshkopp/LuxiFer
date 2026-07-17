@@ -334,9 +334,9 @@ mod tests {
     fn hit_test_ueberspringt_gesperrte_layer() {
         let mut s = AppState::new();
         s.add_shape(rect());
-        assert_eq!(s.hit_test(5.0, 5.0, 0.0), Some(0));
+        assert_eq!(s.hit_test(0.0, 5.0, 0.0), Some(0));
         s.layers[0].locked = true;
-        assert_eq!(s.hit_test(5.0, 5.0, 0.0), None);
+        assert_eq!(s.hit_test(0.0, 5.0, 0.0), None);
     }
 
     #[test]

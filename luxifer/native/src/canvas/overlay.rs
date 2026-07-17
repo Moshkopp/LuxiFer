@@ -22,6 +22,8 @@ pub struct OverlayInput<'a> {
     pub world_cursor: [f64; 2],
     /// Kamera-Skalierung (px/mm) für bildschirmkonstante Markergrößen.
     pub cam_scale: f32,
+    /// Vertauscht grünen Fenster- und roten Kreuz-Auswahlmodus.
+    pub invert_marquee_direction: bool,
     /// Job-Startpunkt (mm) für den Laser-Tab: der Anker der Job-BBox bei
     /// relativem Startmodus. None = kein Marker (Absolut/leerer Job).
     pub job_start: Option<[f64; 2]>,
@@ -115,15 +117,28 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
     if let Drag::Marquee { start } = input.drag {
         let start = [start[0] as f32, start[1] as f32];
         let cur = [cur[0] as f32, cur[1] as f32];
+        let crossing = luxifer_core::interact::marquee_crossing(
+            start[0] as f64,
+            cur[0] as f64,
+            input.invert_marquee_direction,
+        );
+        let color = if crossing {
+            scene_geo::MARQUEE_CROSS_COLOR
+        } else {
+            scene_geo::MARQUEE_CONTAIN_COLOR
+        };
+        let fill = [color[0], color[1], color[2], 0.16];
+        scene_geo::push_solid_rect(
+            &mut v,
+            start[0].min(cur[0]) as f64,
+            start[1].min(cur[1]) as f64,
+            start[0].max(cur[0]) as f64,
+            start[1].max(cur[1]) as f64,
+            fill,
+        );
         let corners = [start, [cur[0], start[1]], cur, [start[0], cur[1]], start];
         for edge in corners.windows(2) {
-            dashed_seg(
-                &mut v,
-                edge[0],
-                edge[1],
-                scene_geo::SEL_BOX_COLOR,
-                input.cam_scale,
-            );
+            dashed_seg(&mut v, edge[0], edge[1], color, input.cam_scale);
         }
     }
 

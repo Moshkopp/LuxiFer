@@ -22,9 +22,10 @@ impl EditorSession {
         hit
     }
 
-    pub fn select_rect(&mut self, start: [f64; 2], end: [f64; 2]) {
+    pub fn select_rect(&mut self, start: [f64; 2], end: [f64; 2], inverted: bool) {
+        let crossing = luxifer_core::interact::marquee_crossing(start[0], end[0], inverted);
         self.state
-            .select_in_rect(start[0], start[1], end[0], end[1]);
+            .select_in_rect(start[0], start[1], end[0], end[1], crossing);
         self.state.expand_selection_to_groups();
     }
 

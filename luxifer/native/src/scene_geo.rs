@@ -212,7 +212,7 @@ fn raw_vertex(point: Pt, color: [f32; 4]) -> Vertex {
     }
 }
 
-fn push_solid_rect(
+pub(crate) fn push_solid_rect(
     vertices: &mut Vec<Vertex>,
     x0: f64,
     y0: f64,
@@ -493,6 +493,10 @@ pub fn bed_material(w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
 pub const BED_COLOR: [f32; 4] = [0.62, 0.65, 0.7, 0.95];
 /// Auswahl-BBox-Rahmen (heller Akzentton).
 pub const SEL_BOX_COLOR: [f32; 4] = [0.4, 0.7, 1.0, 0.9];
+/// Fenster-Auswahl rechts→links: nur vollständig enthalten.
+pub const MARQUEE_CONTAIN_COLOR: [f32; 4] = [0.18, 0.9, 0.42, 0.9];
+/// Kreuz-Auswahl links→rechts: Berührung genügt.
+pub const MARQUEE_CROSS_COLOR: [f32; 4] = [0.95, 0.24, 0.22, 0.9];
 /// Transform-Handles (weiß).
 pub const HANDLE_COLOR: [f32; 4] = [0.95, 0.97, 1.0, 1.0];
 /// Maschinen-Nullmarker (leuchtendes Akzentgrün).

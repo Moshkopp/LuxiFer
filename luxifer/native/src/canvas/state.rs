@@ -28,6 +28,8 @@ pub struct CanvasState {
     pub space_down: bool,
     pub ctrl_down: bool,
     pub shift_down: bool,
+    /// Benutzerpräferenz: Fenster-/Kreuz-Auswahlrichtungen vertauschen.
+    pub invert_marquee_direction: bool,
     /// Punkt-Zug (Welt-Punkte), bis Doppelklick/Enter schließt.
     pub poly_pts: Vec<(f64, f64)>,
     /// Schwebender Haltesteg-Entwurf (nur beim Bridge-Werkzeug).
@@ -54,6 +56,7 @@ impl CanvasState {
             space_down: false,
             ctrl_down: false,
             shift_down: false,
+            invert_marquee_direction: false,
             poly_pts: Vec::new(),
             bridge: None,
             bridge_width: 2.0,

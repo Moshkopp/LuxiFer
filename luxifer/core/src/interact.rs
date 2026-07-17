@@ -244,9 +244,20 @@ impl AppState {
         self.dirty = true;
     }
 
-    /// Wählt alle Shapes, deren Bounding-Box vollständig im Rechteck liegt
-    /// (Marquee). Überspringt unsichtbare/gesperrte Layer. Ersetzt die Auswahl.
-    pub fn select_in_rect(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
+    /// Richtungsabhängige Marquee-Auswahl:
+    ///
+    /// - rechts → links: nur vollständig umschlossene Shapes;
+    /// - links → rechts: alle Shapes, deren Bounding-Box den Kasten berührt.
+    ///
+    /// Unsichtbare/gesperrte Layer werden übersprungen, die Auswahl ersetzt.
+    pub fn select_in_rect(
+        &mut self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        crossing: bool,
+    ) {
         let (lo_x, hi_x) = (x1.min(x2), x1.max(x2));
         let (lo_y, hi_y) = (y1.min(y2), y1.max(y2));
         self.selected.clear();
@@ -257,11 +268,20 @@ impl AppState {
                 }
             }
             let b = s.bbox();
-            if b.x >= lo_x && b.y >= lo_y && b.x + b.w <= hi_x && b.y + b.h <= hi_y {
+            let contained =
+                b.x >= lo_x && b.y >= lo_y && b.x + b.w <= hi_x && b.y + b.h <= hi_y;
+            let intersects =
+                b.x <= hi_x && b.x + b.w >= lo_x && b.y <= hi_y && b.y + b.h >= lo_y;
+            if contained || (crossing && intersects) {
                 self.selected.push(i);
             }
         }
     }
+}
+
+/// Liefert den aktiven Marquee-Modus aus Zugrichtung und Benutzerpräferenz.
+pub fn marquee_crossing(start_x: f64, end_x: f64, inverted: bool) -> bool {
+    (end_x > start_x) ^ inverted
 }
 
 #[cfg(test)]
@@ -502,7 +522,41 @@ mod tests {
             w: 20.0,
             h: 20.0,
         }); // draußen
-        s.select_in_rect(0.0, 0.0, 100.0, 100.0);
+        s.select_in_rect(100.0, 0.0, 0.0, 100.0, false);
         assert_eq!(s.selected, vec![0]);
+    }
+
+    #[test]
+    fn marquee_von_links_nach_rechts_waehlt_auch_schneidende_shapes() {
+        let mut s = AppState::new();
+        s.add_shape(Geo::Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 20.0,
+            h: 20.0,
+        });
+        s.add_shape(Geo::Rect {
+            x: 80.0,
+            y: 40.0,
+            w: 50.0,
+            h: 20.0,
+        });
+        s.add_shape(Geo::Rect {
+            x: 150.0,
+            y: 40.0,
+            w: 20.0,
+            h: 20.0,
+        });
+
+        s.select_in_rect(0.0, 0.0, 100.0, 100.0, true);
+        assert_eq!(s.selected, vec![0, 1]);
+    }
+
+    #[test]
+    fn marquee_richtung_kann_invertiert_werden() {
+        assert!(marquee_crossing(0.0, 10.0, false));
+        assert!(!marquee_crossing(10.0, 0.0, false));
+        assert!(!marquee_crossing(0.0, 10.0, true));
+        assert!(marquee_crossing(10.0, 0.0, true));
     }
 }

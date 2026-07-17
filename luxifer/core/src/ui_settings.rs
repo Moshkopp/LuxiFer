@@ -13,7 +13,7 @@ use crate::project::data_root;
 pub const UI_SETTINGS_FILE: &str = "gui-settings.json";
 
 /// Aktuelle Formatversion der GUI-Settings.
-pub const UI_FORMAT_VERSION: u32 = 2;
+pub const UI_FORMAT_VERSION: u32 = 3;
 
 /// Eine Theme-Farbe: Farbton (RGB) plus geklemmte Intensität (ADR §3).
 ///
@@ -129,6 +129,9 @@ pub struct UiSettings {
     /// sinnvollen Bereich geklemmt. `#[serde(default = …)]` für alte Settings.
     #[serde(default = "default_grid_size")]
     pub grid_size_mm: f64,
+    /// Vertauscht Fenster- und Kreuz-Auswahlrichtung des Marquee-Werkzeugs.
+    #[serde(default)]
+    pub invert_marquee_direction: bool,
     /// Splash-Screen beim Start anzeigen (Logo + Version). Default an.
     #[serde(default = "default_true")]
     pub show_splash: bool,
@@ -192,6 +195,7 @@ impl Default for UiSettings {
             theme: Theme::default(),
             last_project: String::new(),
             grid_size_mm: default_grid_size(),
+            invert_marquee_direction: false,
             show_splash: true,
             splash_ms: default_splash_ms(),
             modal_backdrop_alpha: default_modal_backdrop_alpha(),
@@ -321,6 +325,7 @@ mod tests {
         assert_eq!(back.last_project, "Text");
         // Fehlende neue Felder fallen auf ihre Defaults zurück.
         assert_eq!(back.grid_size_mm, default_grid_size());
+        assert!(!back.invert_marquee_direction);
         assert!(back.show_splash);
         assert_eq!(back.splash_ms, default_splash_ms());
         assert_eq!(back.modal_backdrop_alpha, default_modal_backdrop_alpha());

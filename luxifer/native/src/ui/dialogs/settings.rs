@@ -132,6 +132,15 @@ fn ui_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
                     .speed(1.0),
             );
             ui.end_row();
+            ui.label("Auswahlrichtung");
+            ui.checkbox(
+                &mut s.invert_marquee_direction,
+                "Fenster/Kreuz-Auswahl umkehren",
+            )
+            .on_hover_text(
+                "Vertauscht rechts→links und links→rechts samt grüner/roter Anzeige.",
+            );
+            ui.end_row();
             ui.label("Akzentfarbe");
             theme_color_row(ui, &mut s.theme.accent);
             ui.end_row();

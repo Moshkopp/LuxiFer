@@ -174,7 +174,11 @@ impl App {
             splash: ui_settings.show_splash.then(crate::ui::Splash::new),
             window,
             session: EditorSession::new(state),
-            canvas: CanvasState::new(cam),
+            canvas: {
+                let mut canvas = CanvasState::new(cam);
+                canvas.invert_marquee_direction = ui_settings.invert_marquee_direction;
+                canvas
+            },
             renderer,
             // Start-Ansicht per Env (Testhilfe): LUXI_TAB=laser|preview.
             view: match std::env::var("LUXI_TAB").as_deref() {
@@ -652,6 +656,7 @@ impl App {
                 bridge: self.canvas.bridge,
                 world_cursor: self.canvas.world(),
                 cam_scale: self.canvas.cam.scale,
+                invert_marquee_direction: self.canvas.invert_marquee_direction,
                 // Startmarker nur im Laser-Tab: Dort wird der Job platziert.
                 job_start: if self.view == crate::tools::View::Laser {
                     self.session

@@ -181,7 +181,7 @@ Zusätzlich, obwohl es keine separaten Commands sind:
 | `Aztec laden` | entfernen/dev-only | **noch Demo** | kein nutzerspezifischer absoluter Pfad im Produkt |
 | Fit/Zoom/Pan/Kamera | Native | vorhanden, prüfen | DPI, Cursor-Zoom, Panelgrößen, großes Fenster |
 | Werkzeugauswahl/Shortcuts | Native | typisierte `Shortcut`-Ebene, getestet | Fokus-/Modal-Gate wirksam; Space-Key-up kommt immer durch |
-| Drag-/Marquee-/Handle-Vorschau | Native | vorhanden | Marquee als gestricheltes Overlay; nur Präsentationszustand, Commit über Session |
+| Drag-/Marquee-/Handle-Vorschau | Native | vorhanden | rechts→links grün/umschlossen, links→rechts rot/schneidend; Richtung per UI-Setting invertierbar |
 | FPS-/Statuszeile | Native | vorhanden | Dev-Metrik optional; Fehler/Projektstatus klar |
 | Laser-Verwaltung | Native + Application | vorhanden | Master-Detail aus dem Laser-Tab: Grunddaten, Scan-Offset und Ruida-Controller; UI hält nur Draft/Livewerte |
 | Text-Dialog | Native + Application | vollständig | Anlegen + Editieren (Doppelklick), Core-basierte Live-Vorschau und Import eigener TTF-/OTF-Fonts |
