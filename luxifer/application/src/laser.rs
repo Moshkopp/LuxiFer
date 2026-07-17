@@ -34,22 +34,6 @@ fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
     }
 }
 
-/// Relative Ruida-Spuren werden um den controllerseitigen Bezugspunkt in die
-/// absoluten Bettkoordinaten der Preview versetzt.
-fn translate_trace(trace: &mut luxifer_core::ExecutionTrace, offset: (f64, f64)) {
-    for movement in &mut trace.moves {
-        for point in [
-            &mut movement.ideal_from,
-            &mut movement.ideal_to,
-            &mut movement.from,
-            &mut movement.to,
-        ] {
-            point.0 += offset.0;
-            point.1 += offset.1;
-        }
-    }
-}
-
 /// Hält die Laser-Registry und den (lazy gebauten) aktiven Treiber.
 pub struct LaserService {
     pub registry: LaserRegistry,
@@ -62,38 +46,27 @@ impl LaserService {
     /// Baut die maschinenspezifische Bewegungsspur mit denselben Profil- und
     /// Startparametern wie Export/Start.
     pub fn execution_trace(
-        &mut self,
+        &self,
         shapes: &[Shape],
         layers: &[Layer],
-        start_mode: StartMode,
+        _start_mode: StartMode,
         anchor_idx: usize,
     ) -> Result<luxifer_core::ExecutionTrace, AppError> {
         let profile = self
             .active_profile()
-            .cloned()
             .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
-        let reference = if start_mode == StartMode::Benutzerursprung && self.is_connected() {
-            Some(self.with_driver(true, |driver| {
-                driver.read_origin().map_err(|error| {
-                    AppError::wrap(
-                        "laser_origin_read",
-                        "Benutzerursprung konnte nicht vom Laser gelesen werden.",
-                        error.to_string(),
-                    )
-                })
-            })?)
-        } else {
-            None
-        };
         let plan = JobPlan::from_shapes_with_assets(shapes, layers, crate::assets::resolve_luma)
             .transformed_for_bed(profile.origin, profile.bed_mm);
         let params = JobParams {
-            start_mode,
+            // Die Preview bleibt an den Projekt-/Bettkoordinaten des Motivs.
+            // Relative Startmodi und ihr Jobanker werden erst vom Controller
+            // beim Starten bzw. Rahmen auf den realen Bezugspunkt angewendet.
+            start_mode: StartMode::Absolut,
             anchor: profile
                 .origin
                 .transform_anchor(Anchor::from_index(anchor_idx)),
         };
-        let mut trace = driver_for(&profile)
+        driver_for(profile)
             .execution_trace(&plan, layers, &params)
             .map_err(|error| {
                 AppError::wrap(
@@ -101,11 +74,7 @@ impl LaserService {
                     "Laserpfad konnte nicht aufgebaut werden.",
                     error,
                 )
-            })?;
-        if let Some(reference) = reference {
-            translate_trace(&mut trace, reference);
-        }
-        Ok(trace)
+            })
     }
     /// Liest bekannte und rohe Maschinenregister eines Ruida-Controllers.
     pub fn read_machine_settings(
