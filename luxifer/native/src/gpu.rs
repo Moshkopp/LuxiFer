@@ -14,7 +14,8 @@ struct Uniforms {
     scale: f32,
     _pad: f32,
     viewport: [f32; 2],
-    _pad2: [f32; 2],
+    line_aa: f32,
+    _pad2: f32,
 }
 
 /// Kapselt Device/Queue/Surface + die Canvas-Pipeline. egui-State liegt separat.
@@ -23,6 +24,7 @@ pub struct Gpu {
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
+    pub sample_count: u32,
     pipeline: wgpu::RenderPipeline,
     fill_stencil_pipeline: wgpu::RenderPipeline,
     fill_union_pipeline: wgpu::RenderPipeline,
@@ -30,6 +32,8 @@ pub struct Gpu {
     fill_color_pipeline: wgpu::RenderPipeline,
     fill_clear_pipeline: wgpu::RenderPipeline,
     stencil_view: wgpu::TextureView,
+    msaa_view: Option<wgpu::TextureView>,
+    line_antialiasing: bool,
     uniform_buf: wgpu::Buffer,
     bind: wgpu::BindGroup,
     // Dynamischer Vertex-Buffer (gecachte Szene); wächst bei Bedarf.
@@ -50,7 +54,11 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    pub async fn new(window: std::sync::Arc<winit::window::Window>) -> Result<Self, String> {
+    pub async fn new(
+        window: std::sync::Arc<winit::window::Window>,
+        requested_samples: u32,
+        line_antialiasing: bool,
+    ) -> Result<Self, String> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance
@@ -94,6 +102,23 @@ impl Gpu {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
+        let color_features = adapter.get_texture_format_features(format);
+        let stencil_features = adapter.get_texture_format_features(STENCIL_FORMAT);
+        let sample_count = [16, 8, 4, 2, 1]
+            .into_iter()
+            .find(|&samples| {
+                samples <= requested_samples
+                    && color_features.flags.sample_count_supported(samples)
+                    && stencil_features.flags.sample_count_supported(samples)
+                    && (samples == 1
+                        || color_features
+                            .flags
+                            .contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE))
+            })
+            .unwrap_or(1);
+        if sample_count != requested_samples {
+            log::warn!("MSAA {requested_samples}x nicht unterstützt; verwende {sample_count}x");
+        }
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("canvas"),
@@ -109,7 +134,7 @@ impl Gpu {
             label: None,
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -160,7 +185,10 @@ impl Gpu {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -210,7 +238,10 @@ impl Gpu {
                     },
                     bias: Default::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    ..Default::default()
+                },
                 multiview_mask: None,
                 cache: None,
             })
@@ -255,7 +286,15 @@ impl Gpu {
             0x02,
             0x02,
         );
-        let stencil_view = stencil_view(&device, size.width.max(1), size.height.max(1));
+        let stencil_view =
+            stencil_view(&device, size.width.max(1), size.height.max(1), sample_count);
+        let msaa_view = msaa_view(
+            &device,
+            format,
+            size.width.max(1),
+            size.height.max(1),
+            sample_count,
+        );
 
         let vbuf_cap = 1 << 16;
         let vbuf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -291,6 +330,7 @@ impl Gpu {
             queue,
             surface,
             config,
+            sample_count,
             pipeline,
             fill_stencil_pipeline,
             fill_union_pipeline,
@@ -298,6 +338,8 @@ impl Gpu {
             fill_color_pipeline,
             fill_clear_pipeline,
             stencil_view,
+            msaa_view,
+            line_antialiasing,
             uniform_buf,
             bind,
             vbuf,
@@ -377,7 +419,19 @@ impl Gpu {
         self.config.width = w.max(1);
         self.config.height = h.max(1);
         self.surface.configure(&self.device, &self.config);
-        self.stencil_view = stencil_view(&self.device, self.config.width, self.config.height);
+        self.stencil_view = stencil_view(
+            &self.device,
+            self.config.width,
+            self.config.height,
+            self.sample_count,
+        );
+        self.msaa_view = msaa_view(
+            &self.device,
+            self.config.format,
+            self.config.width,
+            self.config.height,
+            self.sample_count,
+        );
     }
 
     /// Schreibt die Kamera-Uniforms (jeden Frame — billig, ein kleiner Buffer).
@@ -387,7 +441,8 @@ impl Gpu {
             scale: cam.scale,
             _pad: 0.0,
             viewport: cam.viewport,
-            _pad2: [0.0, 0.0],
+            line_aa: f32::from(self.line_antialiasing),
+            _pad2: 0.0,
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&uni));
@@ -431,6 +486,10 @@ impl Gpu {
 
     pub fn stencil_view(&self) -> &wgpu::TextureView {
         &self.stencil_view
+    }
+
+    pub fn color_view<'a>(&'a self, surface: &'a wgpu::TextureView) -> &'a wgpu::TextureView {
+        self.msaa_view.as_ref().unwrap_or(surface)
     }
 
     pub fn draw_solid_fills<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, batches: &[FillBatch]) {
@@ -477,7 +536,12 @@ impl Gpu {
     }
 }
 
-fn stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
+fn stencil_view(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    sample_count: u32,
+) -> wgpu::TextureView {
     device
         .create_texture(&wgpu::TextureDescriptor {
             label: Some("canvas-stencil"),
@@ -487,7 +551,7 @@ fn stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count,
             dimension: wgpu::TextureDimension::D2,
             format: STENCIL_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -496,10 +560,37 @@ fn stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture
         .create_view(&Default::default())
 }
 
+fn msaa_view(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+    sample_count: u32,
+) -> Option<wgpu::TextureView> {
+    (sample_count > 1).then(|| {
+        device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("canvas-msaa"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&Default::default())
+    })
+}
+
 const SHADER: &str = r#"
-struct U { center: vec2<f32>, scale: f32, _p: f32, viewport: vec2<f32>, _p2: vec2<f32> };
+struct U { center: vec2<f32>, scale: f32, _p: f32, viewport: vec2<f32>, line_aa: f32, _p2: f32 };
 @group(0) @binding(0) var<uniform> u: U;
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32> };
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32>, @location(1) edge: f32 };
 
 // Halbe Linienbreite in Pixeln (bildschirm-konstant).
 const HALF_W: f32 = 1.1;
@@ -511,14 +602,22 @@ fn vs(@location(0) p: vec2<f32>, @location(1) dir: vec2<f32>,
     var px = (p - u.center) * u.scale;
     // Senkrechte zur Segmentrichtung, um HALF_W Pixel zur Seite versetzen.
     let n = vec2<f32>(-dir.y, dir.x);
-    px = px + n * side * HALF_W;
+    let outer = HALF_W + u.line_aa;
+    px = px + n * side * outer;
     let ndc = vec2<f32>(px.x / (u.viewport.x * 0.5), -px.y / (u.viewport.y * 0.5));
     var o: VOut;
     o.pos = vec4<f32>(ndc, 0.0, 1.0);
     o.col = c;
+    o.edge = side * outer;
     return o;
 }
 
 @fragment
-fn fs(v: VOut) -> @location(0) vec4<f32> { return v.col; }
+fn fs(v: VOut) -> @location(0) vec4<f32> {
+    if u.line_aa < 0.5 {
+        return v.col;
+    }
+    let coverage = 1.0 - smoothstep(HALF_W - u.line_aa, HALF_W + u.line_aa, abs(v.edge));
+    return vec4<f32>(v.col.rgb, v.col.a * coverage);
+}
 "#;

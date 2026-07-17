@@ -143,6 +143,25 @@ fn ui_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
             ui.checkbox(&mut s.open_maximized, "Maximiert öffnen")
                 .on_hover_text("Wird beim nächsten Programmstart angewendet.");
             ui.end_row();
+            ui.label("Linienglättung");
+            ui.checkbox(&mut s.line_antialiasing, "Analytisches GPU-AA")
+                .on_hover_text("Glättet Konturen, Raster und Overlays. Gilt nach Neustart.");
+            ui.end_row();
+            ui.label("Flächen-MSAA");
+            egui::ComboBox::from_id_salt("settings_msaa")
+                .selected_text(if s.msaa_samples == 1 {
+                    "Aus".to_owned()
+                } else {
+                    format!("{}×", s.msaa_samples)
+                })
+                .show_ui(ui, |ui| {
+                    for (samples, label) in
+                        [(1, "Aus"), (2, "2×"), (4, "4×"), (8, "8×"), (16, "16×")]
+                    {
+                        ui.selectable_value(&mut s.msaa_samples, samples, label);
+                    }
+                });
+            ui.end_row();
             ui.label("Akzentfarbe");
             theme_color_row(ui, &mut s.theme.accent);
             ui.end_row();

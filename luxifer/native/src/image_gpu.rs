@@ -57,24 +57,21 @@ pub struct ImageStore {
 }
 
 impl ImageStore {
-    pub fn insert_rgba(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        asset: &str,
-        rgba: &[u8],
-        size: (u32, u32),
-    ) {
+    pub fn insert_rgba(&mut self, gpu: &Gpu, asset: &str, rgba: &[u8], size: (u32, u32)) {
         let (width, height) = size;
-        self.ensure_pipeline(device, format);
-        let texture = self.upload_rgba(device, queue, rgba, width, height);
+        self.ensure_pipeline(&gpu.device, gpu.config.format, gpu.sample_count);
+        let texture = self.upload_rgba(&gpu.device, &gpu.queue, rgba, width, height);
         self.textures.insert(asset.to_owned(), texture);
     }
 
     /// Baut die Pipeline lazy (beim ersten Bild). Trennt die einmalige
     /// GPU-Objekt-Erzeugung von der Textur-Verwaltung.
-    fn ensure_pipeline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+    fn ensure_pipeline(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) {
         if self.pipeline.is_some() {
             return;
         }
@@ -160,7 +157,10 @@ impl ImageStore {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -182,6 +182,7 @@ impl ImageStore {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
+        sample_count: u32,
         state: &AppState,
     ) {
         let dir = luxifer_core::assets_dir();
@@ -190,7 +191,7 @@ impl ImageStore {
                 if self.textures.contains_key(asset) {
                     continue;
                 }
-                self.ensure_pipeline(device, format);
+                self.ensure_pipeline(device, format, sample_count);
                 match luxifer_core::load_asset_rgba(&dir, asset) {
                     Ok((rgba, w, h)) => {
                         let tex = self.upload_rgba(device, queue, &rgba, w, h);
@@ -211,6 +212,7 @@ impl ImageStore {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
+        sample_count: u32,
         rasters: &[luxifer_core::RasterTexture],
         burn_color: [f32; 4],
     ) {
@@ -219,7 +221,7 @@ impl ImageStore {
             if r.width == 0 || r.height == 0 {
                 continue;
             }
-            self.ensure_pipeline(device, format);
+            self.ensure_pipeline(device, format, sample_count);
             let burn = [
                 (burn_color[0] * 255.0) as u8,
                 (burn_color[1] * 255.0) as u8,

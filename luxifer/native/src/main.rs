@@ -58,7 +58,8 @@ impl ApplicationHandler for Runner {
         if self.app.is_some() {
             return;
         }
-        let open_maximized = luxifer_core::UiSettings::load().open_maximized;
+        let startup_settings = luxifer_core::UiSettings::load();
+        let open_maximized = startup_settings.open_maximized;
         let mut attrs = Window::default_attributes()
             .with_title("LuxiFer")
             .with_inner_size(winit::dpi::LogicalSize::new(1400, 880))
@@ -84,7 +85,11 @@ impl ApplicationHandler for Runner {
                 return;
             }
         };
-        let gpu = match pollster::block_on(Gpu::new(window.clone())) {
+        let gpu = match pollster::block_on(Gpu::new(
+            window.clone(),
+            startup_settings.msaa_samples,
+            startup_settings.line_antialiasing,
+        )) {
             Ok(gpu) => gpu,
             Err(error) => {
                 log::error!("{error}");

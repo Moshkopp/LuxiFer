@@ -85,21 +85,18 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn preload_image(&mut self, asset: &str, rgba: &[u8], width: u32, height: u32) {
-        self.images.insert_rgba(
-            &self.gpu.device,
-            &self.gpu.queue,
-            self.gpu.config.format,
-            asset,
-            rgba,
-            (width, height),
-        );
+        self.images
+            .insert_rgba(&self.gpu, asset, rgba, (width, height));
     }
 
     pub fn new(gpu: Gpu, egui_state: egui_winit::State) -> Self {
         let egui_renderer = egui_wgpu::Renderer::new(
             &gpu.device,
             gpu.config.format,
-            egui_wgpu::RendererOptions::default(),
+            egui_wgpu::RendererOptions {
+                msaa_samples: gpu.sample_count,
+                ..Default::default()
+            },
         );
         Self {
             gpu,
@@ -246,6 +243,7 @@ impl Renderer {
                         &self.gpu.device,
                         &self.gpu.queue,
                         self.gpu.config.format,
+                        self.gpu.sample_count,
                         &[],
                         crate::canvas::scene::srgb_to_linear(key.material.burn()),
                     );
@@ -271,6 +269,7 @@ impl Renderer {
                     &self.gpu.device,
                     &self.gpu.queue,
                     self.gpu.config.format,
+                    self.gpu.sample_count,
                     &geometry.rasters,
                     crate::canvas::scene::srgb_to_linear(key.material.burn()),
                 );
@@ -322,6 +321,7 @@ impl Renderer {
                 &self.gpu.device,
                 &self.gpu.queue,
                 self.gpu.config.format,
+                self.gpu.sample_count,
                 scene.session,
             );
         }
@@ -347,6 +347,7 @@ impl Renderer {
             | wgpu::CurrentSurfaceTexture::Validation => return,
         };
         let view = frame.texture.create_view(&Default::default());
+        let color_view = self.gpu.color_view(&view);
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
 
         // egui-Texturen/Buffer aktualisieren.
@@ -372,7 +373,7 @@ impl Renderer {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("background-images"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: color_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -411,7 +412,7 @@ impl Renderer {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("solid-fills"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: color_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -437,9 +438,9 @@ impl Renderer {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("outlines-overlay-ui"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: color_view,
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: (self.gpu.sample_count > 1).then_some(&view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,

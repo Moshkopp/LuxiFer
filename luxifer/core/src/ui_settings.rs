@@ -135,6 +135,12 @@ pub struct UiSettings {
     /// Hauptfenster beim Programmstart maximiert oeffnen.
     #[serde(default)]
     pub open_maximized: bool,
+    /// Analytische Kantenglaettung fuer Canvas-Linien und Overlays.
+    #[serde(default = "default_true")]
+    pub line_antialiasing: bool,
+    /// Gewuenschte GPU-MSAA-Samplezahl: 1 (Aus), 2, 4, 8 oder 16.
+    #[serde(default = "default_msaa_samples")]
+    pub msaa_samples: u32,
     /// Splash-Screen beim Start anzeigen (Logo + Version). Default an.
     #[serde(default = "default_true")]
     pub show_splash: bool,
@@ -181,6 +187,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_msaa_samples() -> u32 {
+    4
+}
+
 /// Grenzen der Rasterweite (mm): fein genug für Details, grob genug fürs Bett.
 pub const GRID_SIZE_MIN: f64 = 1.0;
 pub const GRID_SIZE_MAX: f64 = 500.0;
@@ -200,6 +210,8 @@ impl Default for UiSettings {
             grid_size_mm: default_grid_size(),
             invert_marquee_direction: false,
             open_maximized: false,
+            line_antialiasing: true,
+            msaa_samples: default_msaa_samples(),
             show_splash: true,
             splash_ms: default_splash_ms(),
             modal_backdrop_alpha: default_modal_backdrop_alpha(),
@@ -220,6 +232,9 @@ impl UiSettings {
         }
         self.grid_size_mm = self.grid_size_mm.clamp(GRID_SIZE_MIN, GRID_SIZE_MAX);
         self.splash_ms = self.splash_ms.clamp(SPLASH_MS_MIN, SPLASH_MS_MAX);
+        if !matches!(self.msaa_samples, 1 | 2 | 4 | 8 | 16) {
+            self.msaa_samples = default_msaa_samples();
+        }
     }
 
     pub fn to_json(&self) -> Result<String, String> {
@@ -331,6 +346,8 @@ mod tests {
         assert_eq!(back.grid_size_mm, default_grid_size());
         assert!(!back.invert_marquee_direction);
         assert!(!back.open_maximized);
+        assert!(back.line_antialiasing);
+        assert_eq!(back.msaa_samples, default_msaa_samples());
         assert!(back.show_splash);
         assert_eq!(back.splash_ms, default_splash_ms());
         assert_eq!(back.modal_backdrop_alpha, default_modal_backdrop_alpha());
@@ -364,6 +381,16 @@ mod tests {
         };
         s.sanitize();
         assert_eq!(s.splash_ms, SPLASH_MS_MAX);
+    }
+
+    #[test]
+    fn ungueltige_msaa_stufe_faellt_auf_standard_zurueck() {
+        let mut settings = UiSettings {
+            msaa_samples: 3,
+            ..UiSettings::default()
+        };
+        settings.sanitize();
+        assert_eq!(settings.msaa_samples, default_msaa_samples());
     }
 
     #[test]
