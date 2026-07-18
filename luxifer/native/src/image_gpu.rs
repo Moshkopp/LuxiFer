@@ -61,6 +61,7 @@ pub struct ImageStore {
     /// Verarbeitete Rasterungen für den Preview-Reiter (ersetzen dort die
     /// Design-Texturen). Werden beim Preview-Aufbau gesetzt.
     rasters: Vec<RasterQuad>,
+    raster_vbuf: Option<wgpu::Buffer>,
 }
 
 impl ImageStore {
@@ -309,6 +310,23 @@ impl ImageStore {
                 h: r.h as f32,
             });
         }
+        let mut vertices = Vec::with_capacity(self.rasters.len() * 6);
+        for raster in &self.rasters {
+            Self::push_quad(
+                &mut vertices,
+                raster.x,
+                raster.y,
+                raster.x + raster.w,
+                raster.y + raster.h,
+            );
+        }
+        self.raster_vbuf = (!vertices.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("raster_quads_cached"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
     }
 
     fn upload_rgba(
@@ -489,13 +507,7 @@ impl ImageStore {
 
     /// Zeichnet die verarbeiteten Preview-Rasterungen (Laser-Vorschau) als
     /// texturierte Quads — statt der Design-Texturen.
-    pub fn draw_rasters<'a>(
-        &'a self,
-        rp: &mut wgpu::RenderPass<'a>,
-        gpu: &Gpu,
-        cam: &Camera,
-        scratch: &'a mut Option<wgpu::Buffer>,
-    ) {
+    pub fn draw_rasters<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>, gpu: &Gpu, cam: &Camera) {
         if self.rasters.is_empty() {
             return;
         }
@@ -511,19 +523,9 @@ impl ImageStore {
         };
         self.write_camera(gpu, cam, uni_buf, selection_uni_buf, Default::default());
 
-        let mut verts: Vec<ImgVertex> = Vec::new();
-        for r in &self.rasters {
-            Self::push_quad(&mut verts, r.x, r.y, r.x + r.w, r.y + r.h);
-        }
-        let buf = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("raster_quads"),
-                contents: bytemuck::cast_slice(&verts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        *scratch = Some(buf);
-        let buf = scratch.as_ref().unwrap();
+        let Some(buf) = self.raster_vbuf.as_ref() else {
+            return;
+        };
 
         rp.set_pipeline(pipeline);
         rp.set_bind_group(0, uni_bind, &[]);

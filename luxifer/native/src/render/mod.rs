@@ -529,8 +529,6 @@ impl Renderer {
             &screen,
         );
 
-        // Scratch-Buffer für die Bild-Quads (muss den Render-Pass überleben).
-        let mut img_scratch: Option<wgpu::Buffer> = None;
         let image_started = Instant::now();
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -559,8 +557,7 @@ impl Renderer {
             self.gpu.draw_canvas_range(&mut rp, 0..self.background_end);
             self.gpu.draw_grid(&mut rp);
             if scene.preview {
-                self.images
-                    .draw_rasters(&mut rp, &self.gpu, scene.cam, &mut img_scratch);
+                self.images.draw_rasters(&mut rp, &self.gpu, scene.cam);
             } else {
                 self.images
                     .draw(&mut rp, &self.gpu, scene.cam, scene.selection_transform);

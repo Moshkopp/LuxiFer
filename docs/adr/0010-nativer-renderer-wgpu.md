@@ -291,6 +291,14 @@ Regressionstests sichern für Bild-Rotate und vollständiges Fill-Resize: keine
 Core-Revision und keine Geometriemutation während der Vorschau, affine
 GPU-Matrix während der Geste und genau ein finaler Commit.
 
+### Persistenter Raster-Quad-Cache der Laser-Vorschau
+
+Die Rastertexturen der Laser-Vorschau erzeugen ihre Quad-Vertices und den
+zugehörigen GPU-Buffer nun einmal beim Eintreffen eines neuen Workergebnisses.
+Der Frame-Pfad bindet ausschließlich den persistenten Buffer. Damit entfallen
+die zuvor pro Preview-Frame ausgeführten CPU-Vertexallokationen sowie
+`create_buffer_init`; Kameraänderungen aktualisieren weiterhin nur Uniforms.
+
 ### Fill-Compound-Stresstest nach dem Transform-Checkpoint
 
 Ein synthetischer Release-Test bildet die historische Obergrenze mit 1.808
