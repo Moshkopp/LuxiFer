@@ -15,6 +15,10 @@ impl App {
             charon_status: self.charon_status.clone(),
             charon_sync_error: self.charon_sync_error.clone(),
             charon_backups: Vec::new(),
+            shortcut_recording: None,
+            shortcut_conflict: None,
+            shortcut_error: None,
+            confirm_shortcut_defaults: false,
         });
     }
 
@@ -95,6 +99,10 @@ impl App {
         };
         let mut draft = st.draft.clone();
         draft.sanitize();
+        if let Err(message) = draft.shortcut_bindings.validate() {
+            self.app_error = Some(AppError::new("shortcut_conflict", message));
+            return false;
+        }
         if let Err(error) = draft.save() {
             self.app_error = Some(AppError::new(
                 "settings_write",

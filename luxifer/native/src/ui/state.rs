@@ -235,8 +235,23 @@ pub struct ProjectBrowserState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsSection {
     Oberflaeche,
+    Tastaturkuerzel,
     Charon,
     Ueber,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ShortcutRecording {
+    pub action: luxifer_core::ShortcutAction,
+    pub replace: Option<luxifer_core::ShortcutTrigger>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ShortcutConflict {
+    pub action: luxifer_core::ShortcutAction,
+    pub previous_action: luxifer_core::ShortcutAction,
+    pub trigger: luxifer_core::ShortcutTrigger,
+    pub replace: Option<luxifer_core::ShortcutTrigger>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -256,6 +271,10 @@ pub struct SettingsDialogState {
     pub charon_status: CharonTestStatus,
     pub charon_sync_error: Option<String>,
     pub charon_backups: Vec<luxifer_application::CharonWorkplaceBackup>,
+    pub shortcut_recording: Option<ShortcutRecording>,
+    pub shortcut_conflict: Option<ShortcutConflict>,
+    pub shortcut_error: Option<String>,
+    pub confirm_shortcut_defaults: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

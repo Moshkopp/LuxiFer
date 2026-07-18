@@ -157,6 +157,7 @@ pub struct Mods {
 /// Tippen hinter einem offenen Layer-/Text-/Laser-Dialog die Szene nicht
 /// mutiert. `pressed` unterscheidet Down/Up; nur die Leertaste braucht beide
 /// Flanken, alle anderen Befehle lösen auf Down aus.
+#[cfg(test)]
 pub fn resolve_shortcut(
     key: Key,
     mods: Mods,

@@ -355,3 +355,20 @@ Zeichenwerkzeug wird dabei nicht verändert. Wird die rechte Maustaste später
 einer anderen Action zugewiesen, löst sie diese einmal auf Mouse-Down aus.
 53 native Tests sichern unter anderem benutzerdefinierte Bindings,
 Fokusblockade und die temporäre Rechtsauswahl.
+
+### Einstellungssektion und Recorder
+
+Der Einstellungsdialog besitzt nun den eigenen Bereich „Tastenkürzel“. Die
+Aktionen sind nach Kategorien geordnet und zeigen alle aktuell zugewiesenen
+Trigger. Ein Linksklick auf eine Belegung startet deren Ersetzung; über `+`
+kann eine weitere Belegung ergänzt und über `×` einzeln entfernt werden. Der
+Aufnahmezustand zeigt die gerade gehaltenen Modifier und lässt sich mit
+`Escape` abbrechen.
+
+Reservierte Kombinationen werden mit Begründung abgelehnt. Bei einer
+Doppelbelegung erscheint die bestätigte Abfrage „Umbelegen/Abbrechen“; erst
+„Umbelegen“ entfernt den konkreten Trigger bei der bisherigen Aktion und weist
+ihn atomar der neuen Aktion zu. Jede Aktion kann einzeln und die gesamte
+Tabelle nach einer Bestätigung auf Standard zurückgesetzt werden. Speichern ist
+während einer offenen Aufnahme, Fehlermeldung oder Konfliktentscheidung
+gesperrt; Abbrechen verwirft weiterhin den vollständigen Settings-Entwurf.
