@@ -289,6 +289,33 @@ Compounds gilt. Der dauerhafte Test sichert deshalb Compoundzahl, Vertexzahl
 und Draw-Call-Ableitung. Vor einem semantischen Umbau folgt ein gezielter
 GPU-Benchmark dieses 5.426-Draw-Falls.
 
+### GPU-Gegencheck des 5.426-Draw-Falls
+
+Der native Startpfad kann die synthetische Szene opt-in direkt in den
+produktiven Surface-, Stencil-, MSAA- und Present-Pfad einsetzen:
+
+```bash
+LUXIFER_FILL_STRESS=1808 \
+LUXIFER_RENDER_PROFILE=1 \
+RUST_LOG=luxifer_render_perf=info \
+cargo run --release -p luxifer-native
+```
+
+Ohne `LUXIFER_FILL_STRESS` bleibt der normale Projektstart unverändert. Der
+Release-Gegencheck auf dem vorhandenen RADV/Vulkan-System ergab:
+
+- 1.808 Fill-Compounds und 5.429 geschätzte Canvas-Draws insgesamt,
+- stabile 60-Hz-Intervalle mit etwa 16,18 bis 16,34 ms pro Frame,
+- etwa 0,17 bis 0,18 ms UI und 0,13 bis 0,14 ms egui-Tessellation,
+- einmalig 0,84 ms Fill- und 1,70 ms Linien-Cacheaufbau,
+- danach keine Scene- oder Selection-Rebuilds.
+
+Damit ist die Compoundzahl weiterhin ein Skalierungsrisiko für schwächere
+Treiber und höhere Bildraten, auf der gemessenen Hardware aber kein belegter
+60-Hz-Flaschenhals. Ein semantisch riskantes Zusammenlegen unabhängiger
+Compounds oder ein neuer Fill-Renderer ist derzeit nicht gerechtfertigt. Der
+opt-in Hook bleibt als reproduzierbarer Regressionstest erhalten.
+
 ## Offen (Reihenfolge im Branch)
 
 Die funktionale Migration und der vollständige Tauri-Abbau werden durch

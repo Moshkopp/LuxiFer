@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use luxifer_application::{AppError, EditorSession};
 use luxifer_core::state::AppState;
+use luxifer_core::{Geo, Layer, LayerMode, Shape};
 use winit::event::{ElementState, WindowEvent};
 use winit::window::Window;
 
@@ -147,7 +148,14 @@ impl App {
         let viewport = [gpu.config.width as f32, gpu.config.height as f32];
         let renderer = Renderer::new(gpu, egui_state);
 
-        let state = AppState::new();
+        let mut state = AppState::new();
+        if let Some(compounds) = fill_stress_compounds_from_env() {
+            populate_fill_stress_scene(&mut state, compounds);
+            log::info!(
+                target: "luxifer_render_perf",
+                "synthetic fill stress scene enabled: compounds={compounds}"
+            );
+        }
         let accent = state.active_color().unwrap_or([0x3B, 0x82, 0xF6]);
         // Ein erstes CLI-Argument wird als zu importierende Datei geladen
         // (praktisch fürs Testen: `luxifer-native datei.svg`).
@@ -739,8 +747,55 @@ impl App {
     }
 }
 
+/// Opt-in Diagnose-Szene für den echten Surface-/Stencil-/Present-Pfad.
+/// Ohne `LUXIFER_FILL_STRESS` bleibt der normale Startzustand unverändert.
+fn fill_stress_compounds_from_env() -> Option<usize> {
+    std::env::var("LUXIFER_FILL_STRESS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|count| *count > 0)
+}
+
+fn populate_fill_stress_scene(state: &mut AppState, compounds: usize) {
+    let mut layer = Layer::new(0);
+    layer.mode = LayerMode::Fill;
+    state.layers.push(layer);
+    state.shapes.reserve(compounds);
+    for index in 0..compounds {
+        let column = (index % 64) as f64;
+        let row = (index / 64) as f64;
+        state.shapes.push(Shape::new(
+            0,
+            Geo::Rect {
+                x: column * 2.0,
+                y: row * 2.0,
+                w: 1.0,
+                h: 1.0,
+            },
+        ));
+    }
+    state.selected.clear();
+    state.dirty = false;
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fill_stress_scene_erzeugt_unabhaengige_fill_shapes() {
+        let mut state = luxifer_core::AppState::new();
+        super::populate_fill_stress_scene(&mut state, 1_808);
+
+        assert_eq!(state.layers.len(), 1);
+        assert_eq!(state.layers[0].mode, luxifer_core::LayerMode::Fill);
+        assert_eq!(state.shapes.len(), 1_808);
+        assert!(state
+            .shapes
+            .iter()
+            .all(|shape| shape.fill_group_id.is_none()));
+        assert!(state.selected.is_empty());
+        assert!(!state.dirty);
+    }
+
     /// Bild-Import-Kette: import_image (Store) → add_image → Geo::Image im State.
     /// Verifiziert die native Verdrahtung (Rendern selbst braucht die GPU).
     #[test]
