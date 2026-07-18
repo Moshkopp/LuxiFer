@@ -86,6 +86,12 @@ impl CanvasState {
         double
     }
 
+    /// Ein tatsächlich angefasster Knoten ist eine Drag-Geste und darf nicht
+    /// als erster Klick eines späteren Segment-Doppelklicks weiterleben.
+    pub(super) fn clear_double_click_candidate(&mut self) {
+        self.last_click = None;
+    }
+
     /// Cursor-Weltkoordinaten (mm).
     pub fn world(&self) -> [f64; 2] {
         self.cam.screen_to_world(self.cursor)

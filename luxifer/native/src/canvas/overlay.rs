@@ -391,16 +391,22 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
         }
     }
 
-    // Auswahl-BBox toolunabhängig anzeigen (nicht im gecachten Puffer, damit
-    // dieser nicht an der Auswahl hängt).
-    if let Some(b) = input.session.selection_bbox() {
-        v.extend(scene_geo::rect_outline(
-            b.x as f32,
-            b.y as f32,
-            b.w as f32,
-            b.h as f32,
-            scene_geo::SEL_BOX_COLOR,
-        ));
+    if input.tool == Tool::Node {
+        draw_edit_nodes(&mut v, input);
+    }
+
+    // Im Node-Modus stört die Transform-BBox und suggeriert eine andere
+    // Interaktion. Dort werden ausschließlich Anker und Tangenten angezeigt.
+    if input.tool != Tool::Node {
+        if let Some(b) = input.session.selection_bbox() {
+            v.extend(scene_geo::rect_outline(
+                b.x as f32,
+                b.y as f32,
+                b.w as f32,
+                b.h as f32,
+                scene_geo::SEL_BOX_COLOR,
+            ));
+        }
     }
 
     // Handles nur im Auswahl-Werkzeug und bei vorhandener Auswahl.
@@ -443,4 +449,106 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
         scene_geo::HANDLE_COLOR,
     ));
     v
+}
+
+fn draw_edit_nodes(v: &mut Vec<Vertex>, input: &OverlayInput<'_>) {
+    let hw = handle_hw(input.cam_scale);
+    for &shape_idx in &input.session.selected {
+        let Some(shape) = input.session.shapes.get(shape_idx) else {
+            continue;
+        };
+        let fallback;
+        let nodes = if let Some(path) = &shape.bezier {
+            &path.nodes
+        } else if !matches!(
+            shape.geo,
+            luxifer_core::Geo::Image { .. } | luxifer_core::Geo::Ellipse { .. }
+        ) {
+            fallback = shape
+                .geo
+                .outline_points()
+                .0
+                .into_iter()
+                .map(luxifer_core::bezier::BezierNode::corner)
+                .collect::<Vec<_>>();
+            &fallback
+        } else {
+            continue;
+        };
+        let pivot = shape.geo.bbox().center();
+        let world = |p: (f64, f64)| {
+            if shape.rotation.abs() > f64::EPSILON {
+                luxifer_core::geometry::rotate_point(p.0, p.1, pivot.0, pivot.1, shape.rotation)
+            } else {
+                p
+            }
+        };
+        for node in nodes {
+            let anchor = world(node.p);
+            for handle in [node.h_in, node.h_out].into_iter().flatten() {
+                let handle = world(handle);
+                scene_geo::push_seg(
+                    v,
+                    [anchor.0 as f32, anchor.1 as f32],
+                    [handle.0 as f32, handle.1 as f32],
+                    [0.3, 0.51, 0.97, 0.8],
+                );
+                v.extend(scene_geo::handle_marker(
+                    handle.0 as f32,
+                    handle.1 as f32,
+                    hw * 0.72,
+                    [0.85, 0.9, 1.0, 1.0],
+                ));
+            }
+            v.extend(scene_geo::handle_marker(
+                anchor.0 as f32,
+                anchor.1 as f32,
+                hw,
+                [0.3, 0.51, 0.97, 1.0],
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input<'a>(session: &'a EditorSession, drag: &'a Drag, tool: Tool) -> OverlayInput<'a> {
+        OverlayInput {
+            session,
+            accent: [220, 40, 40],
+            drag,
+            tool,
+            active_shape: PolyShape::Penta,
+            poly_pts: &[],
+            bezier_nodes: &[],
+            world_cursor: [0.0, 0.0],
+            cam_scale: 1.0,
+            invert_marquee_direction: false,
+            job_start: None,
+            bridge: None,
+            trim_preview: None,
+        }
+    }
+
+    #[test]
+    fn node_modus_blendet_die_auswahl_boundingbox_aus() {
+        let mut session = EditorSession::default();
+        session.add_line([0.0, 0.0], [20.0, 0.0]);
+        let drag = Drag::None;
+
+        let select = overlay_vertices(&input(&session, &drag, Tool::Select));
+        assert!(select
+            .iter()
+            .any(|vertex| vertex.color == scene_geo::SEL_BOX_COLOR));
+
+        let node = overlay_vertices(&input(&session, &drag, Tool::Node));
+        assert!(!node
+            .iter()
+            .any(|vertex| vertex.color == scene_geo::SEL_BOX_COLOR));
+        assert!(node
+            .iter()
+            .any(|vertex| vertex.color == [0.3, 0.51, 0.97, 1.0]));
+    }
 }

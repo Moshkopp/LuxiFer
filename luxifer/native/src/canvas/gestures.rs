@@ -98,6 +98,17 @@ impl CanvasState {
                     self.drag = Drag::Pan;
                     return out;
                 }
+                // Im Knotenwerkzeug teilt ein Doppelklick genau das getroffene
+                // Segment. Der Core liefert auch bei Kurven/Rotation das exakte t.
+                if self.tool == Tool::Node && self.is_double_click(w) {
+                    let tolerance = 6.0 / self.cam.scale as f64;
+                    if let Some(hit) = session.hit_bezier_segment((w[0], w[1]), tolerance) {
+                        session.begin_edit();
+                        session.split_node_segment(hit.shape, hit.segment, hit.t);
+                        session.commit_edit();
+                        return out;
+                    }
+                }
                 // Doppelklick im Auswahl-Werkzeug auf einen Shape → Editor öffnen.
                 if matches!(self.tool, Tool::Select) && self.is_double_click(w) {
                     let tol = 4.0 / self.cam.scale as f64;
@@ -111,7 +122,8 @@ impl CanvasState {
                     return out;
                 }
                 match self.tool {
-                    Tool::Select | Tool::Node => self.begin_select(session, w),
+                    Tool::Select => self.begin_select(session, w),
+                    Tool::Node => self.begin_node_edit(session, w),
                     Tool::Trim => {
                         let tolerance = 6.0 / self.cam.scale as f64;
                         session.begin_edit();
@@ -255,6 +267,66 @@ impl CanvasState {
         }
     }
 
+    fn begin_node_edit(&mut self, session: &mut EditorSession, w: [f64; 2]) {
+        let pick = 8.0 / self.cam.scale as f64;
+        for &shape_idx in session.selected.iter().rev() {
+            let Some(shape) = session.shapes.get(shape_idx) else {
+                continue;
+            };
+            let pivot = shape.geo.bbox().center();
+            let to_world = |p: (f64, f64)| {
+                if shape.rotation.abs() > f64::EPSILON {
+                    luxifer_core::geometry::rotate_point(p.0, p.1, pivot.0, pivot.1, shape.rotation)
+                } else {
+                    p
+                }
+            };
+            let fallback;
+            let nodes = if let Some(path) = &shape.bezier {
+                &path.nodes
+            } else if !matches!(
+                shape.geo,
+                luxifer_core::Geo::Image { .. } | luxifer_core::Geo::Ellipse { .. }
+            ) {
+                fallback = shape
+                    .geo
+                    .outline_points()
+                    .0
+                    .into_iter()
+                    .map(luxifer_core::bezier::BezierNode::corner)
+                    .collect::<Vec<_>>();
+                &fallback
+            } else {
+                continue;
+            };
+            for (node_idx, node) in nodes.iter().enumerate().rev() {
+                for (part, point) in [
+                    (luxifer_core::bezier::NodePart::HandleIn, node.h_in),
+                    (luxifer_core::bezier::NodePart::HandleOut, node.h_out),
+                    (luxifer_core::bezier::NodePart::Anchor, Some(node.p)),
+                ] {
+                    let Some(point) = point else { continue };
+                    let point = to_world(point);
+                    if (point.0 - w[0]).hypot(point.1 - w[1]) <= pick {
+                        session.begin_edit();
+                        self.clear_double_click_candidate();
+                        self.drag = Drag::EditNode {
+                            shape: shape_idx,
+                            node: node_idx,
+                            part,
+                        };
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Ein Klick auf eine andere Kontur macht sie zum Ziel des Node-Tools,
+        // verschiebt sie aber nicht wie das Auswahlwerkzeug.
+        session.select_at(w[0], w[1], 4.0 / self.cam.scale as f64, false);
+        self.drag = Drag::None;
+    }
+
     /// Cursorbewegung auf Fensterpixel `new`. Aktualisiert laufende Gesten und
     /// setzt am Ende den Cursor.
     pub fn on_cursor_move(&mut self, session: &mut EditorSession, new: [f32; 2]) {
@@ -306,6 +378,26 @@ impl CanvasState {
                     n.h_out = Some((w[0], w[1]));
                     n.h_in = Some((n.p.0 - dx, n.p.1 - dy));
                 }
+                self.cursor = new;
+                return;
+            }
+            Drag::EditNode { shape, node, part } => {
+                let (shape, node, part) = (*shape, *node, *part);
+                let local = session.shapes.get(shape).map_or((w[0], w[1]), |shape| {
+                    if shape.rotation.abs() > f64::EPSILON {
+                        let pivot = shape.geo.bbox().center();
+                        luxifer_core::geometry::rotate_point(
+                            w[0],
+                            w[1],
+                            pivot.0,
+                            pivot.1,
+                            -shape.rotation,
+                        )
+                    } else {
+                        (w[0], w[1])
+                    }
+                });
+                session.drag_node(shape, node, part, local);
                 self.cursor = new;
                 return;
             }
@@ -383,7 +475,10 @@ impl CanvasState {
                 session.commit_edit();
                 false
             }
-            Drag::MoveShapes { .. } | Drag::Resize { .. } | Drag::Rotate { .. } => {
+            Drag::MoveShapes { .. }
+            | Drag::Resize { .. }
+            | Drag::Rotate { .. }
+            | Drag::EditNode { .. } => {
                 session.commit_edit();
                 false
             }
@@ -492,6 +587,59 @@ mod tests {
             Some((15.0, 12.0))
         );
         assert!(session.shapes[0].bezier.as_ref().unwrap().closed);
+    }
+
+    #[test]
+    fn node_doppelklick_teilt_das_getroffene_segment() {
+        let mut canvas = CanvasState::new(Camera::new());
+        canvas.tool = Tool::Node;
+        let mut session = EditorSession::default();
+        session.add_line([0.0, 0.0], [20.0, 0.0]);
+        canvas.cursor = canvas.cam.world_to_screen([10.0, 0.0]);
+
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_mouse(&mut session, MouseButton::Left, false);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+
+        let nodes = &session.shapes[0].bezier.as_ref().unwrap().nodes;
+        assert_eq!(nodes.len(), 3);
+        assert!((nodes[1].p.0 - 10.0).abs() < 0.01);
+        assert!(nodes[1].p.1.abs() < 0.01);
+        assert!(
+            session.undo(),
+            "Doppelklick erzeugt genau einen Undo-Schritt"
+        );
+        assert!(session.shapes[0].bezier.is_none());
+    }
+
+    #[test]
+    fn verschobener_startknoten_blockiert_keine_weitere_bearbeitung() {
+        let mut canvas = CanvasState::new(Camera::new());
+        canvas.tool = Tool::Node;
+        let mut session = EditorSession::default();
+        session.add_point_path(
+            PointPath::Polyline,
+            vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0)],
+            true,
+        );
+
+        canvas.cursor = canvas.cam.world_to_screen([0.0, 0.0]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_cursor_move(&mut session, canvas.cam.world_to_screen([2.0, 2.0]));
+        canvas.on_mouse(&mut session, MouseButton::Left, false);
+
+        // Ein sofortiger weiterer Druck auf den verschobenen Startknoten muss
+        // wieder einen Node-Drag beginnen und darf keinen Split auslösen.
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        assert!(matches!(
+            canvas.drag,
+            Drag::EditNode {
+                shape: 0,
+                node: 0,
+                part: luxifer_core::bezier::NodePart::Anchor
+            }
+        ));
+        assert_eq!(session.shapes[0].bezier.as_ref().unwrap().nodes.len(), 3);
     }
 
     #[test]

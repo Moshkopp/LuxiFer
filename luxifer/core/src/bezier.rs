@@ -369,6 +369,7 @@ impl AppState {
         }
         let (flat, closed) = (bp.flatten(), bp.closed);
         sh.geo = Geo::Polyline { pts: flat, closed };
+        self.invalidate_shape_bounds();
         self.dirty = true;
     }
 
@@ -395,6 +396,7 @@ impl AppState {
         bp.nodes.insert(i + 1, split.mid);
         let (flat, closed) = (bp.flatten(), bp.closed);
         sh.geo = Geo::Polyline { pts: flat, closed };
+        self.invalidate_shape_bounds();
     }
 
     /// Löscht einen Knoten. Ein Undo-Punkt.
@@ -409,6 +411,7 @@ impl AppState {
         bp.nodes.remove(node);
         let (flat, closed) = (bp.flatten(), bp.closed);
         sh.geo = Geo::Polyline { pts: flat, closed };
+        self.invalidate_shape_bounds();
         self.dirty = true;
     }
 
@@ -465,6 +468,7 @@ impl AppState {
         }
         let (flat, closed) = (bp.flatten(), bp.closed);
         sh.geo = Geo::Polyline { pts: flat, closed };
+        self.invalidate_shape_bounds();
         self.dirty = true;
     }
 
@@ -586,7 +590,12 @@ mod tests {
             _ => panic!(),
         };
         app.push_undo();
+        let rev_before_drag = app.render_rev();
         app.drag_node(idx, 1, NodePart::Anchor, (10.0, 30.0));
+        assert!(
+            app.render_rev() > rev_before_drag,
+            "Node-Zug invalidiert den Render-Cache sofort"
+        );
         let after = match &app.shapes[idx].geo {
             Geo::Polyline { pts, .. } => pts.clone(),
             _ => panic!(),

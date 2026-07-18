@@ -238,6 +238,12 @@ pub enum Drag {
     BezierHandle {
         node: usize,
     },
+    /// Anker oder Tangenten-Endpunkt eines bestehenden Pfads verschieben.
+    EditNode {
+        shape: usize,
+        node: usize,
+        part: luxifer_core::bezier::NodePart,
+    },
     /// Endpunkt der Haltesteg-Linie ziehen (0 = Start, 1 = Ende).
     BridgeEnd {
         end: usize,
