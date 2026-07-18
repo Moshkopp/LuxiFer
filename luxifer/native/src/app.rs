@@ -29,6 +29,21 @@ mod project;
 mod settings;
 mod text;
 
+/// Laser-Arbeitsfläche und Vorschau sperren weiterhin mutierende
+/// Editorbefehle. Globale Navigation muss aber aus jeder Hauptansicht heraus
+/// erreichbar bleiben, sonst wird insbesondere F3/F4 zur Einbahnstraße.
+fn shortcut_allowed_in_view(view: crate::tools::View, shortcut: &crate::tools::Shortcut) -> bool {
+    use crate::tools::{Shortcut, View};
+    match view {
+        View::Laser => matches!(
+            shortcut,
+            Shortcut::PanModifier(_) | Shortcut::SwitchView(_) | Shortcut::OpenAssets
+        ),
+        View::Preview => matches!(shortcut, Shortcut::SwitchView(_) | Shortcut::OpenAssets),
+        View::Projekt | View::Design => true,
+    }
+}
+
 pub struct App {
     pub window: Arc<Window>,
     trim_cursor: Option<winit::window::CustomCursor>,
@@ -312,9 +327,6 @@ impl App {
                 self.canvas.cam.viewport = [sz.width as f32, sz.height as f32];
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if self.view == crate::tools::View::Preview {
-                    return true;
-                }
                 let pressed = event.state == ElementState::Pressed;
                 // Logische Taste (Systemlayout), nicht die physische Position —
                 // sonst sind Z/Y auf QWERTZ vertauscht (Strg+Z wäre Redo).
@@ -332,9 +344,7 @@ impl App {
                         blocked,
                         &self.ui_settings.shortcut_bindings,
                     ) {
-                        if self.view == crate::tools::View::Laser
-                            && !matches!(shortcut, crate::tools::Shortcut::PanModifier(_))
-                        {
+                        if !shortcut_allowed_in_view(self.view, &shortcut) {
                             return true;
                         }
                         self.apply_shortcut(shortcut);
@@ -838,6 +848,24 @@ fn populate_fill_stress_scene(state: &mut AppState, compounds: usize) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hauptansichten_bleiben_aus_laser_und_vorschau_erreichbar() {
+        use crate::tools::{Shortcut, View};
+        for source in [View::Laser, View::Preview] {
+            for target in [View::Projekt, View::Design, View::Laser, View::Preview] {
+                assert!(super::shortcut_allowed_in_view(
+                    source,
+                    &Shortcut::SwitchView(target)
+                ));
+            }
+            assert!(super::shortcut_allowed_in_view(
+                source,
+                &Shortcut::OpenAssets
+            ));
+            assert!(!super::shortcut_allowed_in_view(source, &Shortcut::Delete));
+        }
+    }
+
     #[test]
     fn fill_stress_scene_erzeugt_unabhaengige_fill_shapes() {
         let mut state = luxifer_core::AppState::new();

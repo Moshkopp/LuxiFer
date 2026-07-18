@@ -372,3 +372,13 @@ ihn atomar der neuen Aktion zu. Jede Aktion kann einzeln und die gesamte
 Tabelle nach einer Bestätigung auf Standard zurückgesetzt werden. Speichern ist
 während einer offenen Aufnahme, Fehlermeldung oder Konfliktentscheidung
 gesperrt; Abbrechen verwirft weiterhin den vollständigen Settings-Entwurf.
+
+### Nachtrag: globale Navigation aus Laser und Vorschau
+
+Die bisherige Schutzgrenze der Laseransicht verwarf nach dem Wechsel mit `F3`
+auch alle weiteren Ansichts-Shortcuts. Die Laser-Vorschau blockierte
+Tastatureingaben sogar vollständig. Beide Ansichten lassen nun gezielt die
+globalen Aktionen `F1` bis `F5` durch. Mutierende Editorbefehle bleiben dort
+weiterhin gesperrt; in der Laseransicht bleibt zusätzlich der statische
+Pan-Modifier aktiv. Ein Regressionstest prüft alle Hauptansichtswechsel aus
+Laser und Vorschau sowie die fortbestehende Sperre für Löschen.
