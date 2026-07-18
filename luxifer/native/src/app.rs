@@ -718,19 +718,20 @@ impl App {
             preview_trace: self.preview_trace.as_ref(),
             grid_mm: self.ui_settings.grid_size_mm as f32,
             selection_transform: self.canvas.selection_transform(),
-            transform_all_fills: self.canvas.selection_transform() != Default::default()
-                && self.session.shapes.iter().enumerate().all(|(i, shape)| {
-                    let visible_fill = shape.geo.outline_points().1
-                        && self
-                            .session
-                            .layers
-                            .get(shape.layer_id)
-                            .is_some_and(|layer| {
-                                layer.visible
-                                    && layer.mode.is_filled()
-                                    && layer.mode != luxifer_core::LayerMode::Image
-                            });
-                    !visible_fill || self.session.selected.contains(&i)
+            transform_fills: self.canvas.selection_transform() != Default::default()
+                && self.session.selected.iter().any(|&i| {
+                    self.session.shapes.get(i).is_some_and(|shape| {
+                        shape.geo.outline_points().1
+                            && self
+                                .session
+                                .layers
+                                .get(shape.layer_id)
+                                .is_some_and(|layer| {
+                                    layer.visible
+                                        && layer.mode.is_filled()
+                                        && layer.mode != luxifer_core::LayerMode::Image
+                                })
+                    })
                 }),
         };
         self.renderer

@@ -218,20 +218,28 @@ impl CanvasState {
                         && layer.mode != luxifer_core::LayerMode::Image
                 })
         };
-        let selected_has_fill = session
-            .selected
-            .iter()
-            .any(|&i| session.shapes.get(i).is_some_and(&is_visible_fill));
-        let all_fills_selected = session
-            .shapes
-            .iter()
-            .enumerate()
-            .all(|(i, shape)| !is_visible_fill(shape) || session.selected.contains(&i));
-        session
-            .selected
-            .iter()
-            .all(|&i| session.shapes.get(i).is_some())
-            && (!selected_has_fill || all_fills_selected)
+        let selected_compounds_complete = session.selected.iter().all(|&selected_index| {
+            let Some(selected_shape) = session.shapes.get(selected_index) else {
+                return false;
+            };
+            if !is_visible_fill(selected_shape) {
+                return true;
+            }
+            let Some(group_id) = selected_shape.fill_group_id.or(selected_shape.group_id) else {
+                return true;
+            };
+            session.shapes.iter().enumerate().all(|(index, shape)| {
+                shape.layer_id != selected_shape.layer_id
+                    || shape.fill_group_id.or(shape.group_id) != Some(group_id)
+                    || session.selected.contains(&index)
+            })
+        });
+        !session.selected.is_empty()
+            && session
+                .selected
+                .iter()
+                .all(|&i| session.shapes.get(i).is_some())
+            && selected_compounds_complete
     }
 
     fn begin_select(&mut self, session: &mut EditorSession, w: [f64; 2]) {
@@ -885,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn move_einer_von_mehreren_fill_konturen_bleibt_im_sicheren_pfad() {
+    fn move_eines_unabhaengigen_fill_compounds_darf_gpu_live_nutzen() {
         let mut canvas = CanvasState::new(Camera::new());
         canvas.tool = Tool::Select;
         let mut session = EditorSession::default();
@@ -894,10 +902,37 @@ mod tests {
         session.layers[0].mode = luxifer_core::LayerMode::Fill;
         session.selected = vec![0];
         let rev = session.render_rev();
+        assert!(CanvasState::selection_can_gpu_transform(&session));
 
-        canvas.cursor = canvas.cam.world_to_screen([0.0, 20.0]);
+        canvas.cursor = canvas.cam.world_to_screen([10.0, 0.0]);
         canvas.on_mouse(&mut session, MouseButton::Left, true);
-        canvas.on_cursor_move(&mut session, canvas.cam.world_to_screen([15.0, 25.0]));
+        assert_eq!(session.selected, vec![0]);
+        assert!(matches!(
+            canvas.drag,
+            Drag::MoveShapes { gpu_live: true, .. }
+        ));
+        canvas.on_cursor_move(&mut session, canvas.cam.world_to_screen([25.0, 5.0]));
+
+        assert_eq!(session.render_rev(), rev);
+        assert_eq!(canvas.live_move_offset(), [15.0, 5.0]);
+    }
+
+    #[test]
+    fn teilselektion_eines_fill_compounds_bleibt_im_sicheren_pfad() {
+        let mut canvas = CanvasState::new(Camera::new());
+        canvas.tool = Tool::Select;
+        let mut session = EditorSession::default();
+        session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [40.0, 40.0]);
+        session.add_box_shape(BoxShape::Rect, [10.0, 10.0], [30.0, 30.0]);
+        session.layers[0].mode = luxifer_core::LayerMode::Fill;
+        session.shapes[0].fill_group_id = Some(1);
+        session.shapes[1].fill_group_id = Some(1);
+        session.selected = vec![0];
+        let rev = session.render_rev();
+
+        canvas.cursor = canvas.cam.world_to_screen([10.0, 0.0]);
+        canvas.on_mouse(&mut session, MouseButton::Left, true);
+        canvas.on_cursor_move(&mut session, canvas.cam.world_to_screen([25.0, 5.0]));
 
         assert!(session.render_rev() > rev);
         assert_eq!(canvas.live_move_offset(), [0.0, 0.0]);

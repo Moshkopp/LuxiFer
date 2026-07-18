@@ -107,6 +107,7 @@ pub struct FillCompoundBatch {
 pub struct FillBatch {
     pub compounds: Vec<FillCompoundBatch>,
     pub cover: std::ops::Range<u32>,
+    pub selected: bool,
 }
 
 /// Normale Design-Flächenfüllung. Jede geschlossene Kontur wird als
@@ -114,6 +115,30 @@ pub struct FillBatch {
 /// alle Konturen eines Layers dieselbe Even-Odd-Semantik wie der Laser-Fill,
 /// ohne dessen Scanlinien im Design-Canvas zu erzeugen oder zu zeigen.
 pub fn solid_fills(state: &AppState) -> (Vec<Vertex>, Vec<FillBatch>) {
+    solid_fills_partitioned(state, false)
+}
+
+pub fn solid_fills_for_transform(state: &AppState) -> (Vec<Vertex>, Vec<FillBatch>) {
+    let selected_fill = state.selected.iter().any(|&index| {
+        state.shapes.get(index).is_some_and(|shape| {
+            shape.geo.outline_points().1
+                && state.layers.get(shape.layer_id).is_some_and(|layer| {
+                    layer.visible
+                        && layer.mode.is_filled()
+                        && layer.mode != luxifer_core::LayerMode::Image
+                })
+        })
+    });
+    if !selected_fill {
+        return (Vec::new(), Vec::new());
+    }
+    solid_fills_partitioned(state, true)
+}
+
+fn solid_fills_partitioned(
+    state: &AppState,
+    partition_selection: bool,
+) -> (Vec<Vertex>, Vec<FillBatch>) {
     let mut vertices = Vec::new();
     let mut batches = Vec::new();
     for (li, layer) in state.layers.iter().enumerate() {
@@ -124,84 +149,111 @@ pub fn solid_fills(state: &AppState) -> (Vec<Vertex>, Vec<FillBatch>) {
         {
             continue;
         }
-        let mut compounds: Vec<(Option<u32>, Vec<Vec<Pt>>)> = Vec::new();
-        for shape in state.shapes.iter().filter(|shape| shape.layer_id == li) {
+        let mut compounds: Vec<(Option<u32>, bool, Vec<Vec<Pt>>)> = Vec::new();
+        for (shape_index, shape) in state
+            .shapes
+            .iter()
+            .enumerate()
+            .filter(|(_, shape)| shape.layer_id == li)
+        {
             let (points, closed) = world_outline(shape);
             if !closed || points.len() < 3 {
                 continue;
             }
             let fill_group_id = shape.fill_group_id.or(shape.group_id);
             if let Some(id) = fill_group_id {
-                if let Some((_, rings)) = compounds
+                if let Some((_, fully_selected, rings)) = compounds
                     .iter_mut()
-                    .find(|(candidate, _)| *candidate == Some(id))
+                    .find(|(candidate, _, _)| *candidate == Some(id))
                 {
+                    *fully_selected &= state.selected.contains(&shape_index);
                     rings.push(points);
                     continue;
                 }
             }
-            compounds.push((fill_group_id, vec![points]));
+            compounds.push((
+                fill_group_id,
+                state.selected.contains(&shape_index),
+                vec![points],
+            ));
         }
         if compounds.is_empty() {
             continue;
         }
 
-        let mut bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        for points in compounds.iter().flat_map(|(_, rings)| rings) {
-            for point in points {
-                bounds.0 = bounds.0.min(point.0);
-                bounds.1 = bounds.1.min(point.1);
-                bounds.2 = bounds.2.max(point.0);
-                bounds.3 = bounds.3.max(point.1);
+        let partitions: &[bool] = if partition_selection {
+            &[false, true]
+        } else {
+            &[false]
+        };
+        for &selected in partitions {
+            let included: Vec<_> = compounds
+                .iter()
+                .filter(|(_, compound_selected, _)| {
+                    !partition_selection || *compound_selected == selected
+                })
+                .collect();
+            if included.is_empty() {
+                continue;
             }
-        }
-
-        let mut compound_batches = Vec::with_capacity(compounds.len());
-        for (_, rings) in &compounds {
-            let stencil_start = vertices.len() as u32;
-            let mut compound_bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-            for points in rings {
+            let mut bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+            for points in included.iter().flat_map(|(_, _, rings)| rings) {
                 for point in points {
-                    compound_bounds.0 = compound_bounds.0.min(point.0);
-                    compound_bounds.1 = compound_bounds.1.min(point.1);
-                    compound_bounds.2 = compound_bounds.2.max(point.0);
-                    compound_bounds.3 = compound_bounds.3.max(point.1);
+                    bounds.0 = bounds.0.min(point.0);
+                    bounds.1 = bounds.1.min(point.1);
+                    bounds.2 = bounds.2.max(point.0);
+                    bounds.3 = bounds.3.max(point.1);
                 }
-                let anchor = points[0];
-                for triangle in points[1..].windows(2) {
-                    for point in [anchor, triangle[0], triangle[1]] {
-                        vertices.push(raw_vertex(point, [0.0; 4]));
+            }
+
+            let mut compound_batches = Vec::with_capacity(included.len());
+            for (_, _, rings) in included {
+                let stencil_start = vertices.len() as u32;
+                let mut compound_bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+                for points in rings {
+                    for point in points {
+                        compound_bounds.0 = compound_bounds.0.min(point.0);
+                        compound_bounds.1 = compound_bounds.1.min(point.1);
+                        compound_bounds.2 = compound_bounds.2.max(point.0);
+                        compound_bounds.3 = compound_bounds.3.max(point.1);
+                    }
+                    let anchor = points[0];
+                    for triangle in points[1..].windows(2) {
+                        for point in [anchor, triangle[0], triangle[1]] {
+                            vertices.push(raw_vertex(point, [0.0; 4]));
+                        }
                     }
                 }
+                let stencil_end = vertices.len() as u32;
+                let compound_cover = stencil_end;
+                push_solid_rect(
+                    &mut vertices,
+                    compound_bounds.0,
+                    compound_bounds.1,
+                    compound_bounds.2,
+                    compound_bounds.3,
+                    [0.0; 4],
+                );
+                compound_batches.push(FillCompoundBatch {
+                    stencil: stencil_start..stencil_end,
+                    cover: compound_cover..vertices.len() as u32,
+                });
             }
-            let stencil_end = vertices.len() as u32;
-            let compound_cover = stencil_end;
+            let cover_start = vertices.len() as u32;
             push_solid_rect(
                 &mut vertices,
-                compound_bounds.0,
-                compound_bounds.1,
-                compound_bounds.2,
-                compound_bounds.3,
-                [0.0; 4],
+                bounds.0,
+                bounds.1,
+                bounds.2,
+                bounds.3,
+                col(layer.color, 0.32),
             );
-            compound_batches.push(FillCompoundBatch {
-                stencil: stencil_start..stencil_end,
-                cover: compound_cover..vertices.len() as u32,
+            batches.push(FillBatch {
+                compounds: compound_batches,
+                cover: cover_start..vertices.len() as u32,
+                selected: partition_selection && selected,
             });
         }
-        let cover_start = vertices.len() as u32;
-        push_solid_rect(
-            &mut vertices,
-            bounds.0,
-            bounds.1,
-            bounds.2,
-            bounds.3,
-            col(layer.color, 0.32),
-        );
-        batches.push(FillBatch {
-            compounds: compound_batches,
-            cover: cover_start..vertices.len() as u32,
-        });
     }
     (vertices, batches)
 }
@@ -576,6 +628,32 @@ mod tests {
         let (_, batches) = solid_fills(&state);
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].compounds.len(), 2);
+    }
+
+    #[test]
+    fn fill_transform_partitioniert_ausgewaehlte_compounds() {
+        let mut state = AppState::new();
+        state.add_shape(luxifer_core::Geo::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        });
+        state.add_shape(luxifer_core::Geo::Rect {
+            x: 20.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        });
+        state.layers[0].mode = luxifer_core::LayerMode::Fill;
+        state.selected = vec![0];
+
+        let (_, batches) = solid_fills_for_transform(&state);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].compounds.len(), 1);
+        assert!(!batches[0].selected);
+        assert_eq!(batches[1].compounds.len(), 1);
+        assert!(batches[1].selected);
     }
 
     #[test]

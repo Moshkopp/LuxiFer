@@ -588,26 +588,21 @@ impl Gpu {
         self.msaa_view.as_ref().unwrap_or(surface)
     }
 
-    pub fn draw_solid_fills<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        batches: &[FillBatch],
-        use_selection_transform: bool,
-    ) {
+    pub fn draw_solid_fills<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, batches: &[FillBatch]) {
         if batches.is_empty() {
             return;
         }
-        pass.set_bind_group(
-            0,
-            if use_selection_transform {
-                &self.selection_bind
-            } else {
-                &self.bind
-            },
-            &[],
-        );
         pass.set_vertex_buffer(0, self.fill_vbuf.slice(..));
         for batch in batches {
+            pass.set_bind_group(
+                0,
+                if batch.selected {
+                    &self.selection_bind
+                } else {
+                    &self.bind
+                },
+                &[],
+            );
             for compound in &batch.compounds {
                 pass.set_stencil_reference(0);
                 pass.set_pipeline(&self.fill_stencil_pipeline);

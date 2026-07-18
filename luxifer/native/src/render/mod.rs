@@ -157,7 +157,7 @@ pub struct FrameScene<'a> {
     /// Maschinen-Nullpunkt des aktiven Laserprofils.
     pub bed_origin: luxifer_core::BedOrigin,
     pub selection_transform: crate::gpu::SelectionTransform,
-    pub transform_all_fills: bool,
+    pub transform_fills: bool,
 }
 
 pub struct Renderer {
@@ -170,6 +170,7 @@ pub struct Renderer {
     // unberührt (die Projektion macht der Shader), daher bleiben sie gecacht.
     verts: Vec<crate::scene_geo::Vertex>,
     fill_batches: Vec<crate::scene_geo::FillBatch>,
+    fill_transform_batches: Vec<crate::scene_geo::FillBatch>,
     background_end: u32,
     /// Render-Revision (aus dem Core) beim letzten Vertex-Aufbau.
     last_render_rev: u64,
@@ -220,6 +221,7 @@ impl Renderer {
             images: ImageStore::default(),
             verts: Vec::new(),
             fill_batches: Vec::new(),
+            fill_transform_batches: Vec::new(),
             background_end: 0,
             // MAX erzwingt den Aufbau im ersten Frame (Core startet bei 0).
             last_render_rev: u64::MAX,
@@ -368,6 +370,7 @@ impl Renderer {
                     );
                     self.background_end = self.verts.len() as u32;
                     self.fill_batches.clear();
+                    self.fill_transform_batches.clear();
                     self.gpu.upload_fill_verts(&[]);
                     self.images.set_rasters(
                         &self.gpu.device,
@@ -394,6 +397,7 @@ impl Renderer {
                 self.background_end = geometry.background_end;
                 self.verts = geometry.vertices;
                 self.fill_batches.clear();
+                self.fill_transform_batches.clear();
                 self.gpu.upload_fill_verts(&[]);
                 self.images.set_rasters(
                     &self.gpu.device,
@@ -422,6 +426,7 @@ impl Renderer {
             self.background_end = geometry.background_end;
             self.verts = geometry.vertices;
             self.fill_batches = geometry.fill_batches;
+            self.fill_transform_batches = geometry.fill_transform_batches;
             self.gpu.upload_fill_verts(&geometry.fill_vertices);
             self.preview_legend = None;
             let verts = std::mem::take(&mut self.verts);
@@ -564,7 +569,12 @@ impl Renderer {
             }
         }
         perf.image_ms = image_started.elapsed().as_secs_f64() * 1_000.0;
-        if !scene.preview && !self.fill_batches.is_empty() {
+        let active_fill_batches = if scene.transform_fills {
+            &self.fill_transform_batches
+        } else {
+            &self.fill_batches
+        };
+        if !scene.preview && !active_fill_batches.is_empty() {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("solid-fills"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -588,8 +598,7 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.gpu
-                .draw_solid_fills(&mut rp, &self.fill_batches, scene.transform_all_fills);
+            self.gpu.draw_solid_fills(&mut rp, active_fill_batches);
         }
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {

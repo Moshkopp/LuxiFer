@@ -287,6 +287,15 @@ gemeinsame Fill-Buffer vollständig transformiert werden. Sobald lediglich ein
 Teil der sichtbaren Fills ausgewählt ist, bleibt der Snapshot-/Core-Pfad aktiv,
 damit unselektierte Compounds nicht mitbewegt werden.
 
+Die nachfolgende Partitionierung hebt diese Einschränkung für unabhängige
+Compounds auf: Bei einer Fill-Auswahl hält der Cache zusätzlich stationäre und
+selektierte Stencil-Batches im selben GPU-Buffer. Nur die selektierten Batches
+binden während Move, Resize oder Rotate die affine Selection-Uniform. Eine
+Teilkontur eines zusammengesetzten `fill_group_id` bleibt weiterhin im
+Core-Pfad, weil einzelne Ringe desselben Even-Odd-Compounds nicht unabhängig
+transformiert werden dürfen. Ohne ausgewählte Fill-Fläche wird der zusätzliche
+Transform-Cache gar nicht erzeugt.
+
 Regressionstests sichern für Bild-Rotate und vollständiges Fill-Resize: keine
 Core-Revision und keine Geometriemutation während der Vorschau, affine
 GPU-Matrix während der Geste und genau ein finaler Commit.

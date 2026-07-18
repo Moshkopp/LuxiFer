@@ -10,6 +10,7 @@ pub struct BaseGeometry {
     pub vertices: Vec<Vertex>,
     pub fill_vertices: Vec<Vertex>,
     pub fill_batches: Vec<scene_geo::FillBatch>,
+    pub fill_transform_batches: Vec<scene_geo::FillBatch>,
     /// Ende des Bett-/Gitter-Bereichs im gemeinsamen Vertexpuffer.
     pub background_end: u32,
 }
@@ -33,7 +34,21 @@ pub fn base_vertices_profiled(
     let mut v = scene_geo::bed_base(session.bed_w_mm as f32, session.bed_h_mm as f32, origin);
     let background_end = v.len() as u32;
     let fill_started = std::time::Instant::now();
-    let (fill_vertices, fill_batches) = scene_geo::solid_fills(session);
+    let (mut fill_vertices, fill_batches) = scene_geo::solid_fills(session);
+    let (transform_vertices, mut fill_transform_batches) =
+        scene_geo::solid_fills_for_transform(session);
+    let transform_offset = fill_vertices.len() as u32;
+    for batch in &mut fill_transform_batches {
+        batch.cover.start += transform_offset;
+        batch.cover.end += transform_offset;
+        for compound in &mut batch.compounds {
+            compound.stencil.start += transform_offset;
+            compound.stencil.end += transform_offset;
+            compound.cover.start += transform_offset;
+            compound.cover.end += transform_offset;
+        }
+    }
+    fill_vertices.extend(transform_vertices);
     let fill_ms = fill_started.elapsed().as_secs_f64() * 1_000.0;
     let lines_started = std::time::Instant::now();
     v.extend(scene_geo::shape_lines(session));
@@ -45,6 +60,7 @@ pub fn base_vertices_profiled(
             vertices: v,
             fill_vertices,
             fill_batches,
+            fill_transform_batches,
             background_end,
         },
         BaseBuildTimings { fill_ms, lines_ms },
