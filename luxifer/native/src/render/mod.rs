@@ -20,6 +20,130 @@ use crate::canvas::scene::{
 use crate::gpu::Gpu;
 use crate::image_gpu::ImageStore;
 
+const GPU_QUERY_BYTES: u64 = 16;
+const GPU_QUERY_BUFFER_BYTES: u64 = 256;
+
+fn timestamp_delta_ms(start: u64, end: u64, period_ns: f64) -> Option<f64> {
+    (end >= start).then(|| (end - start) as f64 * period_ns / 1_000_000.0)
+}
+
+struct GpuTimestampSlot {
+    buffer: wgpu::Buffer,
+    receiver: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
+}
+
+struct GpuTimestampProfiler {
+    query_set: wgpu::QuerySet,
+    resolve_buffer: wgpu::Buffer,
+    slots: Vec<GpuTimestampSlot>,
+    timestamp_period_ns: f64,
+}
+
+impl GpuTimestampProfiler {
+    fn new(gpu: &Gpu) -> Option<Self> {
+        if !gpu
+            .device
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY)
+        {
+            log::info!(
+                target: "luxifer_render_perf",
+                "GPU timestamps unavailable; CPU/frame profiling remains active"
+            );
+            return None;
+        }
+        let query_set = gpu.device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("render-profile-timestamps"),
+            ty: wgpu::QueryType::Timestamp,
+            count: 2,
+        });
+        let resolve_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render-profile-resolve"),
+            size: GPU_QUERY_BUFFER_BYTES,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let slots = (0..3)
+            .map(|_| GpuTimestampSlot {
+                buffer: gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("render-profile-readback"),
+                    size: GPU_QUERY_BUFFER_BYTES,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }),
+                receiver: None,
+            })
+            .collect();
+        Some(Self {
+            query_set,
+            resolve_buffer,
+            slots,
+            timestamp_period_ns: gpu.queue.get_timestamp_period() as f64,
+        })
+    }
+
+    fn collect(&mut self, device: &wgpu::Device) -> Vec<f64> {
+        let _ = device.poll(wgpu::PollType::Poll);
+        let mut values = Vec::new();
+        for slot in &mut self.slots {
+            let Some(receiver) = slot.receiver.as_ref() else {
+                continue;
+            };
+            match receiver.try_recv() {
+                Ok(Ok(())) => {
+                    let mapped = slot.buffer.slice(..GPU_QUERY_BYTES).get_mapped_range();
+                    let timestamps: &[u64] = bytemuck::cast_slice(&mapped);
+                    if timestamps.len() == 2 {
+                        if let Some(ms) = timestamp_delta_ms(
+                            timestamps[0],
+                            timestamps[1],
+                            self.timestamp_period_ns,
+                        ) {
+                            values.push(ms);
+                        }
+                    }
+                    drop(mapped);
+                    slot.buffer.unmap();
+                    slot.receiver = None;
+                }
+                Ok(Err(error)) => {
+                    log::warn!(target: "luxifer_render_perf", "GPU timestamp readback failed: {error}");
+                    slot.receiver = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    slot.receiver = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        values
+    }
+
+    fn free_slot(&self) -> Option<usize> {
+        self.slots.iter().position(|slot| slot.receiver.is_none())
+    }
+
+    fn map_slot(&mut self, index: usize) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.slots[index].buffer.slice(..GPU_QUERY_BYTES).map_async(
+            wgpu::MapMode::Read,
+            move |result| {
+                let _ = tx.send(result);
+            },
+        );
+        self.slots[index].receiver = Some(rx);
+    }
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    #[test]
+    fn timestamp_ticks_werden_mit_adapterperiode_in_ms_umgerechnet() {
+        assert_eq!(super::timestamp_delta_ms(100, 2_100, 2.5), Some(0.005));
+        assert_eq!(super::timestamp_delta_ms(2_100, 100, 2.5), None);
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct PreviewKey {
     revision: u64,
@@ -51,6 +175,8 @@ struct PerfWindow {
     selection_ms: f64,
     image_ms: f64,
     frame_ms: f64,
+    gpu_ms: f64,
+    gpu_samples: u64,
     max_frame_ms: f64,
     scene_vertices: usize,
     fill_vertices: usize,
@@ -61,6 +187,11 @@ struct PerfWindow {
 }
 
 impl PerfWindow {
+    fn record_gpu(&mut self, gpu_ms: f64) {
+        self.gpu_ms += gpu_ms;
+        self.gpu_samples += 1;
+    }
+
     fn record(&mut self, sample: PerfSample) {
         self.started.get_or_insert_with(Instant::now);
         self.frames += 1;
@@ -93,11 +224,13 @@ impl PerfWindow {
         let selection_rebuilds = self.selection_rebuilds.max(1) as f64;
         log::info!(
             target: "luxifer_render_perf",
-            "frames={} rebuilds={} selection_rebuilds={} avg_frame_ms frame={:.2} ui={:.2} tess={:.2} overlay={:.2} images={:.2} avg_rebuild_ms fill={:.2} lines={:.2} selection={:.2} max_frame_ms={:.2} vertices scene={} fill={} selection={} dynamic_overlay={} fill_compounds={} estimated_canvas_draw_calls={}",
+            "frames={} rebuilds={} selection_rebuilds={} avg_frame_ms frame={:.2} gpu={:.2} gpu_samples={} ui={:.2} tess={:.2} overlay={:.2} images={:.2} avg_rebuild_ms fill={:.2} lines={:.2} selection={:.2} max_frame_ms={:.2} vertices scene={} fill={} selection={} dynamic_overlay={} fill_compounds={} estimated_canvas_draw_calls={}",
             self.frames,
             self.scene_rebuilds,
             self.selection_rebuilds,
             self.frame_ms / n,
+            self.gpu_ms / self.gpu_samples.max(1) as f64,
+            self.gpu_samples,
             self.ui_ms / n,
             self.tessellate_ms / n,
             self.overlay_ms / n,
@@ -197,6 +330,7 @@ pub struct Renderer {
     selection_vertex_count: usize,
     perf_enabled: bool,
     perf: PerfWindow,
+    gpu_profiler: Option<GpuTimestampProfiler>,
 }
 
 impl Renderer {
@@ -206,6 +340,10 @@ impl Renderer {
     }
 
     pub fn new(gpu: Gpu, egui_state: egui_winit::State) -> Self {
+        let perf_enabled = std::env::var_os("LUXIFER_RENDER_PROFILE").is_some();
+        let gpu_profiler = perf_enabled
+            .then(|| GpuTimestampProfiler::new(&gpu))
+            .flatten();
         let egui_renderer = egui_wgpu::Renderer::new(
             &gpu.device,
             gpu.config.format,
@@ -237,8 +375,9 @@ impl Renderer {
             selection_indices: Vec::new(),
             selection_accent: [0; 3],
             selection_vertex_count: 0,
-            perf_enabled: std::env::var_os("LUXIFER_RENDER_PROFILE").is_some(),
+            perf_enabled,
             perf: PerfWindow::default(),
+            gpu_profiler,
         }
     }
 
@@ -301,6 +440,15 @@ impl Renderer {
         ui_timings: UiFrameTimings,
     ) {
         let frame_started = Instant::now();
+        if let Some(profiler) = self.gpu_profiler.as_mut() {
+            for gpu_ms in profiler.collect(&self.gpu.device) {
+                self.perf.record_gpu(gpu_ms);
+            }
+        }
+        let gpu_profile_slot = self
+            .gpu_profiler
+            .as_ref()
+            .and_then(GpuTimestampProfiler::free_slot);
         let mut perf = PerfSample {
             ui: ui_timings,
             ..Default::default()
@@ -554,7 +702,15 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: gpu_profile_slot.and_then(|_| {
+                    self.gpu_profiler
+                        .as_ref()
+                        .map(|profiler| wgpu::RenderPassTimestampWrites {
+                            query_set: &profiler.query_set,
+                            beginning_of_pass_write_index: Some(0),
+                            end_of_pass_write_index: None,
+                        })
+                }),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -613,7 +769,15 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: gpu_profile_slot.and_then(|_| {
+                    self.gpu_profiler
+                        .as_ref()
+                        .map(|profiler| wgpu::RenderPassTimestampWrites {
+                            query_set: &profiler.query_set,
+                            beginning_of_pass_write_index: None,
+                            end_of_pass_write_index: Some(1),
+                        })
+                }),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -625,7 +789,20 @@ impl Renderer {
             let mut rp = rp.forget_lifetime();
             self.egui_renderer.render(&mut rp, &tris, &screen);
         }
+        if let (Some(slot), Some(profiler)) = (gpu_profile_slot, self.gpu_profiler.as_ref()) {
+            enc.resolve_query_set(&profiler.query_set, 0..2, &profiler.resolve_buffer, 0);
+            enc.copy_buffer_to_buffer(
+                &profiler.resolve_buffer,
+                0,
+                &profiler.slots[slot].buffer,
+                0,
+                GPU_QUERY_BYTES,
+            );
+        }
         self.gpu.queue.submit(Some(enc.finish()));
+        if let (Some(slot), Some(profiler)) = (gpu_profile_slot, self.gpu_profiler.as_mut()) {
+            profiler.map_slot(slot);
+        }
         frame.present();
 
         if self.perf_enabled {

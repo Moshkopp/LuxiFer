@@ -145,10 +145,10 @@ Overlay-Aufbereitung und Image-Draw-Vorbereitung. Dazu protokolliert er
 Szenen-Rebuilds, Scene-/Fill-/Overlay-Vertices, Fill-Compounds und die aus dem
 Renderpfad abgeleitete Draw-Call-Anzahl.
 
-Die Werte sind bewusst keine behauptete GPU-Laufzeit: `queue.submit()` ist
-asynchron. GPU-Zeitstempel werden erst ergänzt, wenn die CPU-Baseline einen
-GPU-seitigen Verdacht belegt. Der nächste Umbau wird anhand dieser Baseline der
-Live-Transformpfad für Move ohne vollständigen Scene-Rebuild und Upload.
+Die ursprünglichen Werte enthielten noch keine behauptete GPU-Laufzeit, weil
+`queue.submit()` asynchron ist. Nach Abschluss der CPU-/Cache-Arbeiten ergänzt
+das opt-in Profiling echte Hardware-Timestamps, sofern der Adapter
+`TIMESTAMP_QUERY` unterstützt; andernfalls bleibt der CPU-/Framepfad aktiv.
 
 ### Messung und erster Cache-Schritt
 
@@ -352,6 +352,31 @@ Treiber und höhere Bildraten, auf der gemessenen Hardware aber kein belegter
 60-Hz-Flaschenhals. Ein semantisch riskantes Zusammenlegen unabhängiger
 Compounds oder ein neuer Fill-Renderer ist derzeit nicht gerechtfertigt. Der
 opt-in Hook bleibt als reproduzierbarer Regressionstest erhalten.
+
+### Hardware-Timestamps und abschließende GPU-Messung
+
+Bei aktiviertem `LUXIFER_RENDER_PROFILE` fordert der Renderer optional das
+wgpu-Feature `TIMESTAMP_QUERY` an. Zwei Pass-Timestamps umfassen die tatsächliche
+GPU-Arbeit vom Beginn des Background-/Image-Passes bis zum Ende des
+Outline-/Overlay-/egui-Passes. Query-Resolve und drei rotierende MAP_READ-Buffer
+werden asynchron ausgewertet; die CPU wartet niemals auf die GPU. Das Protokoll
+weist `gpu` und `gpu_samples` getrennt von Frame-/Present-Zeit aus.
+
+Release-Messung auf dem vorhandenen RADV/Vulkan-System:
+
+- leere Szene: etwa 0,21 bis 0,32 ms GPU-Zeit,
+- 1.808 Fill-Compounds / 5.429 Canvas-Draws: etwa 1,71 bis 1,72 ms GPU-Zeit,
+- gleichzeitig etwa 16,2 bis 16,4 ms Framezeit bei 60-Hz-Present.
+
+Damit ist bestätigt, dass der vermeintliche 16-ms-Engpass vom Present/VSync
+und nicht von der GPU-Arbeit stammt. Selbst der historische Fill-Extremfall
+verbraucht nur rund 10 % eines 60-Hz-Budgets.
+
+Die dynamischen CPU-Overlays bleiben bewusst unverändert. Ihr Aufbau lag in
+allen Release-Gegenchecks unter der zweistelligen Messauflösung des Logs
+(`0,00 ms` bei Ausgabe mit zwei Nachkommastellen), während sie nur wenige
+kameraabhängige Vertices aktualisieren. Eine GPU-Persistierung würde mehr
+Synchronisationszustand als messbaren Nutzen erzeugen.
 
 ## Offen (Reihenfolge im Branch)
 

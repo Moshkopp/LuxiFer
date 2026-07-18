@@ -102,8 +102,14 @@ impl Gpu {
             .await
             .map_err(|error| format!("Kein geeigneter GPU-Adapter verfügbar: {error}"))?;
         log::info!("GPU: {}", adapter.get_info().name);
+        let mut device_descriptor = wgpu::DeviceDescriptor::default();
+        if std::env::var_os("LUXIFER_RENDER_PROFILE").is_some()
+            && adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY)
+        {
+            device_descriptor.required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
+            .request_device(&device_descriptor)
             .await
             .map_err(|error| format!("GPU-Gerät konnte nicht geöffnet werden: {error}"))?;
 
