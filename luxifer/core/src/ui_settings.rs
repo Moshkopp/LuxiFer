@@ -13,7 +13,7 @@ use crate::project::data_root;
 pub const UI_SETTINGS_FILE: &str = "gui-settings.json";
 
 /// Aktuelle Formatversion der GUI-Settings.
-pub const UI_FORMAT_VERSION: u32 = 3;
+pub const UI_FORMAT_VERSION: u32 = 4;
 
 /// Eine Theme-Farbe: Farbton (RGB) plus geklemmte Intensität (ADR §3).
 ///
@@ -157,6 +157,9 @@ pub struct UiSettings {
     /// Basisadresse des Charon-Dienstes (ADR 0012).
     #[serde(default = "default_charon_url")]
     pub charon_url: String,
+    /// Arbeitsplatzbezogene, konfliktfreie Action-Trigger (ADR 0018).
+    #[serde(default)]
+    pub shortcut_bindings: crate::shortcuts::ShortcutBindings,
 }
 
 /// Default-Mindestdauer des Splash (ms).
@@ -217,6 +220,7 @@ impl Default for UiSettings {
             modal_backdrop_alpha: default_modal_backdrop_alpha(),
             charon_enabled: false,
             charon_url: default_charon_url(),
+            shortcut_bindings: Default::default(),
         }
     }
 }
@@ -235,6 +239,7 @@ impl UiSettings {
         if !matches!(self.msaa_samples, 1 | 2 | 4 | 8 | 16) {
             self.msaa_samples = default_msaa_samples();
         }
+        self.shortcut_bindings.normalize();
     }
 
     pub fn to_json(&self) -> Result<String, String> {
@@ -255,6 +260,7 @@ impl UiSettings {
             s.version = UI_FORMAT_VERSION;
         }
         s.sanitize();
+        s.shortcut_bindings.validate()?;
         Ok(s)
     }
 
@@ -353,6 +359,22 @@ mod tests {
         assert_eq!(back.modal_backdrop_alpha, default_modal_backdrop_alpha());
         assert!(!back.charon_enabled);
         assert_eq!(back.charon_url, default_charon_url());
+        assert_eq!(back.shortcut_bindings, crate::ShortcutBindings::default());
+    }
+
+    #[test]
+    fn version_drei_migriert_auf_stabile_shortcut_defaults() {
+        let mut value = serde_json::to_value(UiSettings::default()).unwrap();
+        value["version"] = 3.into();
+        value.as_object_mut().unwrap().remove("shortcut_bindings");
+
+        let migrated = UiSettings::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+
+        assert_eq!(migrated.version, UI_FORMAT_VERSION);
+        assert_eq!(
+            migrated.shortcut_bindings,
+            crate::ShortcutBindings::default()
+        );
     }
 
     #[test]

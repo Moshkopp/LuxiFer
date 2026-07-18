@@ -321,3 +321,20 @@ Dialog:
 3. Settings-Sektion und Recorder ergänzen.
 4. Fokus-, Konflikt-, Persistenz- und Dialogtests vervollständigen.
 5. Release-Gegencheck auf deutschem Tastaturlayout.
+
+## Umsetzungsprotokoll
+
+### Core-Modell und Settings-Migration
+
+`luxifer-core` besitzt nun die UI-freien Typen `ShortcutAction`,
+`ShortcutKey`, `ShortcutChord`, `ShortcutTrigger` und `ShortcutBindings`.
+Defaults, Labels, Kategorien, Reserviert-Prüfung, Deduplizierung, Konfliktsuche,
+Entfernen, Einzel-Reset und atomare Umbelegung liegen an dieser zentralen
+Stelle. Die bestätigten Tastatur- und Rechtsmaus-Defaults sind vollständig
+abgebildet; Redo behält beide Standardtrigger.
+
+`UiSettings` Format 4 persistiert die Bindings arbeitsplatzbezogen. Version-3-
+Dateien ohne Feld migrieren über `#[serde(default)]` exakt auf die neuen
+Defaults. Laden normalisiert die Tabelle und lehnt verbleibende Konflikte ab.
+252 Core-Tests einschließlich Defaults, Reserviert-Regeln, Umbelegung,
+JSON-Roundtrip und Version-3-Migration sind grün.

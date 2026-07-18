@@ -32,6 +32,7 @@ pub mod project;
 pub mod raster;
 pub mod scanline;
 pub mod shapes;
+pub mod shortcuts;
 pub mod state;
 pub mod text;
 pub mod trace;
@@ -65,5 +66,9 @@ pub use project::{
 pub use raster::{raster_rows, raster_texture, Placement, RasterImage, RasterRow, RasterTexture};
 pub use scanline::FillSegment;
 pub use shapes::{PolyShape, ShapeInfo};
+pub use shortcuts::{
+    ShortcutAction, ShortcutBindings, ShortcutChord, ShortcutKey, ShortcutMouseButton,
+    ShortcutTrigger,
+};
 pub use state::AppState;
 pub use ui_settings::{Theme, ThemeColor, ThemePalette, UiSettings};
