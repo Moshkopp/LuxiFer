@@ -64,7 +64,7 @@ struct Handshake {
     server_version: &'static str,
     protocol_version: u32,
     instance_id: String,
-    capabilities: [&'static str; 9],
+    capabilities: [&'static str; 10],
 }
 
 #[derive(Serialize)]
@@ -240,6 +240,14 @@ struct RevisionAck {
 }
 
 #[derive(Debug, Serialize)]
+struct RevisionInventoryEntry {
+    revision_id: String,
+    project_id: String,
+    project_version_id: String,
+    content_hash: String,
+}
+
+#[derive(Debug, Serialize)]
 struct RevisionDownload {
     revision_id: String,
     project_id: String,
@@ -386,6 +394,7 @@ fn route(
                 "handshake",
                 "workplaces",
                 "project_revisions",
+                "project_inventory",
                 "project_events",
                 "assets",
                 "workplace_backups",
@@ -541,6 +550,9 @@ fn route(
                 Err(StoreRevisionError::Io(error)) => return Err(error),
             }
         }
+        ("GET", "/api/v1/projects/inventory") => {
+            json_body(&list_revision_inventory(&state.data_dir)?)?
+        }
         ("GET", "/api/v1/projects/revisions") => {
             let workplace_id = query_value(query, "workplace_id").unwrap_or_default();
             if !valid_id(workplace_id) {
@@ -675,6 +687,42 @@ fn list_remote_revisions(
     }
     revisions.sort_by(|a, b| a.revision_id.cmp(&b.revision_id));
     Ok(revisions)
+}
+
+fn list_revision_inventory(data_dir: &Path) -> std::io::Result<Vec<RevisionInventoryEntry>> {
+    let projects_dir = data_dir.join("projects");
+    let projects = match std::fs::read_dir(projects_dir) {
+        Ok(projects) => projects,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut inventory = Vec::new();
+    for project in projects {
+        let revision_dirs = match std::fs::read_dir(project?.path().join("revisions")) {
+            Ok(dirs) => dirs,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        for revision_dir in revision_dirs {
+            let revision_dir = revision_dir?;
+            if !revision_dir.file_type()?.is_dir()
+                || revision_dir.file_name().to_string_lossy().starts_with('.')
+            {
+                continue;
+            }
+            let manifest = std::fs::read(revision_dir.path().join("manifest.json"))?;
+            let stored: StoredRevision = serde_json::from_slice(&manifest)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+            inventory.push(RevisionInventoryEntry {
+                revision_id: stored.revision_id,
+                project_id: stored.project_id,
+                project_version_id: stored.project_version_id,
+                content_hash: stored.content_hash,
+            });
+        }
+    }
+    inventory.sort_by(|left, right| left.revision_id.cmp(&right.revision_id));
+    Ok(inventory)
 }
 
 #[derive(Debug)]
@@ -1296,6 +1344,7 @@ mod tests {
                 "handshake",
                 "workplaces",
                 "project_revisions",
+                "project_inventory",
                 "project_events",
                 "assets",
                 "workplace_backups",
@@ -1425,6 +1474,10 @@ mod tests {
         let remote = list_remote_revisions(&dir, "workshop-1").unwrap();
         assert_eq!(remote.len(), 1);
         assert_eq!(remote[0].payload, payload);
+        let inventory = list_revision_inventory(&dir).unwrap();
+        assert_eq!(inventory.len(), 1);
+        assert_eq!(inventory[0].project_id, "project-1");
+        assert_eq!(inventory[0].project_version_id, "version-1");
         assert!(list_remote_revisions(&dir, "office-1").unwrap().is_empty());
         let receipt = RevisionReceipt {
             workplace_id: "workshop-1".into(),

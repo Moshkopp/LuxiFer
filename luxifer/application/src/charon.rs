@@ -192,6 +192,13 @@ struct RevisionAck {
     stored: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct RevisionInventoryEntry {
+    project_id: String,
+    project_version_id: String,
+    content_hash: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CharonSyncReport {
     pub uploaded: usize,
@@ -758,8 +765,54 @@ pub fn sync_project_revisions(
     base_url: &str,
     workplace_id: &str,
 ) -> Result<CharonSyncReport, AppError> {
-    let mut report = upload_pending_revisions(base_url)?;
     let endpoint = HttpEndpoint::parse(base_url)?;
+    crate::sync_outbox::seed_saved_projects(workplace_id)?;
+    let inventory: Vec<RevisionInventoryEntry> = parse_json_response(&send_request(
+        &endpoint,
+        "GET",
+        "/api/v1/projects/inventory",
+        "",
+        UPLOAD_TIMEOUT,
+    )?)?;
+    let entries = crate::sync_outbox::list_outbox()?;
+    let mut report = CharonSyncReport::default();
+    for entry in entries {
+        let present = inventory.iter().any(|remote| {
+            remote.project_id == entry.project_id
+                && remote.project_version_id == entry.project_version_id
+                && remote.content_hash == entry.content_hash
+        });
+        if present {
+            if entry.status != crate::OutboxStatus::Uploaded {
+                crate::sync_outbox::set_outbox_status(
+                    &entry.revision_id,
+                    crate::OutboxStatus::Uploaded,
+                    None,
+                )?;
+            }
+            continue;
+        }
+        report.pending += 1;
+        match upload_revision(&endpoint, &entry) {
+            Ok(()) => {
+                crate::sync_outbox::set_outbox_status(
+                    &entry.revision_id,
+                    crate::OutboxStatus::Uploaded,
+                    None,
+                )?;
+                report.uploaded += 1;
+                report.pending -= 1;
+            }
+            Err(error) => {
+                crate::sync_outbox::set_outbox_status(
+                    &entry.revision_id,
+                    crate::OutboxStatus::Failed,
+                    Some(error.message().to_owned()),
+                )?;
+                return Err(error);
+            }
+        }
+    }
     let path = format!("/api/v1/projects/revisions?workplace_id={workplace_id}");
     let revisions: Vec<CharonRevision> =
         parse_json_response(&send_request(&endpoint, "GET", &path, "", UPLOAD_TIMEOUT)?)?;

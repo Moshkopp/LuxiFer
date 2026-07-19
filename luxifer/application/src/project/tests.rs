@@ -91,6 +91,22 @@ fn outbox_friert_jeden_speicherstand_mit_parent_ein() {
 }
 
 #[test]
+fn projektbestand_wird_auch_ohne_neues_speichern_eingereiht() {
+    let _g = with_temp_dir("seed_saved_projects");
+    let mut svc = ProjectService::new();
+    svc.new_project(&state_with_rect(), "Bestand", "").unwrap();
+    assert!(list_outbox().unwrap().is_empty());
+
+    crate::sync_outbox::seed_saved_projects("office-id").unwrap();
+    let entries = list_outbox().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].project_name, "Bestand");
+
+    crate::sync_outbox::seed_saved_projects("office-id").unwrap();
+    assert_eq!(list_outbox().unwrap().len(), 1);
+}
+
+#[test]
 fn beschreibung_wird_gespeichert_und_getrimmt() {
     let _g = with_temp_dir("description");
     let mut svc = ProjectService::new();

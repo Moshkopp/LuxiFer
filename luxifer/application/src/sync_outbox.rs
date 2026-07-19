@@ -104,6 +104,58 @@ pub fn list_outbox() -> Result<Vec<OutboxEntry>, AppError> {
     read_entries(&outbox_dir())
 }
 
+/// Stellt sicher, dass jede lokal gespeicherte Projektversion mindestens einen
+/// unveränderlichen Outbox-Snapshot besitzt. Das ermöglicht den vollständigen
+/// Wiederaufbau eines leeren Charon, ohne das Projekt erneut zu speichern.
+pub(crate) fn seed_saved_projects(workplace_id: &str) -> Result<(), AppError> {
+    let projects_dir = luxifer_core::projects_dir();
+    let mut known = list_outbox()?
+        .into_iter()
+        .map(|entry| {
+            (
+                entry.project_id,
+                entry.project_version_id,
+                entry.content_hash,
+            )
+        })
+        .collect::<Vec<_>>();
+    for info in luxifer_core::list_projects(&projects_dir) {
+        let project = ProjectFile::load_by_name(&projects_dir, &info.name).map_err(|error| {
+            AppError::wrap(
+                "project_inventory_read",
+                format!("Projekt {} konnte nicht abgeglichen werden.", info.name),
+                error,
+            )
+        })?;
+        for version in &project.versions {
+            let snapshot = projects_dir
+                .join(&project.name)
+                .join(luxifer_core::project::VERSIONS_DIR)
+                .join(format!("{}.luxi", version.id));
+            let payload = std::fs::read(&snapshot).map_err(|error| {
+                AppError::wrap(
+                    "project_inventory_read",
+                    "Gespeicherte Projektversion konnte nicht abgeglichen werden.",
+                    error.to_string(),
+                )
+            })?;
+            let hash = content_hash(&payload);
+            if known.iter().any(|(project_id, version_id, content_hash)| {
+                project_id == &project.id && version_id == &version.id && content_hash == &hash
+            }) {
+                continue;
+            }
+            let entry = enqueue_project_snapshot(&project, &version.id, workplace_id, &snapshot)?;
+            known.push((
+                entry.project_id,
+                entry.project_version_id,
+                entry.content_hash,
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn set_outbox_status(
     revision_id: &str,
     status: OutboxStatus,

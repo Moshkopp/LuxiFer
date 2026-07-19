@@ -363,3 +363,10 @@ den lokalen Stand nicht. Die aktive Laserwahl und die aktive Materialwahl pro
 Laser bleiben ausschließlich lokal. Die vorhandene Sicherungshistorie bleibt
 als bewusst auszulösender Rücksetzpunkt erhalten; ein wiederhergestellter
 Profilstand wird anschließend wieder in den gemeinsamen Katalog veröffentlicht.
+
+`project_inventory` ergänzt für Projekte denselben selbstheilenden Abgleich:
+Charon meldet die vorhandenen Projekt-, Versions- und Inhaltshash-Tupel.
+LuxiFer stellt für jede lokal gespeicherte Projektversion einen dauerhaften
+Outbox-Snapshot sicher und überträgt alle auf Charon fehlenden Revisionen erneut.
+Damit lässt sich auch ein leerer oder nur teilweise vorhandener Charon-Bestand
+ohne erneutes Öffnen und Speichern der Projekte rekonstruieren.

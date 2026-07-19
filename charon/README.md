@@ -97,3 +97,8 @@ gemeinsamer Katalog automatisch zwischen allen Arbeitsplätzen abgeglichen.
 Änderungen verwenden Inhaltshashes und Basisrevisionen; Löschungen bleiben als
 Tombstones erhalten. Aktive Auswahlen sind weiterhin rein lokal. Die
 arbeitsplatzbezogene Historie dient nur noch der bewussten Wiederherstellung.
+
+Das Projektinventar erlaubt LuxiFer außerdem, fehlende lokal gespeicherte
+Projektversionen automatisch erneut hochzuladen. Nach dem Verlust des
+Charon-Datenverzeichnisses ist daher kein manuelles Neuspeichern der Projekte
+erforderlich.
