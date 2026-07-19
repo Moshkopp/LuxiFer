@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 fn main() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../branding.conf");
+    // env::var statt env!: Der Pfad darf nicht zur Compile-Zeit ins
+    // Build-Skript eingebrannt werden, sonst bricht ein verschobenes Repo.
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR fehlt");
+    let path = PathBuf::from(manifest_dir).join("../../branding.conf");
     println!("cargo:rerun-if-changed={}", path.display());
     let content = std::fs::read_to_string(&path).expect("branding.conf muss lesbar sein");
     for line in content.lines().map(str::trim) {

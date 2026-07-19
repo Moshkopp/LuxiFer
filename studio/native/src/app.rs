@@ -919,7 +919,7 @@ mod tests {
         use studio_core::{import_image, AppState, Geo};
         let png = std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../studio/native/tests/fixtures/test2x2.png"
+            "/tests/fixtures/test2x2.png"
         ));
         // Fixture optional: wenn nicht vorhanden, Test überspringen (CI-tolerant).
         let Ok(bytes) = png else {
