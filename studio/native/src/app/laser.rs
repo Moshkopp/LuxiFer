@@ -20,6 +20,10 @@ pub struct LaserLiveState {
     /// Nach einem Fehler wird seltener gelesen, damit Timeouts das UI nicht
     /// dauerhaft ausbremsen.
     error_backoff: bool,
+    /// Genau eine laufende Geräteabfrage; weitere Frames starten keine zweite.
+    pending: Option<std::sync::mpsc::Receiver<studio_application::LaserLiveRead>>,
+    /// Aktives Profil beim Start der Abfrage, gegen verspätete Ergebnisse.
+    pending_profile: Option<String>,
 }
 
 impl LaserLiveState {
@@ -273,10 +277,62 @@ impl App {
     /// Benutzerursprung) während einer aktiven Verbindung im Laser-Tab.
     /// Fehler ersetzen den Anzeigewert sichtbar, statt einen alten Stand
     /// unmarkiert stehen zu lassen.
-    pub fn poll_laser_status(&mut self) {
+    pub fn poll_laser_status(&mut self) -> bool {
         if !self.laser_backend.is_connected() {
             self.laser_live = LaserLiveState::default();
-            return;
+            return false;
+        }
+
+        if let Some(receiver) = self.laser_live.pending.as_ref() {
+            match receiver.try_recv() {
+                Ok(read) => {
+                    self.laser_live.pending = None;
+                    let requested_profile = self.laser_live.pending_profile.take();
+                    let active_profile = self
+                        .laser_backend
+                        .active_profile()
+                        .map(|profile| profile.id.as_str());
+                    if requested_profile.as_deref() != active_profile {
+                        return false;
+                    }
+                    match read.status {
+                        Ok(status) => {
+                            self.laser_live.head = Some((status.pos_x_mm, status.pos_y_mm));
+                            self.laser_live.head_note = None;
+                            self.laser_live.is_running = status.is_running;
+                            self.laser_live.error_backoff = false;
+                        }
+                        Err(error) => {
+                            self.laser_live.head = None;
+                            self.laser_live.head_note = Some(error.message().to_owned());
+                            self.laser_live.error_backoff = true;
+                        }
+                    }
+                    if let Some(origin) = read.user_origin {
+                        match origin {
+                            Ok(origin) => {
+                                self.laser_live.user_origin = Some(origin);
+                                self.laser_live.user_origin_note = None;
+                            }
+                            Err(error) => {
+                                self.laser_live.user_origin = None;
+                                self.laser_live.user_origin_note = Some(error.message().to_owned());
+                                self.laser_live.error_backoff = true;
+                            }
+                        }
+                    } else {
+                        self.laser_live.user_origin = None;
+                        self.laser_live.user_origin_note = None;
+                    }
+                    return true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.laser_live.pending = None;
+                    self.laser_live.pending_profile = None;
+                    self.laser_live.error_backoff = true;
+                }
+            }
         }
         let due = self
             .laser_live
@@ -284,51 +340,27 @@ impl App {
             .map(|at| at.elapsed() >= self.laser_live.interval())
             .unwrap_or(true);
         if !due {
-            return;
+            return false;
         }
         self.laser_live.last_poll = Some(std::time::Instant::now());
-        let capabilities = self.laser_backend.driver_capabilities();
-        if !capabilities.position_read {
-            self.laser_live.head = None;
-            self.laser_live.head_note = Some("nicht unterstützt".into());
-        } else {
-            match self.laser_backend.read_status() {
-                Ok(status) => {
-                    self.laser_live.head = Some((status.pos_x_mm, status.pos_y_mm));
-                    self.laser_live.head_note = None;
-                    self.laser_live.is_running = status.is_running;
-                    self.laser_live.error_backoff = false;
-                }
-                Err(error) => {
-                    self.laser_live.head = None;
-                    self.laser_live.head_note = Some(error.message().to_owned());
-                    self.laser_live.error_backoff = true;
-                }
+        let include_origin =
+            self.laser.start_reference == studio_core::StartReference::Benutzerursprung;
+        match self.laser_backend.read_live_async(include_origin) {
+            Ok(receiver) => {
+                self.laser_live.pending = Some(receiver);
+                self.laser_live.pending_profile = self
+                    .laser_backend
+                    .active_profile()
+                    .map(|profile| profile.id.clone());
+            }
+            Err(error) => {
+                self.laser_live.head = None;
+                self.laser_live.head_note = Some(error.message().to_owned());
+                self.laser_live.error_backoff = true;
+                return true;
             }
         }
-        // Der Benutzerursprung wird nur bei angewählter Referenz gelesen —
-        // nicht ohne Bedarf in jeder Ansicht (ADR 0020 §A).
-        if self.laser.start_reference == studio_core::StartReference::Benutzerursprung {
-            if !capabilities.user_origin_read {
-                self.laser_live.user_origin = None;
-                self.laser_live.user_origin_note = Some("nicht unterstützt".into());
-            } else {
-                match self.laser_backend.read_user_origin() {
-                    Ok(origin) => {
-                        self.laser_live.user_origin = Some(origin);
-                        self.laser_live.user_origin_note = None;
-                    }
-                    Err(error) => {
-                        self.laser_live.user_origin = None;
-                        self.laser_live.user_origin_note = Some(error.message().to_owned());
-                        self.laser_live.error_backoff = true;
-                    }
-                }
-            }
-        } else {
-            self.laser_live.user_origin = None;
-            self.laser_live.user_origin_note = None;
-        }
+        false
     }
 
     /// Referenzkoordinate der aktuellen „Starten von"-Auswahl in absoluten

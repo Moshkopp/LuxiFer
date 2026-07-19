@@ -271,7 +271,7 @@ fn empfangenes_profil_mit_neuerer_schemaversion_wird_nicht_uebernommen() {
 
 #[test]
 fn aktiver_ruida_meldet_aktionen() {
-    let mut svc = service_with_ruida();
+    let svc = service_with_ruida();
     let actions = svc.actions();
     assert!(!actions.is_empty(), "Ruida sollte Aktionen melden");
     assert!(actions.iter().any(|a| matches!(a, JobAction::SendJob)));
@@ -385,7 +385,9 @@ fn explizites_verbinden_meldet_ziel_und_ursache() {
 /// die privaten Felder setzen).
 fn mark_connected(svc: &mut LaserService) {
     let profile = svc.registry.active().unwrap().clone();
-    svc.driver = Some(super::driver_for(&profile));
+    svc.driver = Some(std::sync::Arc::new(std::sync::Mutex::new(
+        super::driver_for(&profile),
+    )));
     svc.driver_id = Some(profile.id.clone());
     svc.connected_id = Some(profile.id);
 }

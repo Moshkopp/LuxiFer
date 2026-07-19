@@ -38,9 +38,16 @@ fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
 /// Hält die Laser-Registry und den (lazy gebauten) aktiven Treiber.
 pub struct LaserService {
     pub registry: LaserRegistry,
-    driver: Option<Box<dyn MachineDriver + Send>>,
+    driver: Option<std::sync::Arc<std::sync::Mutex<Box<dyn MachineDriver + Send>>>>,
     driver_id: Option<String>,
     connected_id: Option<String>,
+}
+
+/// Vollständiges Ergebnis einer Live-Abfrage. Es wird im Hintergrund erzeugt,
+/// damit Netzwerk-Timeouts niemals den UI-/Render-Thread anhalten.
+pub struct LaserLiveRead {
+    pub status: Result<MachineStatus, AppError>,
+    pub user_origin: Option<Result<(f64, f64), AppError>>,
 }
 
 impl LaserService {
@@ -418,16 +425,24 @@ impl LaserService {
     }
 
     pub fn disconnect(&mut self) {
-        if let Some(driver) = self.driver.as_mut() {
-            driver.disconnect();
+        if let Some(driver) = self.driver.take() {
+            // Eine laufende Hintergrundabfrage darf auch das Trennen nicht im
+            // UI-Thread blockieren. Ist der Treiber frei, sauber trennen;
+            // andernfalls fällt der Socket nach Abschluss des Workers mit dem
+            // letzten `Arc` weg.
+            if let Ok(mut driver) = driver.try_lock() {
+                driver.disconnect();
+            }
         }
+        self.driver_id = None;
         self.connected_id = None;
     }
 
-    /// Verfügbare Job-Aktionen des aktiven Treibers (fürs Panel-Grid). Ohne
-    /// aktiven Treiber leer.
-    pub fn actions(&mut self) -> Vec<JobAction> {
-        self.with_driver(false, |d| Ok(d.actions()))
+    /// Verfügbare Job-Aktionen des aktiven Treibertyps (fürs Panel-Grid).
+    /// Rein statische Metadaten: darf nicht auf laufendes Geräte-I/O warten.
+    pub fn actions(&self) -> Vec<JobAction> {
+        self.active_profile()
+            .map(|profile| driver_for(profile).actions())
             .unwrap_or_default()
     }
 
@@ -450,17 +465,24 @@ impl LaserService {
             })?
             .clone();
         if self.driver_id.as_deref() != Some(profile.id.as_str()) || self.driver.is_none() {
-            self.driver = Some(driver_for(&profile));
+            self.driver = Some(std::sync::Arc::new(std::sync::Mutex::new(driver_for(
+                &profile,
+            ))));
             self.driver_id = Some(profile.id.clone());
         }
-        let driver = self.driver.as_mut().unwrap();
         if requires_connection && self.connected_id.as_deref() != Some(profile.id.as_str()) {
             return Err(AppError::new(
                 "laser_not_connected",
                 "Laser ist nicht verbunden. Bitte zuerst ausdrücklich verbinden.",
             ));
         }
-        f(driver)
+        let mut driver = self.driver.as_ref().unwrap().lock().map_err(|_| {
+            AppError::new(
+                "laser_driver_lock",
+                "Laser-Treiber ist nicht mehr verfügbar.",
+            )
+        })?;
+        f(&mut driver)
     }
 
     /// Baut den JobPlan MIT Asset-Auflösung — Bild-Layer werden gerastert.
@@ -592,8 +614,9 @@ impl LaserService {
     // --- Positionslesen und Werkstück-Nullpunkte (ADR 0020) -----------------
 
     /// Fähigkeiten des aktiven Treibers (für „nicht unterstützt"-Anzeigen).
-    pub fn driver_capabilities(&mut self) -> DriverCapabilities {
-        self.with_driver(false, |driver| Ok(driver.capabilities()))
+    pub fn driver_capabilities(&self) -> DriverCapabilities {
+        self.active_profile()
+            .map(|profile| driver_for(profile).capabilities())
             .unwrap_or_default()
     }
 
@@ -616,6 +639,75 @@ impl LaserService {
                 )
             })
         })
+    }
+
+    /// Startet eine zusammenhängende Live-Abfrage auf dem Geräte-Worker. Der
+    /// geklonte `Arc` zeigt auf denselben Treiber und damit denselben Socket;
+    /// der Mutex verhindert, dass Antworten paralleler Befehle sich mischen.
+    pub fn read_live_async(
+        &mut self,
+        include_user_origin: bool,
+    ) -> Result<std::sync::mpsc::Receiver<LaserLiveRead>, AppError> {
+        if !self.is_connected() {
+            return Err(AppError::new(
+                "laser_not_connected",
+                "Laser ist nicht verbunden. Bitte zuerst ausdrücklich verbinden.",
+            ));
+        }
+        // Baut den Treiber bei Bedarf und prüft die Capability, ohne I/O.
+        self.with_driver(true, |_| Ok(()))?;
+        let driver = self.driver.as_ref().unwrap().clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let read = match driver.lock() {
+                Ok(driver) => {
+                    let capabilities = driver.capabilities();
+                    let status = if capabilities.position_read {
+                        driver.status().map_err(|error| {
+                            AppError::wrap(
+                                "laser_status",
+                                "Maschinenstatus lesen fehlgeschlagen.",
+                                error.to_string(),
+                            )
+                        })
+                    } else {
+                        Err(AppError::new(
+                            "position_unsupported",
+                            "Der aktive Lasertreiber unterstützt kein Positionslesen.",
+                        ))
+                    };
+                    let user_origin = include_user_origin.then(|| {
+                        if capabilities.user_origin_read {
+                            driver.read_origin().map_err(|error| {
+                                AppError::wrap(
+                                    "laser_origin_read",
+                                    "Benutzerursprung lesen fehlgeschlagen.",
+                                    error.to_string(),
+                                )
+                            })
+                        } else {
+                            Err(AppError::new(
+                                "origin_unsupported",
+                                "Der aktive Lasertreiber unterstützt kein Lesen des Benutzerursprungs.",
+                            ))
+                        }
+                    });
+                    LaserLiveRead {
+                        status,
+                        user_origin,
+                    }
+                }
+                Err(_) => LaserLiveRead {
+                    status: Err(AppError::new(
+                        "laser_driver_lock",
+                        "Laser-Treiber ist nicht mehr verfügbar.",
+                    )),
+                    user_origin: None,
+                },
+            };
+            let _ = tx.send(read);
+        });
+        Ok(rx)
     }
 
     /// Liest den am Ruida-Hardwarepanel gesetzten Benutzerursprung. Wird nur

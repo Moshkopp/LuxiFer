@@ -247,8 +247,7 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             }
 
             // Sichten vorab ableiten, damit die Panels keinen App-/Backend-
-            // Zugriff brauchen. `laser_view` ruft `actions()` (baut den Treiber
-            // lazy), daher &mut vor der Closure.
+            // Zugriff brauchen.
             let laser_view = if is_laser {
                 Some(laser_view(app))
             } else {
@@ -869,8 +868,7 @@ fn layer_rows(app: &App) -> Vec<layers::LayerRow> {
         .collect()
 }
 
-/// Leitet die reine Laser-Sicht für `laserpanel::show` ab. Braucht `&mut`, weil
-/// `laser_backend.actions()` den Treiber zum aktiven Profil lazy aufbaut.
+/// Leitet die reine Laser-Sicht für `laserpanel::show` ab.
 fn laser_view(app: &mut App) -> laserpanel::LaserView {
     use studio_core::JobAction;
     let profiles = app
