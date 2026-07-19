@@ -60,6 +60,7 @@ pub(super) enum LeaseWorkerResult {
 
 struct ActiveLease {
     controller_id: String,
+    controller_name: String,
     token: String,
     usage: studio_application::LeaseUsage,
 }
@@ -216,6 +217,7 @@ fn lease_worker(command_rx: Receiver<LeaseCommand>, result_tx: Sender<LeaseWorke
                     Ok(reply) if reply.granted => {
                         active = reply.token.clone().map(|token| ActiveLease {
                             controller_id,
+                            controller_name,
                             token,
                             usage: studio_application::LeaseUsage::Idle,
                         });
@@ -272,6 +274,7 @@ fn lease_worker(command_rx: Receiver<LeaseCommand>, result_tx: Sender<LeaseWorke
                         Ok(reply) if reply.granted => {
                             active = reply.token.map(|token| ActiveLease {
                                 controller_id: request.controller_id.clone(),
+                                controller_name: request.controller_name.clone(),
                                 token,
                                 usage: studio_application::LeaseUsage::Idle,
                             });
@@ -289,25 +292,64 @@ fn lease_worker(command_rx: Receiver<LeaseCommand>, result_tx: Sender<LeaseWorke
                 let Some(lease) = active.as_ref() else {
                     continue;
                 };
+                let (controller_id, controller_name, usage) = (
+                    lease.controller_id.clone(),
+                    lease.controller_name.clone(),
+                    lease.usage,
+                );
                 match studio_application::heartbeat_lease(
                     &current.url,
-                    &lease.controller_id,
+                    &controller_id,
                     &current.workplace_id,
                     &lease.token,
-                    lease.usage,
+                    usage,
                 ) {
                     Ok(reply)
                         if reply.release_requested
-                            && lease.usage == studio_application::LeaseUsage::Idle =>
+                            && usage == studio_application::LeaseUsage::Idle =>
                     {
                         release_active(config.as_deref(), &mut active);
                         let _ = result_tx.send(LeaseWorkerResult::ReleaseRequested);
                     }
                     Ok(_) => {}
-                    Err(error) => {
-                        active = None;
-                        let _ = result_tx.send(LeaseWorkerResult::Lost(error.message().into()));
+                    // Hub erreichbar, aber der Lease ist dort unbekannt (409;
+                    // z. B. Hub-Neustart — Leases liegen nur im Speicher):
+                    // still neu anfordern, statt laufende lokale Arbeit zu
+                    // unterbrechen. Getrennt wird erst, wenn nachweislich ein
+                    // anderer Arbeitsplatz das Gerät hält.
+                    Err(error) if error.code() == "hub_status" => {
+                        match studio_application::acquire_lease(
+                            &current.url,
+                            &controller_id,
+                            &controller_name,
+                            &current.workplace_id,
+                            &current.workplace_name,
+                            false,
+                        ) {
+                            Ok(reply) if reply.granted => {
+                                if let (Some(lease), Some(token)) = (active.as_mut(), reply.token) {
+                                    lease.token = token;
+                                }
+                            }
+                            Ok(reply) => {
+                                active = None;
+                                let holder = reply
+                                    .holder_name
+                                    .unwrap_or_else(|| "einen anderen Arbeitsplatz".into());
+                                let _ = result_tx.send(LeaseWorkerResult::Lost(format!(
+                                    "Gerät ist inzwischen durch {holder} belegt."
+                                )));
+                            }
+                            // Hub zwischenzeitlich wieder weg: Lease behalten,
+                            // nächster Zyklus versucht es erneut.
+                            Err(_) => {}
+                        }
                     }
+                    // Hub nicht erreichbar: Koordination setzt aus, die lokale
+                    // Verbindung bleibt bestehen (Hub ist nie Voraussetzung
+                    // für lokale Arbeit). Der Lease wird mit altem Token
+                    // weiterversucht, sobald der Hub wieder antwortet.
+                    Err(_) => {}
                 }
             }
             Err(RecvTimeoutError::Disconnected) => return,
