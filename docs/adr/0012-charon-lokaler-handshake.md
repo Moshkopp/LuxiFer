@@ -344,3 +344,11 @@ Protokollversion `2` ergänzt `material_profiles` als dritten
 Arbeitsplatz-Backup-Typ. Da Clients die Backup-Art als geschlossenes Enum
 validieren, wird die Version bewusst angehoben; Server und Client müssen für
 diesen Stand gemeinsam aktualisiert werden.
+
+UI-Einstellungen, Laser- und Materialprofile erzeugen bei jeder erfolgreichen
+Änderung einen geordneten Snapshot. Charon dedupliziert identische Inhalte
+und bewahrt eine abgestufte Historie auf: zehn letzte Änderungen, Tagesstände
+für 30 Tage und danach zwölf 30-Tage-Stände. Die UI gruppiert diese Historie
+nach Arbeitsplatz und Typ; ältere Stände bleiben standardmäßig eingeklappt.
+Vor einer Wiederherstellung wird der lokale Ausgangsstand selbst als Snapshot
+eingereiht und eine fachliche Änderungszusammenfassung angezeigt.

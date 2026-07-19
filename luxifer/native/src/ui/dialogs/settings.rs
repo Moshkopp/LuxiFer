@@ -15,7 +15,9 @@ pub(in crate::ui) enum SettingsOutcome {
     Cancel,
     CharonTest,
     CharonBackups,
-    RestoreBackup(usize),
+    PrepareRestore(usize),
+    ConfirmRestore(usize),
+    CancelRestore,
 }
 
 pub(in crate::ui) fn settings_dialog_window(
@@ -652,17 +654,84 @@ fn charon_section(
     {
         *outcome = SettingsOutcome::CharonBackups;
     }
+    let mut groups = std::collections::BTreeMap::new();
     for (index, backup) in state.charon_backups.iter().enumerate() {
-        ui.horizontal(|ui| {
-            let kind = match backup.kind {
-                luxifer_application::CharonBackupKind::UiSettings => "Einstellungen",
-                luxifer_application::CharonBackupKind::LaserProfiles => "Laserprofile",
-                luxifer_application::CharonBackupKind::MaterialProfiles => "Materialprofile",
-            };
-            ui.label(format!("{} · {}", backup.workplace_name, kind));
-            if ui.button("Wiederherstellen").clicked() {
-                *outcome = SettingsOutcome::RestoreBackup(index);
+        groups
+            .entry((backup.workplace_name.clone(), backup.kind))
+            .or_insert_with(Vec::new)
+            .push(index);
+    }
+    for ((workplace, kind), indices) in groups {
+        let label = backup_kind_label(kind);
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.strong(format!("{workplace} · {label}"));
+                let latest = &state.charon_backups[indices[0]];
+                ui.weak(format_backup_age(latest.saved_at_unix));
+                if ui.button("Letzten Stand wiederherstellen").clicked() {
+                    *outcome = SettingsOutcome::PrepareRestore(indices[0]);
+                }
+            });
+            if indices.len() > 1 {
+                egui::CollapsingHeader::new(format!(
+                    "Ältere Stände anzeigen ({})",
+                    indices.len() - 1
+                ))
+                .id_salt(("backup_history", &workplace, kind))
+                .show(ui, |ui| {
+                    for &index in indices.iter().skip(1) {
+                        let backup = &state.charon_backups[index];
+                        ui.horizontal(|ui| {
+                            ui.label(format_backup_age(backup.saved_at_unix));
+                            if ui.small_button("Wiederherstellen").clicked() {
+                                *outcome = SettingsOutcome::PrepareRestore(index);
+                            }
+                        });
+                    }
+                });
             }
         });
+    }
+    if let Some(confirm) = &state.backup_restore_confirm {
+        ui.add_space(8.0);
+        ui.group(|ui| {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "Diesen Sicherungsstand wirklich wiederherstellen?",
+            );
+            ui.weak("Der aktuelle lokale Stand wird vorher automatisch gesichert.");
+            for line in &confirm.summary {
+                ui.label(line);
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Wiederherstellen").clicked() {
+                    *outcome = SettingsOutcome::ConfirmRestore(confirm.index);
+                }
+                if ui.button("Abbrechen").clicked() {
+                    *outcome = SettingsOutcome::CancelRestore;
+                }
+            });
+        });
+    }
+}
+
+fn backup_kind_label(kind: luxifer_application::CharonBackupKind) -> &'static str {
+    match kind {
+        luxifer_application::CharonBackupKind::UiSettings => "Einstellungen",
+        luxifer_application::CharonBackupKind::LaserProfiles => "Laserprofile",
+        luxifer_application::CharonBackupKind::MaterialProfiles => "Materialprofile",
+    }
+}
+
+fn format_backup_age(saved_at_unix: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs());
+    let age = now.saturating_sub(saved_at_unix);
+    match age {
+        0..=59 => "gerade eben".into(),
+        60..=3_599 => format!("vor {} min", age / 60),
+        3_600..=86_399 => format!("vor {} h", age / 3_600),
+        _ => format!("vor {} Tagen", age / 86_400),
     }
 }

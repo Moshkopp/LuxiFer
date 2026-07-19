@@ -897,6 +897,10 @@ enum StoreBackupError {
     Io(std::io::Error),
 }
 
+const BACKUP_RECENT_LIMIT: usize = 10;
+const BACKUP_DAILY_DAYS: u64 = 30;
+const BACKUP_MONTHLY_BUCKETS: u64 = 12;
+
 fn store_workplace_backup(
     data_dir: &Path,
     backup: WorkplaceBackup,
@@ -915,11 +919,9 @@ fn store_workplace_backup(
         return Err(StoreBackupError::HashMismatch);
     }
     let dir = data_dir.join("workplaces").join(&backup.workplace_id);
-    let path = dir.join(format!("{}.json", backup.kind));
-    if let Ok(bytes) = std::fs::read(&path) {
-        let existing: WorkplaceBackup = serde_json::from_slice(&bytes)
-            .map_err(|error| StoreBackupError::Io(std::io::Error::other(error)))?;
-        if existing.content_hash == backup.content_hash {
+    std::fs::create_dir_all(&dir).map_err(StoreBackupError::Io)?;
+    for (_, existing) in read_backup_dir(&dir).map_err(StoreBackupError::Io)? {
+        if existing.kind == backup.kind && existing.content_hash == backup.content_hash {
             return Ok(WorkplaceBackupAck {
                 workplace_id: backup.workplace_id,
                 kind: backup.kind,
@@ -928,18 +930,75 @@ fn store_workplace_backup(
             });
         }
     }
-    std::fs::create_dir_all(&dir).map_err(StoreBackupError::Io)?;
-    let temp = dir.join(format!(".{}.tmp", backup.kind));
+    let filename = format!(
+        "{}-{:020}-{}.json",
+        backup.kind, backup.saved_at_unix, backup.content_hash
+    );
+    let path = dir.join(&filename);
+    let temp = dir.join(format!(".{filename}.tmp"));
     let bytes = serde_json::to_vec_pretty(&backup)
         .map_err(|error| StoreBackupError::Io(std::io::Error::other(error)))?;
     std::fs::write(&temp, bytes).map_err(StoreBackupError::Io)?;
     std::fs::rename(&temp, &path).map_err(StoreBackupError::Io)?;
+    prune_backup_history(&dir, &backup.kind).map_err(StoreBackupError::Io)?;
     Ok(WorkplaceBackupAck {
         workplace_id: backup.workplace_id,
         kind: backup.kind,
         content_hash: backup.content_hash,
         stored: true,
     })
+}
+
+fn read_backup_dir(dir: &Path) -> std::io::Result<Vec<(PathBuf, WorkplaceBackup)>> {
+    let mut backups = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(backups),
+        Err(error) => return Err(error),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !entry.file_type()?.is_file()
+            || path.extension().and_then(|ext| ext.to_str()) != Some("json")
+        {
+            continue;
+        }
+        let backup = serde_json::from_slice(&std::fs::read(&path)?)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        backups.push((path, backup));
+    }
+    Ok(backups)
+}
+
+fn prune_backup_history(dir: &Path, kind: &str) -> std::io::Result<()> {
+    let mut matching: Vec<_> = read_backup_dir(dir)?
+        .into_iter()
+        .filter(|(_, backup)| backup.kind == kind)
+        .collect();
+    matching.sort_by_key(|item| std::cmp::Reverse(item.1.saved_at_unix));
+    let newest_day = matching
+        .first()
+        .map_or(0, |(_, backup)| backup.saved_at_unix / 86_400);
+    let newest_month = newest_day / 30;
+    let mut daily = std::collections::BTreeSet::new();
+    let mut monthly = std::collections::BTreeSet::new();
+    for (index, (path, backup)) in matching.into_iter().enumerate() {
+        let day = backup.saved_at_unix / 86_400;
+        let month = day / 30;
+        if index < BACKUP_RECENT_LIMIT {
+            daily.insert(day);
+            monthly.insert(month);
+            continue;
+        }
+        let keep_daily = newest_day.saturating_sub(day) < BACKUP_DAILY_DAYS && daily.insert(day);
+        let keep_monthly = !keep_daily
+            && newest_month.saturating_sub(month) < BACKUP_MONTHLY_BUCKETS
+            && monthly.insert(month);
+        if !keep_daily && !keep_monthly {
+            std::fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
 fn list_workplace_backups(data_dir: &Path) -> std::io::Result<Vec<WorkplaceBackup>> {
@@ -954,14 +1013,7 @@ fn list_workplace_backups(data_dir: &Path) -> std::io::Result<Vec<WorkplaceBacku
         if !workplace.path().is_dir() {
             continue;
         }
-        for kind in ["ui_settings", "laser_profiles", "material_profiles"] {
-            let path = workplace.path().join(format!("{kind}.json"));
-            if !path.exists() {
-                continue;
-            }
-            let bytes = std::fs::read(path)?;
-            let backup: WorkplaceBackup = serde_json::from_slice(&bytes)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        for (_, backup) in read_backup_dir(&workplace.path())? {
             backups.push(backup);
         }
     }
@@ -969,6 +1021,7 @@ fn list_workplace_backups(data_dir: &Path) -> std::io::Result<Vec<WorkplaceBacku
         left.workplace_name
             .cmp(&right.workplace_name)
             .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| right.saved_at_unix.cmp(&left.saved_at_unix))
     });
     Ok(backups)
 }
@@ -1146,6 +1199,22 @@ mod tests {
 
         assert!(store_workplace_backup(&dir, backup.clone()).unwrap().stored);
         assert!(!store_workplace_backup(&dir, backup).unwrap().stored);
+        let newer_payload = r#"{"version":2,"workplace":"Office"}"#;
+        assert!(
+            store_workplace_backup(
+                &dir,
+                WorkplaceBackup {
+                    workplace_id: "office-1".into(),
+                    workplace_name: "Office".into(),
+                    kind: "ui_settings".into(),
+                    saved_at_unix: 44,
+                    content_hash: luxifer_core::assets::content_hash(newer_payload.as_bytes()),
+                    payload: newer_payload.into(),
+                },
+            )
+            .unwrap()
+            .stored
+        );
         let material_payload = r#"{"profiles":[],"active_by_laser":{}}"#;
         assert!(
             store_workplace_backup(
@@ -1163,13 +1232,46 @@ mod tests {
             .stored
         );
         let backups = list_workplace_backups(&dir).unwrap();
-        assert_eq!(backups.len(), 2);
+        assert_eq!(backups.len(), 3);
         assert!(backups
             .iter()
             .any(|backup| backup.kind == "ui_settings" && backup.saved_at_unix == 42));
         assert!(backups
             .iter()
+            .any(|backup| backup.kind == "ui_settings" && backup.saved_at_unix == 44));
+        assert!(backups
+            .iter()
             .any(|backup| { backup.kind == "material_profiles" && backup.saved_at_unix == 43 }));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn arbeitsplatz_sicherung_begrenzt_historie_pro_typ() {
+        let dir = std::env::temp_dir().join(format!(
+            "charon_backup_retention_test_{}_{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        for saved_at_unix in 1..=25 {
+            let payload = format!(r#"{{"revision":{saved_at_unix}}}"#);
+            store_workplace_backup(
+                &dir,
+                WorkplaceBackup {
+                    workplace_id: "office-1".into(),
+                    workplace_name: "Office".into(),
+                    kind: "laser_profiles".into(),
+                    saved_at_unix,
+                    content_hash: luxifer_core::assets::content_hash(payload.as_bytes()),
+                    payload,
+                },
+            )
+            .unwrap();
+        }
+        let backups = list_workplace_backups(&dir).unwrap();
+        assert_eq!(backups.len(), BACKUP_RECENT_LIMIT);
+        assert_eq!(backups.first().unwrap().saved_at_unix, 25);
+        assert_eq!(backups.last().unwrap().saved_at_unix, 16);
         let _ = std::fs::remove_dir_all(dir);
     }
 

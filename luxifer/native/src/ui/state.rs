@@ -271,10 +271,16 @@ pub struct SettingsDialogState {
     pub charon_status: CharonTestStatus,
     pub charon_sync_error: Option<String>,
     pub charon_backups: Vec<luxifer_application::CharonWorkplaceBackup>,
+    pub backup_restore_confirm: Option<BackupRestoreConfirmation>,
     pub shortcut_recording: Option<ShortcutRecording>,
     pub shortcut_conflict: Option<ShortcutConflict>,
     pub shortcut_error: Option<String>,
     pub confirm_shortcut_defaults: bool,
+}
+
+pub struct BackupRestoreConfirmation {
+    pub index: usize,
+    pub summary: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

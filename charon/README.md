@@ -85,3 +85,9 @@ Charon und ersetzt anschließend `/usr/local/bin/charon`. Startet die neue
 Version nicht, wird automatisch `/usr/local/bin/charon.previous`
 wiederhergestellt. `/var/lib/charon` und `/etc/charon/charon.env` werden beim
 Update nicht verändert.
+
+Arbeitsplatzsicherungen werden versioniert und nur bei geändertem Inhalt neu
+angelegt. Charon behält pro Arbeitsplatz und Sicherungstyp die letzten zehn
+Änderungen, danach je einen Tagesstand für 30 Tage und anschließend je einen
+30-Tage-Stand für zwölf Zeiträume. Bestehende einzelne Sicherungsdateien aus
+Protokollversion 2 bleiben lesbar und gehen in diese Aufbewahrung ein.

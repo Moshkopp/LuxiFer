@@ -15,6 +15,7 @@ impl App {
             charon_status: self.charon_status.clone(),
             charon_sync_error: self.charon_sync_error.clone(),
             charon_backups: Vec::new(),
+            backup_restore_confirm: None,
             shortcut_recording: None,
             shortcut_conflict: None,
             shortcut_error: None,
@@ -35,6 +36,13 @@ impl App {
         else {
             return;
         };
+        // Den unmittelbar vorherigen lokalen Stand zuerst einreihen. Die
+        // Configure-Kommandos sind geordnet; danach folgt der restaurierte Stand.
+        self.charon_runtime.configure(
+            &self.ui_settings,
+            &self.laser_backend.registry,
+            self.material_service.library(),
+        );
         let result = match backup.kind {
             luxifer_application::CharonBackupKind::UiSettings => {
                 luxifer_core::UiSettings::from_json(&backup.payload).and_then(|settings| {
@@ -71,6 +79,9 @@ impl App {
         };
         match result {
             Ok(()) => {
+                if let Some(dialog) = self.settings_dialog.as_mut() {
+                    dialog.backup_restore_confirm = None;
+                }
                 self.apply_active_laser_workspace();
                 self.charon_runtime.configure(
                     &self.ui_settings,
@@ -85,6 +96,59 @@ impl App {
             Err(message) => {
                 self.app_error = Some(AppError::new("charon_backup_restore", message));
             }
+        }
+    }
+
+    pub fn prepare_charon_backup_restore(&mut self, index: usize) {
+        let Some(backup) = self
+            .settings_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.charon_backups.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        let summary = match backup.kind {
+            luxifer_application::CharonBackupKind::UiSettings => {
+                match luxifer_core::UiSettings::from_json(&backup.payload) {
+                    Ok(target) if target == self.ui_settings => {
+                        vec!["Der gesicherte Stand entspricht dem lokalen Stand.".into()]
+                    }
+                    Ok(_) => vec![
+                        "Oberfläche, Bedienung und Arbeitsplatz-Einstellungen werden ersetzt."
+                            .into(),
+                    ],
+                    Err(error) => vec![format!("Sicherung ist ungültig: {error}")],
+                }
+            }
+            luxifer_application::CharonBackupKind::LaserProfiles => {
+                serde_json::from_str::<luxifer_core::LaserRegistry>(&backup.payload).map_or_else(
+                    |error| vec![format!("Sicherung ist ungültig: {error}")],
+                    |target| {
+                        profile_summary(
+                            &self.laser_backend.registry.profiles,
+                            &target.profiles,
+                            |profile| (&profile.id, &profile.name),
+                        )
+                    },
+                )
+            }
+            luxifer_application::CharonBackupKind::MaterialProfiles => {
+                serde_json::from_str::<luxifer_core::MaterialLibrary>(&backup.payload).map_or_else(
+                    |error| vec![format!("Sicherung ist ungültig: {error}")],
+                    |target| {
+                        profile_summary(
+                            &self.material_service.library().profiles,
+                            &target.profiles,
+                            |profile| (&profile.id, &profile.name),
+                        )
+                    },
+                )
+            }
+        };
+        if let Some(dialog) = self.settings_dialog.as_mut() {
+            dialog.backup_restore_confirm =
+                Some(crate::ui::BackupRestoreConfirmation { index, summary });
         }
     }
 
@@ -186,4 +250,30 @@ impl App {
         }
         true
     }
+}
+
+fn profile_summary<T, F>(current: &[T], target: &[T], identity: F) -> Vec<String>
+where
+    T: PartialEq,
+    F: Fn(&T) -> (&String, &String),
+{
+    let mut lines = Vec::new();
+    for item in target {
+        let (id, name) = identity(item);
+        match current.iter().find(|existing| identity(existing).0 == id) {
+            None => lines.push(format!("+ {name}")),
+            Some(existing) if existing != item => lines.push(format!("~ {name}")),
+            Some(_) => {}
+        }
+    }
+    for item in current {
+        let (id, name) = identity(item);
+        if !target.iter().any(|existing| identity(existing).0 == id) {
+            lines.push(format!("- {name}"));
+        }
+    }
+    if lines.is_empty() {
+        lines.push("Der gesicherte Stand entspricht dem lokalen Stand.".into());
+    }
+    lines
 }

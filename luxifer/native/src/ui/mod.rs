@@ -28,11 +28,11 @@ pub use action::UiAction;
 pub(crate) use project::preview_from_state;
 pub use splash::Splash;
 pub use state::{
-    CachedProjectDetail, CharonTestStatus, CropKind, GeoOpDialogState, GeoOpKind, ImageDialogPage,
-    ImageDialogState, LaserManagerState, LaserManagerTab, LayerDialogState, LayerManagerState,
-    MaterialManagerState, PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState,
-    RevisionComparisonState, SelectionSizeState, SettingsDialogState, SettingsSection,
-    TextDialogState,
+    BackupRestoreConfirmation, CachedProjectDetail, CharonTestStatus, CropKind, GeoOpDialogState,
+    GeoOpKind, ImageDialogPage, ImageDialogState, LaserManagerState, LaserManagerTab,
+    LayerDialogState, LayerManagerState, MaterialManagerState, PendingProjectAction,
+    ProjectBrowserState, ProjectSaveDialogState, RevisionComparisonState, SelectionSizeState,
+    SettingsDialogState, SettingsSection, TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -503,7 +503,15 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             dialogs::SettingsOutcome::Cancel => app.settings_dialog = None,
             dialogs::SettingsOutcome::CharonTest => app.test_charon_connection(),
             dialogs::SettingsOutcome::CharonBackups => app.load_charon_backups(),
-            dialogs::SettingsOutcome::RestoreBackup(index) => app.restore_charon_backup(index),
+            dialogs::SettingsOutcome::PrepareRestore(index) => {
+                app.prepare_charon_backup_restore(index)
+            }
+            dialogs::SettingsOutcome::ConfirmRestore(index) => app.restore_charon_backup(index),
+            dialogs::SettingsOutcome::CancelRestore => {
+                if let Some(dialog) = app.settings_dialog.as_mut() {
+                    dialog.backup_restore_confirm = None;
+                }
+            }
         }
     }
 
