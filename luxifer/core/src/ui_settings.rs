@@ -13,7 +13,7 @@ use crate::project::data_root;
 pub const UI_SETTINGS_FILE: &str = "gui-settings.json";
 
 /// Aktuelle Formatversion der GUI-Settings.
-pub const UI_FORMAT_VERSION: u32 = 4;
+pub const UI_FORMAT_VERSION: u32 = 5;
 
 /// Eine Theme-Farbe: Farbton (RGB) plus geklemmte Intensität (ADR §3).
 ///
@@ -132,6 +132,11 @@ pub struct UiSettings {
     /// Vertauscht Fenster- und Kreuz-Auswahlrichtung des Marquee-Werkzeugs.
     #[serde(default)]
     pub invert_marquee_direction: bool,
+    /// Nach einer fertig gezeichneten Form automatisch ins Auswahlwerkzeug
+    /// wechseln. Ist dies aus, bleibt das Zeichenwerkzeug aktiv und die neue
+    /// Form wird abgewählt, damit ein Farbwechsel sie nicht rückwirkend färbt.
+    #[serde(default = "default_true")]
+    pub select_after_drawing: bool,
     /// Hauptfenster beim Programmstart maximiert oeffnen.
     #[serde(default)]
     pub open_maximized: bool,
@@ -212,6 +217,7 @@ impl Default for UiSettings {
             last_project: String::new(),
             grid_size_mm: default_grid_size(),
             invert_marquee_direction: false,
+            select_after_drawing: true,
             open_maximized: false,
             line_antialiasing: true,
             msaa_samples: default_msaa_samples(),
@@ -351,6 +357,7 @@ mod tests {
         // Fehlende neue Felder fallen auf ihre Defaults zurück.
         assert_eq!(back.grid_size_mm, default_grid_size());
         assert!(!back.invert_marquee_direction);
+        assert!(back.select_after_drawing);
         assert!(!back.open_maximized);
         assert!(back.line_antialiasing);
         assert_eq!(back.msaa_samples, default_msaa_samples());

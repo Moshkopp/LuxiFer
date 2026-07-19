@@ -404,7 +404,7 @@ impl App {
                             self.canvas.right_select_active = false;
                         }
                         if out.shape_added {
-                            self.refresh_accent();
+                            self.after_shape_added();
                         }
                         if let Some(error) = out.error {
                             self.app_error = Some(error);
@@ -415,7 +415,7 @@ impl App {
                 }
                 let out = self.canvas.handle_pointer_event(&mut self.session, event);
                 if out.shape_added {
-                    self.refresh_accent();
+                    self.after_shape_added();
                 }
                 if let Some(index) = out.double_clicked {
                     self.edit_shape(index);
@@ -494,7 +494,7 @@ impl App {
             }
             S::FinishPolygon => {
                 if self.canvas.finish_point_path(&mut self.session, true) {
-                    self.refresh_accent();
+                    self.after_shape_added();
                 }
             }
             S::Undo => self.undo(),
@@ -674,6 +674,18 @@ impl App {
     fn refresh_accent(&mut self) {
         if let Some(c) = self.session.active_color() {
             self.accent = c;
+        }
+    }
+
+    /// Einheitlicher Abschluss aller Canvas-Zeichenwerkzeuge. Im fortlaufenden
+    /// Zeichenmodus darf die neue Form nicht selektiert bleiben, weil der
+    /// nächste Palettenklick sonst diese Form umfärben würde.
+    fn after_shape_added(&mut self) {
+        self.refresh_accent();
+        if self.ui_settings.select_after_drawing {
+            self.canvas.tool = crate::tools::Tool::Select;
+        } else {
+            self.session.clear_selection();
         }
     }
 
