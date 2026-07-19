@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/branding.conf"
 PACKAGE="studio"
 BINARY="studio"
-APP_NAME="$PRODUCT_NAME"
+APP_NAME="$STUDIO_NAME"
 VERSION="$(awk -F '"' '/^version = "/ { print $2; exit }' \
   "$ROOT_DIR/Cargo.toml")"
 
@@ -83,7 +83,7 @@ mkdir -p "$APPDIR/usr/share/applications"
 cat >"$APPDIR/usr/share/applications/${APP_ID}.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=$PRODUCT_NAME
+Name=$STUDIO_NAME
 Comment=Nativer Editor für Laserprojekte
 Exec=studio
 Icon=$APP_ID

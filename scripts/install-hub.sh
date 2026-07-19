@@ -117,7 +117,7 @@ EOF
 
 cat >"${UNIT_TMP}" <<EOF
 [Unit]
-Description=${PRODUCT_NAME} ${HUB_NAME} coordination service
+Description=${HUB_NAME} coordination service
 After=network-online.target
 Wants=network-online.target
 

@@ -154,7 +154,8 @@ pub fn ignore_inbox_revision(revision_id: &str) -> Result<(), AppError> {
 
 /// Übernimmt den empfangenen Stand als neue lokale Projektversion. Die lokale
 /// Versionshistorie bleibt erhalten; Projektname und Erstellungszeit bleiben
-/// arbeitsplatzlokal. Bild-Assets werden bis zur Asset-Synchronisierung abgelehnt.
+/// arbeitsplatzlokal. Fehlende, bereits gelöschte Bild-Assets blockieren die
+/// Übernahme nicht; die zugehörigen Shapes bleiben als Referenz erhalten.
 pub fn accept_inbox_revision(revision_id: &str) -> Result<String, AppError> {
     let entry = read_entry(&inbox_dir().join(revision_id).join(MANIFEST_FILE))?;
     let mut remote = read_verified_project(&entry)?;
@@ -400,10 +401,10 @@ fn resolve_project_assets(project: &mut studio_core::ProjectFile) -> Result<(), 
     let store = studio_core::assets_dir();
     for id in &project.asset_refs {
         if studio_core::asset_path(&store, id).is_none() {
-            return Err(AppError::new(
-                "inbox_asset_missing",
-                format!("Projekt-Asset {id} ist lokal noch nicht verfügbar."),
-            ));
+            eprintln!(
+                "Hub-Projektrevision {} verweist auf das lokal nicht verfügbare Asset {id}",
+                project.current_version
+            );
         }
     }
     for shape in &mut project.shapes {
@@ -619,6 +620,38 @@ mod tests {
             apply_inbox_revision("revision-asset-1").unwrap(),
             "Mit Asset"
         );
+    }
+
+    #[test]
+    fn projekt_mit_geloeschtem_asset_bleibt_uebernehmbar() {
+        let _guard = with_temp_dir("sync_inbox_missing_asset");
+        let missing_id = "geloeschtes-asset".to_owned();
+        let mut state = studio_core::AppState::new();
+        state.add_image(missing_id.clone(), 0.0, 0.0, 10.0, 10.0);
+        let project = studio_core::ProjectFile::from_state(&state, "Asset gelöscht", Vec::new());
+        let payload = project.to_json().unwrap();
+        store_remote_revision(HubRevision {
+            revision_id: "revision-missing-asset-1".into(),
+            project_id: project.id.clone(),
+            project_name: project.name.clone(),
+            project_version_id: project.current_version.clone(),
+            parent_revision_id: None,
+            workplace_id: "office-1".into(),
+            queued_at: "2026-07-13T12:00:00Z".into(),
+            content_hash: content_hash(payload.as_bytes()),
+            payload,
+        })
+        .unwrap();
+
+        assert_eq!(
+            apply_inbox_revision("revision-missing-asset-1").unwrap(),
+            "Asset gelöscht"
+        );
+        let imported =
+            studio_core::ProjectFile::load_by_name(&studio_core::projects_dir(), "Asset gelöscht")
+                .unwrap();
+        assert_eq!(imported.asset_refs, vec![missing_id]);
+        assert_eq!(imported.shapes.len(), 1);
     }
 
     #[test]

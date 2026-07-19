@@ -38,7 +38,7 @@ esac
 
 mkdir -p -- "$HUB_DATA" "$OFFICE_DATA" "$WORKSHOP_DATA"
 
-echo "Baue Hub und ${PRODUCT_NAME} …"
+echo "Baue ${HUB_NAME} und ${STUDIO_NAME} …"
 cargo build --manifest-path "$ROOT/Cargo.toml" -p hub -p studio
 
 terminal_command() {
@@ -67,10 +67,10 @@ terminal_command() {
 terminal_command "Hub" \
     "HUB_DATA_DIR='$HUB_DATA' '$ROOT/target/debug/hub'"
 
-terminal_command "${PRODUCT_NAME} — Office" \
+terminal_command "${STUDIO_NAME} — Office" \
     "STUDIO_DATA_DIR='$OFFICE_DATA' '$ROOT/target/debug/studio'"
 
-terminal_command "${PRODUCT_NAME} — Workshop" \
+terminal_command "${STUDIO_NAME} — Workshop" \
     "STUDIO_DATA_DIR='$WORKSHOP_DATA' '$ROOT/target/debug/studio'"
 
 echo

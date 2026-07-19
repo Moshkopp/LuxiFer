@@ -163,9 +163,13 @@ impl Splash {
 
         // Schriftzug: Farbverlauf weiß → warm → orange über gestaffelte
         // Clip-Bereiche (egui kennt keinen Text-Gradient).
-        let text_pos = Pos2::new(card.left() + 250.0, card.center().y - 44.0);
+        let text_pos = Pos2::new(card.left() + 250.0, card.center().y - 78.0);
         let font = FontId::proportional(44.0);
-        let name = studio_core::branding::STUDIO_NAME;
+        let studio_name = studio_core::branding::STUDIO_NAME;
+        let name = studio_name.rsplit_once(' ').map_or_else(
+            || studio_name.to_owned(),
+            |(brand, role)| format!("{brand}\n{role}"),
+        );
         let steps = [
             (0.0, Color32::WHITE),
             (0.45, Color32::from_rgb(0xff, 0xd9, 0xa8)),
@@ -180,13 +184,13 @@ impl Splash {
             painter.with_clip_rect(region.intersect(card)).text(
                 text_pos,
                 Align2::LEFT_TOP,
-                name,
+                &name,
                 font.clone(),
                 faded(color, alpha),
             );
         }
         painter.text(
-            text_pos + egui::vec2(2.0, 54.0),
+            text_pos + egui::vec2(2.0, 108.0),
             Align2::LEFT_TOP,
             "Laser Studio",
             FontId::proportional(13.0),
@@ -199,7 +203,7 @@ impl Splash {
             format!("{} · {}", env!("STUDIO_VERSION"), commit)
         };
         painter.text(
-            text_pos + egui::vec2(2.0, 80.0),
+            text_pos + egui::vec2(2.0, 134.0),
             Align2::LEFT_TOP,
             version,
             FontId::proportional(12.5),

@@ -22,7 +22,7 @@ mkdir -p "$APP_DIR"
 cat >"$APP_DIR/${APP_ID}.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=$PRODUCT_NAME
+Name=$STUDIO_NAME
 Comment=Nativer Editor für Laserprojekte
 Exec=$BINARY
 Icon=$APP_ID

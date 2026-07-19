@@ -11,8 +11,14 @@ fn main() {
         let (key, value) = line
             .split_once('=')
             .expect("branding.conf erwartet SCHLUESSEL=WERT");
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .unwrap_or(value);
         match key {
-            "PRODUCT_NAME" | "HUB_NAME" | "HUB_PROTOCOL_ID" | "APP_ID" | "DATA_DIR_NAME" => {
+            "PRODUCT_NAME" | "STUDIO_NAME" | "HUB_NAME" | "HUB_PROTOCOL_ID" | "APP_ID"
+            | "DATA_DIR_NAME" => {
                 println!("cargo:rustc-env={key}={value}");
             }
             _ => panic!("Unbekannter Branding-Schlüssel: {key}"),

@@ -8,7 +8,7 @@
 pub const PRODUCT_NAME: &str = env!("PRODUCT_NAME");
 
 /// Öffentlich sichtbarer Name der Desktopanwendung.
-pub const STUDIO_NAME: &str = PRODUCT_NAME;
+pub const STUDIO_NAME: &str = env!("STUDIO_NAME");
 
 /// Öffentlich sichtbarer Name des Koordinationsdienstes.
 pub const HUB_NAME: &str = env!("HUB_NAME");
@@ -24,4 +24,4 @@ pub const APP_ID: &str = env!("APP_ID");
 pub const DATA_DIR_NAME: &str = env!("DATA_DIR_NAME");
 
 /// Anzeigename für Projektdateien.
-pub const PROJECT_FILE_LABEL: &str = concat!(env!("PRODUCT_NAME"), "-Projekt");
+pub const PROJECT_FILE_LABEL: &str = concat!(env!("STUDIO_NAME"), "-Projekt");
