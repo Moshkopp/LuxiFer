@@ -226,6 +226,7 @@ impl App {
                             ))
                         };
                         let mut catalog_changed = false;
+                        let was_connected = self.laser_backend.is_connected();
                         for record in &catalog.records {
                             let result = match record.kind {
                                 studio_application::CatalogKind::LaserProfile => {
@@ -249,6 +250,12 @@ impl App {
                                 &self.laser_backend.registry,
                                 self.material_service.library(),
                             );
+                            // Hat ein empfangener Katalogstand die Verbindung
+                            // beendet, den Hub-Lease mit abgeben (Lease ohne
+                            // Verbindung blockiert das Gerät nur scheinbar).
+                            if was_connected && !self.laser_backend.is_connected() {
+                                self.hub_runtime.release_lease();
+                            }
                         }
                         if report.received > 0 {
                             self.refresh_project_inbox();

@@ -69,6 +69,7 @@ impl App {
             return;
         };
         let original_id = profile.id.clone();
+        let was_connected = self.laser_backend.is_connected();
         if let Err(error) = self.laser_backend.save_profile(profile) {
             self.app_error = Some(error);
             return;
@@ -94,6 +95,14 @@ impl App {
             &self.laser_backend.registry,
             self.material_service.library(),
         );
+        // Hat das Speichern die Verbindung beendet (verbindungsrelevante
+        // Änderung), muss auch der Hub-Lease weg — sonst hält dieser
+        // Arbeitsplatz das Gerät hub-seitig weiter besetzt.
+        if was_connected && !self.laser_backend.is_connected() {
+            self.hub_runtime.release_lease();
+            self.toasts
+                .success("Verbindungsdaten geändert — Laser getrennt.");
+        }
         self.toasts.success("Laser-Profil gespeichert.");
     }
 
@@ -105,9 +114,13 @@ impl App {
         else {
             return;
         };
+        let was_connected = self.laser_backend.is_connected();
         if let Err(error) = self.laser_backend.delete_profile(&id) {
             self.app_error = Some(error);
             return;
+        }
+        if was_connected && !self.laser_backend.is_connected() {
+            self.hub_runtime.release_lease();
         }
         self.hub_runtime.configure(
             &self.ui_settings,

@@ -379,3 +379,71 @@ fn explizites_verbinden_meldet_ziel_und_ursache() {
     assert!(err.details().is_some(), "technische Ursache vorhanden");
     assert!(!svc.is_connected());
 }
+
+/// Simuliert eine bestehende Verbindung zum aktiven Profil ohne Hardware:
+/// Treiber gebaut und als verbunden markiert (Tests sind Kindmodul und dürfen
+/// die privaten Felder setzen).
+fn mark_connected(svc: &mut LaserService) {
+    let profile = svc.registry.active().unwrap().clone();
+    svc.driver = Some(super::driver_for(&profile));
+    svc.driver_id = Some(profile.id.clone());
+    svc.connected_id = Some(profile.id);
+}
+
+#[test]
+fn profil_speichern_ohne_verbindungsaenderung_haelt_die_verbindung() {
+    // Nutzerbefund: Profil speichern (z. B. neuer Nullpunkt oder Name)
+    // beendete grundlos die Laser-Verbindung.
+    let _g = crate::test_env::with_temp_dir("laser_save_keeps_connection");
+    let mut svc = service_with_ruida();
+    mark_connected(&mut svc);
+    let mut profile = svc.registry.active().unwrap().clone();
+    profile.name = "Umbenannt".into();
+    profile.bed_mm = (900.0, 600.0);
+    profile.saved_origins = vec![SavedOrigin {
+        id: "origin-1".into(),
+        name: "Halterung".into(),
+        x_mm: 10.0,
+        y_mm: 10.0,
+    }];
+    svc.save_profile(profile).unwrap();
+    assert!(
+        svc.is_connected(),
+        "Speichern ohne Verbindungsänderung trennt nicht"
+    );
+}
+
+#[test]
+fn profil_speichern_mit_neuem_verbindungsziel_trennt() {
+    let _g = crate::test_env::with_temp_dir("laser_save_new_target_disconnects");
+    let mut svc = service_with_ruida();
+    mark_connected(&mut svc);
+    let mut profile = svc.registry.active().unwrap().clone();
+    profile.connection = Connection::Netz {
+        ip: "10.0.0.7".into(),
+        port: None,
+    };
+    svc.save_profile(profile).unwrap();
+    assert!(
+        !svc.is_connected(),
+        "neues Verbindungsziel erzwingt Neuverbindung"
+    );
+}
+
+#[test]
+fn fremdes_profil_speichern_oder_loeschen_haelt_die_verbindung() {
+    let _g = crate::test_env::with_temp_dir("laser_other_profile_keeps_connection");
+    let mut svc = service_with_ruida();
+    mark_connected(&mut svc);
+    let other = LaserProfile {
+        id: "zweiter".into(),
+        name: "Zweiter Laser".into(),
+        ..Default::default()
+    };
+    svc.save_profile(other).unwrap();
+    assert!(svc.is_connected(), "fremdes Profil speichern trennt nicht");
+    svc.delete_profile("zweiter").unwrap();
+    assert!(svc.is_connected(), "fremdes Profil löschen trennt nicht");
+    svc.delete_profile("test-ruida").unwrap();
+    assert!(!svc.is_connected(), "das verbundene Gerät löschen trennt");
+}

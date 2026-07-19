@@ -168,6 +168,12 @@ impl LaserService {
         profile
             .validate_saved_origins()
             .map_err(|message| AppError::new("origin_invalid", message))?;
+        let previous = self
+            .registry
+            .profiles
+            .iter()
+            .find(|existing| existing.id == profile.id)
+            .cloned();
         if profile.id.is_empty() {
             let millis = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -185,10 +191,32 @@ impl LaserService {
             )
         })?;
         enqueue_catalog_profile(CatalogKind::LaserProfile, &profile.id, Some(&profile))?;
-        self.driver = None;
-        self.driver_id = None;
-        self.connected_id = None;
+        // Eine bestehende Verbindung überlebt das Speichern: Nur wenn sich am
+        // Profil des gerade gebauten Treibers treiberrelevante Felder geändert
+        // haben, wird sauber getrennt und der Treiber verworfen.
+        if self.invalidates_driver(&profile, previous.as_ref()) {
+            self.disconnect();
+            self.driver = None;
+            self.driver_id = None;
+        }
         Ok(())
+    }
+
+    /// Ob ein gespeicherter Profilstand den lazy gebauten Treiber (und damit
+    /// eine offene Verbindung) ungültig macht: nur wenn der Treiber für genau
+    /// dieses Profil gebaut wurde UND sich Felder geändert haben, die im
+    /// Treiber bzw. in der Verbindung stecken (Typ, Verbindungsziel,
+    /// Scan-Offset). Name, Bett oder Nullpunkte leben in der Registry und
+    /// erfordern keine Trennung.
+    fn invalidates_driver(&self, profile: &LaserProfile, previous: Option<&LaserProfile>) -> bool {
+        if self.driver_id.as_deref() != Some(profile.id.as_str()) {
+            return false;
+        }
+        previous.is_none_or(|old| {
+            old.kind != profile.kind
+                || old.connection != profile.connection
+                || old.scan_offset != profile.scan_offset
+        })
     }
 
     pub fn delete_profile(&mut self, id: &str) -> Result<(), AppError> {
@@ -200,9 +228,13 @@ impl LaserService {
             )
         })?;
         enqueue_catalog_profile::<LaserProfile>(CatalogKind::LaserProfile, id, None)?;
-        self.driver = None;
-        self.driver_id = None;
-        self.connected_id = None;
+        // Nur das gelöschte Gerät verliert Treiber und Verbindung; andere
+        // Profile zu löschen lässt eine bestehende Verbindung in Ruhe.
+        if self.driver_id.as_deref() == Some(id) {
+            self.disconnect();
+            self.driver = None;
+            self.driver_id = None;
+        }
         Ok(())
     }
 
@@ -218,14 +250,17 @@ impl LaserService {
         if crate::catalog_sync::has_pending_change(record.kind, &record.id)? {
             return Ok(false);
         }
-        let changed = if record.deleted {
+        let (changed, driver_invalidated) = if record.deleted {
             let existed = self
                 .registry
                 .profiles
                 .iter()
                 .any(|profile| profile.id == record.id);
             self.registry.remove(&record.id);
-            existed
+            (
+                existed,
+                existed && self.driver_id.as_deref() == Some(record.id.as_str()),
+            )
         } else {
             let payload = record
                 .payload
@@ -253,16 +288,18 @@ impl LaserService {
             profile
                 .validate_saved_origins()
                 .map_err(|message| AppError::new("catalog_payload", message))?;
-            let changed = self
+            let previous = self
                 .registry
                 .profiles
                 .iter()
                 .find(|item| item.id == profile.id)
-                != Some(&profile);
+                .cloned();
+            let changed = previous.as_ref() != Some(&profile);
+            let invalidated = changed && self.invalidates_driver(&profile, previous.as_ref());
             if !self.registry.update(profile.clone()) {
                 self.registry.profiles.push(profile);
             }
-            changed
+            (changed, invalidated)
         };
         if changed {
             if self.registry.active_id.as_ref().is_some_and(|id| {
@@ -281,9 +318,14 @@ impl LaserService {
             self.registry
                 .save()
                 .map_err(|error| AppError::new("laser_registry_write", error))?;
-            self.disconnect();
-            self.driver = None;
-            self.driver_id = None;
+            // Wie beim lokalen Speichern: Ein empfangener Katalogstand trennt
+            // die Verbindung nur, wenn er das Profil des gebauten Treibers
+            // treiberrelevant ändert oder löscht.
+            if driver_invalidated {
+                self.disconnect();
+                self.driver = None;
+                self.driver_id = None;
+            }
         }
         Ok(changed)
     }
@@ -325,9 +367,9 @@ impl LaserService {
             }
         }
         self.registry = registry;
+        self.disconnect();
         self.driver = None;
         self.driver_id = None;
-        self.connected_id = None;
         Ok(())
     }
 
