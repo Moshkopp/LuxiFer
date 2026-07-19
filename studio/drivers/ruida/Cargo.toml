@@ -1,0 +1,10 @@
+[package]
+name = "driver-ruida"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Ruida-Treiber für Studio: JobPlan → Ruida-Binärjob. Kennt nur den Core."
+
+[dependencies]
+studio-core = { path = "../../core" }

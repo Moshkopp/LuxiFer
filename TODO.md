@@ -1,4 +1,4 @@
-# LuxiFer — offene Punkte
+# Studio — offene Punkte
 
 > **Arbeitsregel bei Unklarheit:** Ist nicht klar, wie eine Funktion arbeiten
 > soll, wird die **ThorBurn-Referenz** angeschaut (`nur zur Referenu/` +
@@ -15,7 +15,7 @@ Platzhalter da, Logik fehlt.
 
 Alle 21 Werkzeuge stehen als Buttons mit SVG-Icon (5 Gruppen nach ThorBurn).
 Aktiv: `select`, `rect`, `ellipse`. Der Rest ist **(Stub)** und muss verdrahtet
-werden — Fachlogik jeweils in `luxifer-core`, das Frontend zeichnet nur.
+werden — Fachlogik jeweils in `studio-core`, das Frontend zeichnet nur.
 
 ### Zeichnen & Formen
 - [x] `line` — Linie (offene 2-Punkt-`Geo::Polyline`; Command `add_line`,
@@ -59,7 +59,7 @@ werden — Fachlogik jeweils in `luxifer-core`, das Frontend zeichnet nur.
       stabiler `id`, Zeitstempeln, Beschreibung, `asset_refs` (vorbereitet) und
       Versionshistorie; Commands (new/save/save_version/open/open_version/list/
       detail/delete/rename/export); **Projekt-Reiter** als Browser (Liste+Suche
-      links, Details rechts inkl. Versionen mit Thumbnail, Charon-Status).
+      links, Details rechts inkl. Versionen mit Thumbnail, Hub-Status).
       Workflows: Strg+S (still speichern / bei namenlos Reiter öffnen),
       Shift+Strg+S (Version), Strg+N (neu), Start-Toast „zuletzt", Unsaved-Guard.
       Offen als Folgeschritte: zentraler **Asset-Store** + Verlinkung (mit Import),
@@ -84,7 +84,7 @@ werden — Fachlogik jeweils in `luxifer-core`, das Frontend zeichnet nur.
 - [ ] **Reiter erweitern** auf: `Projekt | Design | Laser | Monitor | Preview`
       (Core `Tab`-Enum + Frontend). Standard-Layout je neuer Reiter ergänzen.
 - [ ] **Header über volle Breite:** Reiter **zentriert in der Mitte**; **ganz
-      links „LuxiFer" + Logo**, **ganz rechts Zahnrad (Settings)**. Undo/Redo
+      links „Studio" + Logo**, **ganz rechts Zahnrad (Settings)**. Undo/Redo
       neu einordnen (bleiben im Header, aber Layout überdenken).
 - [ ] Laser-Panel-Glyphen auf SVG-Icons umstellen (gcode/pause/stop/home/frame/
       contour/send liegen in `Icon.svelte` bereit)
@@ -113,7 +113,7 @@ einem echten Bereich ausbauen:
       (aus `Cargo.toml`/`package.json` bzw. Git zur Build-Zeit ziehen, nicht
       manuell pflegen), Lizenz/Autor.
 - [ ] **Backup / Restore (Stub)** — Sicherung/Wiederherstellung von Projekten +
-      GUI-Settings. Vorerst nur Platzhalter/Stub; späterer Bezug zu Charon
+      GUI-Settings. Vorerst nur Platzhalter/Stub; späterer Bezug zu Hub
       (Sync/Backup pro Arbeitsplatz).
 
 ---
@@ -132,8 +132,8 @@ einem echten Bereich ausbauen:
 
 ---
 
-## Charon (Server)
+## Hub (Server)
 
 - [ ] Bleibt vorerst leer. Später: GUI-Settings pro Arbeitsplatzname
       synchronisieren (JSON-Struktur aus ADR 0002 ist dafür schon vorbereitet).
-      Charon steuert **nie** eine Maschine (CLAUDE.md-Invariante 5).
+      Hub steuert **nie** eine Maschine (CLAUDE.md-Invariante 5).

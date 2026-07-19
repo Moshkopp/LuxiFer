@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Baut die aktuelle native LuxiFer-Version und paketiert sie als AppImage.
+# Baut die aktuelle native Studio-Version und paketiert sie als AppImage.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PACKAGE="luxifer-native"
-BINARY="luxifer-native"
-APP_NAME="LuxiFer"
+source "$ROOT_DIR/branding.conf"
+PACKAGE="studio"
+BINARY="studio"
+APP_NAME="$PRODUCT_NAME"
 VERSION="$(awk -F '"' '/^version = "/ { print $2; exit }' \
   "$ROOT_DIR/Cargo.toml")"
 
@@ -74,21 +75,21 @@ mkdir -p "$APPDIR/usr/bin"
 install -Dm755 "$BUILD_DIR/$BINARY" "$APPDIR/usr/bin/$BINARY"
 # Größenspezifische Icon-Fassungen (16–32 minimal, ab 48 mit Flügeln).
 for size in 16 24 32 48 64 128 256 512; do
-  install -Dm644 "$ROOT_DIR/luxifer/native/assets/icon/luxifer-$size.png" \
-    "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps/luxifer.png"
+  install -Dm644 "$ROOT_DIR/studio/native/assets/icon/studio-$size.png" \
+    "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps/${APP_ID}.png"
 done
 
 mkdir -p "$APPDIR/usr/share/applications"
-cat >"$APPDIR/usr/share/applications/luxifer.desktop" <<EOF
+cat >"$APPDIR/usr/share/applications/${APP_ID}.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=LuxiFer
+Name=$PRODUCT_NAME
 Comment=Nativer Editor für Laserprojekte
-Exec=luxifer-native
-Icon=luxifer
+Exec=studio
+Icon=$APP_ID
 Terminal=false
 Categories=Graphics;Engineering;
-StartupWMClass=luxifer
+StartupWMClass=$APP_ID
 EOF
 
 rm -f "$OUTPUT"
@@ -96,8 +97,8 @@ echo "» Erzeuge $(basename "$OUTPUT") …"
 LDAI_OUTPUT="$OUTPUT" APPIMAGE_EXTRACT_AND_RUN=1 "$LINUXDEPLOY_BIN" \
   --appdir "$APPDIR" \
   --executable "$APPDIR/usr/bin/$BINARY" \
-  --desktop-file "$APPDIR/usr/share/applications/luxifer.desktop" \
-  --icon-file "$APPDIR/usr/share/icons/hicolor/512x512/apps/luxifer.png" \
+  --desktop-file "$APPDIR/usr/share/applications/${APP_ID}.desktop" \
+  --icon-file "$APPDIR/usr/share/icons/hicolor/512x512/apps/${APP_ID}.png" \
   --output appimage
 
 echo "» Fertig: $OUTPUT"

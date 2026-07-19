@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Aktualisiert einen bereits installierten Charon-Dienst aus diesem Git-Clone.
+# Aktualisiert einen bereits installierten Hub-Dienst aus diesem Git-Clone.
 set -euo pipefail
 
-SERVICE_NAME="charon.service"
-INSTALL_PATH="/usr/local/bin/charon"
-BACKUP_PATH="/usr/local/bin/charon.previous"
+SERVICE_NAME="hub.service"
+INSTALL_PATH="/usr/local/bin/hub"
+BACKUP_PATH="/usr/local/bin/hub.previous"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
+source "${SCRIPT_DIR}/branding.conf"
 
 die() {
     echo "Fehler: $*" >&2
@@ -19,7 +20,7 @@ command -v cargo >/dev/null || die "cargo wurde nicht gefunden"
 command -v sudo >/dev/null || die "sudo wurde nicht gefunden"
 command -v systemctl >/dev/null || die "systemd/systemctl wurde nicht gefunden"
 
-[[ -d .git ]] || die "update.sh muss im LuxiFer-Git-Clone liegen"
+[[ -d .git ]] || die "update.sh muss im ${PRODUCT_NAME}-Git-Clone liegen"
 [[ -z "$(git status --porcelain)" ]] \
     || die "der Git-Clone enthält lokale Änderungen; Update abgebrochen"
 git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1 \
@@ -28,12 +29,12 @@ git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1 \
 echo "» Hole aktuellen Quellstand …"
 git pull --ff-only
 
-echo "» Prüfe Charon …"
-cargo test --locked --package charon
+echo "» Prüfe Hub …"
+cargo test --locked --package hub
 
-echo "» Baue Charon im Release-Profil …"
-cargo build --locked --release --package charon
-NEW_BINARY="${SCRIPT_DIR}/target/release/charon"
+echo "» Baue Hub im Release-Profil …"
+cargo build --locked --release --package hub
+NEW_BINARY="${SCRIPT_DIR}/target/release/hub"
 [[ -x "${NEW_BINARY}" ]] || die "Release-Binary wurde nicht erzeugt"
 
 echo "» Installiere neue Version …"
@@ -48,12 +49,12 @@ sudo mv -f "${INSTALL_TEMP}" "${INSTALL_PATH}"
 
 if sudo systemctl restart "${SERVICE_NAME}" \
     && sudo systemctl is-active --quiet "${SERVICE_NAME}"; then
-    echo "Charon wurde erfolgreich aktualisiert."
+    echo "Hub wurde erfolgreich aktualisiert."
     sudo systemctl --no-pager --full status "${SERVICE_NAME}" || true
     exit 0
 fi
 
-echo "Neuer Charon-Dienst startet nicht; stelle vorheriges Binary wieder her." >&2
+echo "Neuer Hub-Dienst startet nicht; stelle vorheriges Binary wieder her." >&2
 sudo install -m 0755 -o root -g root "${BACKUP_PATH}" "${INSTALL_PATH}"
 sudo systemctl restart "${SERVICE_NAME}" || true
 sudo systemctl --no-pager --full status "${SERVICE_NAME}" || true

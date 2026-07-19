@@ -1,0 +1,534 @@
+use std::path::Path;
+use std::{collections::hash_map::DefaultHasher, hash::Hash, hash::Hasher};
+
+use studio_application::{AppError, AssetService, CropGeometry, PreparedAsset};
+use studio_core::Geo;
+
+use super::App;
+use crate::ui::ImageDialogState;
+
+pub(super) struct ThumbnailRuntime {
+    request_tx: std::sync::mpsc::Sender<String>,
+    result_rx: std::sync::mpsc::Receiver<(String, Result<Vec<u8>, String>)>,
+}
+
+enum AssetWorkerResult {
+    Prepared(Result<PreparedAsset, AppError>),
+    Deleted(Result<(String, bool), AppError>),
+}
+
+pub(super) struct AssetImportRuntime {
+    request_tx: std::sync::mpsc::Sender<AssetImportRequest>,
+    result_rx: std::sync::mpsc::Receiver<AssetWorkerResult>,
+}
+
+enum AssetImportRequest {
+    Catalog(String),
+    Path(std::path::PathBuf),
+    Delete {
+        id: String,
+        referenced_in_session: bool,
+    },
+}
+
+impl AssetImportRuntime {
+    pub fn new() -> Result<Self, AppError> {
+        let (request_tx, request_rx) = std::sync::mpsc::channel::<AssetImportRequest>();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("asset-import".into())
+            .spawn(move || {
+                while let Ok(request) = request_rx.recv() {
+                    let request = match request {
+                        AssetImportRequest::Delete {
+                            id,
+                            referenced_in_session,
+                        } => {
+                            let result = AssetService::delete_or_hide(&id, referenced_in_session)
+                                .map(|hidden| (id, hidden));
+                            if result_tx.send(AssetWorkerResult::Deleted(result)).is_err() {
+                                return;
+                            }
+                            continue;
+                        }
+                        request => request,
+                    };
+                    let result = match request {
+                        AssetImportRequest::Catalog(id) => AssetService::prepare_catalog(&id),
+                        AssetImportRequest::Path(path) => AssetService::import_path(&path),
+                        AssetImportRequest::Delete { .. } => unreachable!(),
+                    };
+                    if result_tx.send(AssetWorkerResult::Prepared(result)).is_err() {
+                        return;
+                    }
+                }
+            })
+            .map_err(|error| {
+                AppError::wrap(
+                    "asset_worker_start",
+                    "Asset-Import konnte nicht gestartet werden.",
+                    error.to_string(),
+                )
+            })?;
+        Ok(Self {
+            request_tx,
+            result_rx,
+        })
+    }
+}
+
+impl ThumbnailRuntime {
+    pub fn new() -> Result<Self, AppError> {
+        let (request_tx, request_rx) = std::sync::mpsc::channel::<String>();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("asset-thumbnails".into())
+            .spawn(move || {
+                while let Ok(id) = request_rx.recv() {
+                    let result = AssetService::thumbnail(&id).map_err(|error| error.to_string());
+                    if result_tx.send((id, result)).is_err() {
+                        return;
+                    }
+                }
+            })
+            .map_err(|error| {
+                AppError::wrap(
+                    "thumbnail_worker_start",
+                    "Asset-Vorschauen konnten nicht gestartet werden.",
+                    error.to_string(),
+                )
+            })?;
+        Ok(Self {
+            request_tx,
+            result_rx,
+        })
+    }
+}
+
+pub(super) fn enrich_asset_tags_from_projects() {
+    AssetService::enrich_tags_from_projects();
+}
+
+impl App {
+    pub(crate) fn refresh_asset_catalog(&mut self) {
+        match AssetService::list_visible() {
+            Ok(assets) => {
+                self.asset_thumbnails
+                    .retain(|id, _| assets.iter().any(|asset| asset.id == *id));
+                self.thumbnail_failed
+                    .retain(|id| assets.iter().any(|asset| asset.id == *id));
+                self.thumbnail_pending
+                    .retain(|id| assets.iter().any(|asset| asset.id == *id));
+                self.asset_catalog = assets;
+            }
+            Err(error) => log::error!("Asset-Katalog aktualisieren: {error}"),
+        }
+    }
+
+    pub fn request_asset_thumbnail(&mut self, id: &str) {
+        if self.asset_thumbnails.contains_key(id)
+            || self.thumbnail_pending.contains(id)
+            || self.thumbnail_failed.contains(id)
+        {
+            return;
+        }
+        if self
+            .thumbnail_runtime
+            .request_tx
+            .send(id.to_owned())
+            .is_ok()
+        {
+            self.thumbnail_pending.insert(id.to_owned());
+        }
+    }
+
+    pub fn poll_asset_thumbnails(&mut self) -> bool {
+        let results: Vec<_> = self.thumbnail_runtime.result_rx.try_iter().collect();
+        if results.is_empty() {
+            return false;
+        }
+        for (id, result) in results {
+            self.thumbnail_pending.remove(&id);
+            if !self.asset_catalog.iter().any(|asset| asset.id == id) {
+                continue;
+            }
+            match result {
+                Ok(png) => match image::load_from_memory(&png) {
+                    Ok(image) => {
+                        let rgba = image.to_rgba8();
+                        let size = [rgba.width() as usize, rgba.height() as usize];
+                        let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                        let texture = self.egui_ctx.load_texture(
+                            format!("asset-thumbnail-{id}"),
+                            color,
+                            egui::TextureOptions::LINEAR,
+                        );
+                        self.asset_thumbnails.insert(id, texture);
+                    }
+                    Err(error) => {
+                        log::error!("Thumbnail dekodieren: {error}");
+                        self.thumbnail_failed.insert(id);
+                    }
+                },
+                Err(error) => {
+                    log::error!("Thumbnail erzeugen: {error}");
+                    self.thumbnail_failed.insert(id);
+                }
+            }
+        }
+        true
+    }
+
+    /// Fügt ein bereits im globalen Katalog vorhandenes Asset erneut ein.
+    pub fn import_catalog_asset(&mut self, id: &str) {
+        if self.asset_import_pending {
+            return;
+        }
+        if self
+            .asset_import_runtime
+            .request_tx
+            .send(AssetImportRequest::Catalog(id.to_owned()))
+            .is_ok()
+        {
+            self.asset_import_pending = true;
+            self.toasts
+                .success("Asset wird im Hintergrund vorbereitet …");
+        }
+    }
+
+    pub fn poll_asset_import(&mut self) -> bool {
+        let Ok(result) = self.asset_import_runtime.result_rx.try_recv() else {
+            return false;
+        };
+        self.asset_import_pending = false;
+        if let AssetWorkerResult::Deleted(result) = result {
+            match result {
+                Ok((id, hidden)) => {
+                    self.asset_catalog.retain(|asset| asset.id != id);
+                    self.asset_thumbnails.remove(&id);
+                    self.thumbnail_pending.remove(&id);
+                    self.thumbnail_failed.remove(&id);
+                    self.toasts.success(if hidden {
+                        "Asset wird von einem Projekt verwendet und wurde ausgeblendet."
+                    } else {
+                        "Asset wurde gelöscht."
+                    });
+                }
+                Err(error) => self.toasts.error(format!("Asset löschen: {error}")),
+            }
+            return true;
+        }
+        let AssetWorkerResult::Prepared(result) = result else {
+            unreachable!()
+        };
+        let prepared = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.app_error = Some(error);
+                return true;
+            }
+        };
+        let PreparedAsset {
+            meta,
+            contours,
+            image: prepared_image,
+        } = prepared;
+        match meta.kind {
+            studio_core::AssetKind::Image => {
+                if let Some(image) = prepared_image {
+                    self.renderer
+                        .preload_image(&meta.id, &image.rgba, image.width, image.height);
+                }
+                let index = self.session.add_image(
+                    meta.id.clone(),
+                    20.0,
+                    20.0,
+                    meta.width as f64 / 10.0,
+                    meta.height as f64 / 10.0,
+                );
+                self.session.selected = vec![index];
+                self.image_dirty = true;
+                self.fit_all();
+            }
+            studio_core::AssetKind::SvgSource | studio_core::AssetKind::DxfSource => {
+                if let Some(contours) = contours {
+                    self.session.add_compound_polylines(contours);
+                    self.refresh_accent();
+                    self.fit_all();
+                }
+            }
+            studio_core::AssetKind::Font => return true,
+        }
+        self.session_asset_context.insert(meta.id.clone());
+        self.tag_asset_for_current_project(&meta.id);
+        self.refresh_asset_catalog();
+        self.view = crate::tools::View::Design;
+        self.canvas.laser_editable_layers = None;
+        self.renderer.invalidate_scene();
+        true
+    }
+
+    pub fn delete_catalog_asset(&mut self, id: &str) {
+        if self.asset_import_pending {
+            return;
+        }
+        let referenced_in_session = self
+            .session
+            .shapes
+            .iter()
+            .any(|shape| matches!(&shape.geo, Geo::Image { asset, .. } if asset == id));
+        if self
+            .asset_import_runtime
+            .request_tx
+            .send(AssetImportRequest::Delete {
+                id: id.to_owned(),
+                referenced_in_session,
+            })
+            .is_ok()
+        {
+            self.asset_import_pending = true;
+            self.toasts.success("Asset-Verwendung wird geprüft …");
+        }
+    }
+
+    /// Öffnet den Bildparameter-Dialog mit den aktuellen Werten des Bild-Shapes.
+    pub fn open_image_dialog(&mut self, index: usize) {
+        if let Some(Geo::Image { params, .. }) =
+            self.session.state().shapes.get(index).map(|s| &s.geo)
+        {
+            self.image_dialog = Some(ImageDialogState::new(index, *params));
+        }
+    }
+
+    /// Aktualisiert die Dialogvorschau nur bei geändertem Entwurf. Die
+    /// Bildverarbeitung selbst bleibt im Core/Application-Pfad.
+    pub fn update_image_dialog_preview(&mut self) {
+        let Some(state) = self.image_dialog.as_ref() else {
+            return;
+        };
+        let Some(asset) =
+            self.session
+                .state()
+                .shapes
+                .get(state.index)
+                .and_then(|shape| match &shape.geo {
+                    Geo::Image { asset, .. } => Some(asset.clone()),
+                    _ => None,
+                })
+        else {
+            return;
+        };
+        let params = state.params;
+        let mut hasher = DefaultHasher::new();
+        asset.hash(&mut hasher);
+        (params.mode as u8).hash(&mut hasher);
+        params.threshold.hash(&mut hasher);
+        params.brightness.hash(&mut hasher);
+        params.contrast.hash(&mut hasher);
+        params.gamma.to_bits().hash(&mut hasher);
+        params.invert_editor.hash(&mut hasher);
+        (state.page as u8).hash(&mut hasher);
+        if state.page == crate::ui::ImageDialogPage::Trace {
+            state.trace_threshold.hash(&mut hasher);
+            state.trace_invert.hash(&mut hasher);
+        }
+        let key = hasher.finish();
+        if state.preview_key == Some(key) {
+            return;
+        }
+
+        let result = match state.page {
+            crate::ui::ImageDialogPage::Trace => AssetService::trace_preview(
+                &asset,
+                &params,
+                state.trace_threshold,
+                state.trace_invert,
+            ),
+            // Die Crop-Seite braucht ein stabiles Vollbild als Zeichenfläche;
+            // die Maske zeichnet das UI darüber.
+            crate::ui::ImageDialogPage::Crop => AssetService::image_preview(&asset, &params),
+            crate::ui::ImageDialogPage::Settings => AssetService::image_preview(&asset, &params),
+        };
+        let Some(state) = self.image_dialog.as_mut() else {
+            return;
+        };
+        state.preview_key = Some(key);
+        match result {
+            Ok(image) => {
+                let color = egui::ColorImage::from_rgba_unmultiplied(
+                    [image.width as usize, image.height as usize],
+                    &image.rgba,
+                );
+                state.preview = Some(self.egui_ctx.load_texture(
+                    format!("image-dialog-{asset}"),
+                    color,
+                    egui::TextureOptions::LINEAR,
+                ));
+                state.preview_error = None;
+            }
+            Err(error) => {
+                state.preview = None;
+                state.preview_error = Some(error.to_string());
+            }
+        }
+    }
+
+    /// Übernimmt den Bildparameter-Entwurf über die Session (validiert, ein
+    /// Undo-Schritt). Erfolg → Dialog schließen; Fehler → offen + Fehlerkanal.
+    pub fn commit_image_dialog(&mut self) -> bool {
+        let Some(st) = self.image_dialog.as_ref() else {
+            return false;
+        };
+        let (index, params) = (st.index, st.params);
+        match self.session.set_image_params(index, params) {
+            Ok(()) => {
+                self.image_dirty = true;
+                true
+            }
+            Err(error) => {
+                self.app_error = Some(error);
+                false
+            }
+        }
+    }
+
+    /// Vektorisiert das Bild des offenen Dialogs (Trace) über die Session.
+    /// Der Dialog bleibt offen; jeder Lauf ist ein eigener Undo-Schritt.
+    pub fn trace_image_dialog(&mut self) {
+        let Some(st) = self.image_dialog.as_ref() else {
+            return;
+        };
+        let (index, params, threshold, invert) =
+            (st.index, st.params, st.trace_threshold, st.trace_invert);
+        match self
+            .session
+            .trace_image_with_params(index, params, threshold, invert)
+        {
+            Ok(indices) => {
+                self.refresh_accent();
+                self.toasts
+                    .success(format!("{} Konturen erzeugt.", indices.len()));
+            }
+            Err(error) => self.app_error = Some(error),
+        }
+    }
+
+    /// Übernimmt den Crop als abgeleitetes Asset und einen Core-Undo-Schritt.
+    pub fn crop_image_dialog(&mut self) -> bool {
+        let Some(st) = self.image_dialog.as_ref() else {
+            return false;
+        };
+        let index = st.index;
+        let geometry = match st.crop_kind {
+            crate::ui::CropKind::Rect => CropGeometry::Rect(st.crop_rect),
+            crate::ui::CropKind::Ellipse if st.crop_ellipse_points == 3 => {
+                CropGeometry::Ellipse(st.crop_ellipse)
+            }
+            crate::ui::CropKind::Ellipse => {
+                self.toasts.error("Bitte alle drei Ellipsenpunkte setzen.");
+                return false;
+            }
+        };
+        let Some(asset) =
+            self.session
+                .state()
+                .shapes
+                .get(index)
+                .and_then(|shape| match &shape.geo {
+                    Geo::Image { asset, .. } => Some(asset.clone()),
+                    _ => None,
+                })
+        else {
+            return false;
+        };
+        let (meta, crop) = match AssetService::crop_image_geometry(&asset, geometry) {
+            Ok(result) => result,
+            Err(error) => {
+                self.app_error = Some(error);
+                return false;
+            }
+        };
+        match self.session.crop_image(index, meta.id, crop) {
+            Ok(()) => {
+                self.image_dirty = true;
+                self.toasts.success("Bild zugeschnitten.");
+                true
+            }
+            Err(error) => {
+                self.app_error = Some(error);
+                false
+            }
+        }
+    }
+
+    /// Öffnet einen nativen Datei-Dialog für Vektor (SVG/DXF) und Bild;
+    /// `import_path` verzweigt nach Endung.
+    pub fn import_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter(
+                "Importierbar (Vektor + Bild)",
+                &["svg", "dxf", "png", "jpg", "jpeg", "bmp", "gif", "webp"],
+            )
+            .add_filter("Vektor", &["svg", "dxf"])
+            .add_filter("Bild", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
+            .pick_file()
+        {
+            self.import_path(&path);
+        }
+    }
+
+    /// Importiert eine Datei direkt nach Endung — Vektor (SVG/DXF) oder Bild.
+    /// Nutzen der Import-Dialog und das CLI-Argument.
+    pub fn import_path(&mut self, path: &Path) {
+        if self.asset_import_pending {
+            self.toasts
+                .error("Ein anderer Asset-Import wird bereits verarbeitet.");
+            return;
+        }
+        if self
+            .asset_import_runtime
+            .request_tx
+            .send(AssetImportRequest::Path(path.to_owned()))
+            .is_ok()
+        {
+            self.asset_import_pending = true;
+            self.toasts.success("Bild wird im Hintergrund importiert …");
+        }
+    }
+
+    pub(super) fn tag_asset_for_current_project(&self, id: &str) {
+        let Some(name) = self.project.open_name() else {
+            return;
+        };
+        let description = self
+            .project
+            .detail(name)
+            .map(|detail| detail.description)
+            .unwrap_or_default();
+        if let Err(error) = AssetService::add_tags(id, [name, description.as_str()]) {
+            log::error!("Asset-Tags ergänzen: {error:?}");
+        }
+    }
+
+    pub(super) fn tag_current_project_assets(&mut self) {
+        let mut ids: Vec<String> = self
+            .session
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.geo {
+                Geo::Image { asset, .. } => Some(asset.clone()),
+                _ => None,
+            })
+            .collect();
+        ids.extend(self.session_asset_context.iter().cloned());
+        ids.sort();
+        ids.dedup();
+        for id in ids {
+            self.tag_asset_for_current_project(&id);
+        }
+        if self.project.has_open() {
+            self.session_asset_context.clear();
+        }
+        self.refresh_asset_catalog();
+    }
+}

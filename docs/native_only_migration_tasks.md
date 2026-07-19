@@ -6,7 +6,7 @@ Architekturentscheidung: [ADR 0011](adr/0011-native-only-anwendungsschicht-und-t
 ## Zweck und Arbeitsregel
 
 Diese Datei ist die fortsetzbare Quelle der Wahrheit für den Wechsel von
-Svelte/Tauri zu einer ausschließlich nativen LuxiFer-Anwendung. Jeder Agent
+Svelte/Tauri zu einer ausschließlich nativen Studio-Anwendung. Jeder Agent
 liest vor Änderungen zuerst ADR 0010, ADR 0011, diese Datei und danach nur die
 für den nächsten offenen Schnitt genannten Quelldateien.
 
@@ -28,9 +28,9 @@ entfernte oder ausdrücklich verbliebene Altimplementierung.
 ## Aktueller Ausgangszustand
 
 - [x] Nativer `winit + wgpu + egui`-Spike rendert performant.
-- [x] `luxifer-core` wird nativ direkt gelinkt.
+- [x] `studio-core` wird nativ direkt gelinkt.
 - [ ] Native ist funktional gleichwertig zur bisherigen Anwendung.
-- [x] Tauri-unabhängige Anwendungsschicht existiert (`luxifer-application`
+- [x] Tauri-unabhängige Anwendungsschicht existiert (`studio-application`
       mit `EditorSession`, `ProjectService`, `LaserService`, `AppError`).
 - [ ] Tauri/Svelte ist entfernt.
 
@@ -103,11 +103,11 @@ Abnahme Phase 0:
       „Aztec laden“.)
 - [x] Jeder Tauri-Command ist einer Zielverantwortung zugeordnet.
 
-## Phase 1 — `luxifer-application` als Grenze einführen
+## Phase 1 — `studio-application` als Grenze einführen
 
 Ziel: Testbare Sitzung und konsistenter Aufrufpfad vor weiterer Migration.
 
-- [x] Workspace-Crate `luxifer/application` anlegen und in `Cargo.toml`
+- [x] Workspace-Crate `studio/application` anlegen und in `Cargo.toml`
       aufnehmen.
 - [x] Abhängigkeiten nur in zulässiger Richtung aufbauen:
       `native -> application -> core/drivers`; niemals zurück.
@@ -264,7 +264,7 @@ verbliebene Aufräumpunkte erledigt.
    Bedingung (`fp != last_fp` nach der Zuweisung) und lief faktisch nur über
    `image_dirty`.
 2. Geometrie-Duplikate in den Core: `resize_to_cursor`, `keep_aspect` und
-   `Handle::is_corner` leben jetzt in `luxifer-core` (`interact.rs`) mit ihren
+   `Handle::is_corner` leben jetzt in `studio-core` (`interact.rs`) mit ihren
    Tests; Native ruft nur noch auf. Der native Drag-Snapshot (Aufschaukel-Fix)
    bleibt Präsentationslogik.
 
@@ -308,7 +308,7 @@ Abnahme Phase 3:
 - [x] `native/src/project.rs` gelöscht — keine konkurrierende Fachlogik mehr.
 
 Projektschnitt 2026-07-12 (Phase 3 im Kern abgeschlossen): `ProjectService`
-in luxifer-application ersetzt das native `ProjectBackend`; Fehler über
+in studio-application ersetzt das native `ProjectBackend`; Fehler über
 `AppError` (neuer `AppError::wrap`); Dirty-Guard bei Neu/Öffnen/Programmende
 (`request_close`), manuelles Speichern mit `mark_saved`. UI-Aktionen
 Öffnen/Export/Löschen im Browser. Validierung: 35 Application-Tests (7 Projekt-,
@@ -569,8 +569,8 @@ bewusste Ausnahme ist hier dokumentiert.
 - [ ] Letzte Funktionsmatrix prüfen: keine ungeklärten Commands.
 - [ ] Noch relevante Tests aus `frontend/src-tauri` nach Core/Application
       verschieben.
-- [ ] `luxifer/frontend/src-tauri/` löschen.
-- [ ] `luxifer/frontend/src/` und WebGL-/Canvas-Helfer löschen.
+- [ ] `studio/frontend/src-tauri/` löschen.
+- [ ] `studio/frontend/src/` und WebGL-/Canvas-Helfer löschen.
 - [ ] Node-/Svelte-/Vite-/Tauri-Konfiguration und Lockfiles löschen, sofern sie
       keinem anderen Workspace-Teil dienen.
 - [ ] Tauri-spezifische Buildskripte, `dev.sh`-Workarounds und CI-Schritte
@@ -592,7 +592,7 @@ cargo fmt --check
 cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo build -p luxifer-native --release
+cargo build -p studio --release
 ```
 
 - [ ] Native Release manuell starten.
@@ -607,7 +607,7 @@ cargo build -p luxifer-native --release
 Diese Fragen müssen vor dem jeweils betroffenen Schnitt entschieden und hier
 eingetragen werden; sie blockieren nicht Phase 0/1:
 
-- [ ] Soll `luxifer-application` ein Crate oder zunächst ein Modul in Native
+- [ ] Soll `studio-application` ein Crate oder zunächst ein Modul in Native
       sein? Vorgabe aus ADR 0011: eigenes Crate bevorzugt, weil es GPU-/UI-frei
       testbar und die Abhängigkeitsrichtung sichtbar bleibt.
 - [ ] Synchroner oder asynchroner Geräte-/Dateiablauf? UI darf in keinem Fall

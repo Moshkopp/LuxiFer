@@ -1,10 +1,10 @@
 # Funktions-Worksheet — wie welche Funktion arbeitet
 
-Bau-Vorlage für den LuxiFer-Neustart (Rust-Core + Tauri + Svelte). Jede Zeile:
+Bau-Vorlage für den Studio-Neustart (Rust-Core + Tauri + Svelte). Jede Zeile:
 **Was** die Funktion tut, **Wie** sie arbeitet, **Quelle** in ThorBurn. Reihenfolge
 = sinnvolle Implementier-Reihenfolge. Neu implementieren, nicht kopieren.
 
-Legende Ort im Neuprojekt: **[Core]** = Rust (`luxifer-core`), **[UI]** = Svelte,
+Legende Ort im Neuprojekt: **[Core]** = Rust (`studio-core`), **[UI]** = Svelte,
 **[Cmd]** = Tauri-Command (Brücke Svelte↔Core).
 
 ---
@@ -173,5 +173,5 @@ Zustand kommt vom Core.
 6. **M6 Laser:** Job-Compiler Cut zuerst, dann Fill/Raster; Protokoll+UDP (H, I).
 7. **M7 Extras:** Import, Boolean, Text, Nesting (J).
 
-Charon (Rust-Server) teilt sich den Core und übernimmt Sync/Koordination —
+Hub (Rust-Server) teilt sich den Core und übernimmt Sync/Koordination —
 niemals Voraussetzung für lokale Arbeit.

@@ -4,15 +4,15 @@
 Akzeptiert — 2026-07-12. Umsetzung im Branch `umbau/wgpu-nativ`.
 
 Löst die Render-Plattform aus ADR 0008/0009 ab: deren Diagnose („GPU statt CPU")
-war richtig, blieb aber **im WebView gefangen**. Die Fachlogik (`luxifer-core`)
+war richtig, blieb aber **im WebView gefangen**. Die Fachlogik (`studio-core`)
 bleibt unberührt; abgelöst wird nur die Zeichen-/UI-Schicht.
 
 ## Kontext
 
-Trotz ADR 0008 (GPU-Canvas) und 0009 (WebGL-only) fühlt sich LuxiFer im
+Trotz ADR 0008 (GPU-Canvas) und 0009 (WebGL-only) fühlt sich Studio im
 **Release** weiter spürbar träger an als ThorBurn (Qt/QML). Der Nutzer hat es
 Seite an Seite verglichen: ThorBurn lädt dieselbe große Aztec-Datei „ohne ein
-Augenzwinkern" und füllt sie sofort; LuxiFer braucht Sekunden. Betroffen sind
+Augenzwinkern" und füllt sie sofort; Studio braucht Sekunden. Betroffen sind
 **alle** Achsen: App-Start, Eingabe-Latenz, Canvas-Pan/Zoom, schwere Ops.
 
 Das ist kein Nachtuning-Thema, sondern eine Architektur-Weiche — also **gemessen,
@@ -21,7 +21,7 @@ nicht vermutet** (die Regel aus ADR 0008).
 ### Messung: Wegwerf-Spike, echter Core, nativ wgpu
 
 Ein isolierter `winit + wgpu`-Spike lädt die reale Aztec-Datei über **denselben**
-`luxifer-core`-Pfad wie die App (`import_vector` → `JobPlan::from_shapes` →
+`studio-core`-Pfad wie die App (`import_vector` → `JobPlan::from_shapes` →
 `JobPreview::from_plan`), lädt Cut+Fill als GPU-Buffer und pant/zoomt nativ.
 Zielhardware (AMD RX 9060 XT), Release:
 
@@ -54,13 +54,13 @@ Der Design- und Vorschau-Canvas samt UI wird **nativ** neu gebaut:
 - **Fenster/Events:** `winit`
 - **Canvas:** `wgpu` (nativer GPU-Present, kein WebView)
 - **Panels/UI:** `egui` (oder gleichwertig) — reines Rust
-- **`luxifer-core` bleibt die einzige Quelle der Wahrheit** und wird direkt
+- **`studio-core` bleibt die einzige Quelle der Wahrheit** und wird direkt
   gelinkt (kein IPC, keine Serialisierung mehr für Geometrie).
 
 Was **raus** fliegt: der gesamte 2D/WebKit/Svelte-Zeichenpfad
-(`luxifer/frontend/src/`, das Tauri-`src-tauri`-WebView-Setup, Canvas-WebGL).
+(`studio/frontend/src/`, das Tauri-`src-tauri`-WebView-Setup, Canvas-WebGL).
 
-Was **bleibt** unangetastet: `luxifer-core` (Datenmodell, Geometrie, Fill,
+Was **bleibt** unangetastet: `studio-core` (Datenmodell, Geometrie, Fill,
 Import, Job, Undo, Laser, 199 Tests) und die Treiber. Das ist die
 Architektur-Invariante „Frontend zeichnet nur" aus CLAUDE.md — genau sie macht
 diesen Wechsel bezahlbar: migriert wird nur die dünne Zeichenschicht.
@@ -135,8 +135,8 @@ Vor weiteren GPU-Umbauten bekommt der native Renderer eine opt-in Baseline.
 Mit
 
 ```bash
-LUXIFER_RENDER_PROFILE=1 RUST_LOG=luxifer_render_perf=info \
-  cargo run --release -p luxifer-native
+STUDIO_RENDER_PROFILE=1 RUST_LOG=studio_render_perf=info \
+  cargo run --release -p studio
 ```
 
 fasst er einmal pro Sekunde folgende CPU-/Treiberwerte zusammen: kompletter
@@ -332,13 +332,13 @@ Der native Startpfad kann die synthetische Szene opt-in direkt in den
 produktiven Surface-, Stencil-, MSAA- und Present-Pfad einsetzen:
 
 ```bash
-LUXIFER_FILL_STRESS=1808 \
-LUXIFER_RENDER_PROFILE=1 \
-RUST_LOG=luxifer_render_perf=info \
-cargo run --release -p luxifer-native
+STUDIO_FILL_STRESS=1808 \
+STUDIO_RENDER_PROFILE=1 \
+RUST_LOG=studio_render_perf=info \
+cargo run --release -p studio
 ```
 
-Ohne `LUXIFER_FILL_STRESS` bleibt der normale Projektstart unverändert. Der
+Ohne `STUDIO_FILL_STRESS` bleibt der normale Projektstart unverändert. Der
 Release-Gegencheck auf dem vorhandenen RADV/Vulkan-System ergab:
 
 - 1.808 Fill-Compounds und 5.429 geschätzte Canvas-Draws insgesamt,
@@ -355,7 +355,7 @@ opt-in Hook bleibt als reproduzierbarer Regressionstest erhalten.
 
 ### Hardware-Timestamps und abschließende GPU-Messung
 
-Bei aktiviertem `LUXIFER_RENDER_PROFILE` fordert der Renderer optional das
+Bei aktiviertem `STUDIO_RENDER_PROFILE` fordert der Renderer optional das
 wgpu-Feature `TIMESTAMP_QUERY` an. Zwei Pass-Timestamps umfassen die tatsächliche
 GPU-Arbeit vom Beginn des Background-/Image-Passes bis zum Ende des
 Outline-/Overlay-/egui-Passes. Query-Resolve und drei rotierende MAP_READ-Buffer

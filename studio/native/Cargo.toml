@@ -1,0 +1,35 @@
+[package]
+name = "studio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Nativer Renderer (ADR 0010): winit + wgpu (Canvas) + egui (Panels), direkt an
+# studio-core gelinkt — kein WebView, kein IPC. Löst die Zeichen-/UI-Schicht von
+# Tauri/Svelte ab; der Core bleibt die einzige Quelle der Wahrheit.
+
+[dependencies]
+studio-core = { path = "../core" }
+studio-application = { path = "../application" }
+serde_json = { workspace = true }
+
+winit = "0.30"
+wgpu = "29"
+pollster = "0.3"
+bytemuck = { version = "1", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+
+# egui-Stack für die Panels, gerendert über wgpu in denselben Frame.
+# Familien-/Schnittnamen aus der Font-name-Tabelle (Font-Liste des Text-Tools);
+# die Glyph-Umsetzung selbst bleibt im Core.
+ttf-parser = { workspace = true }
+
+egui = "0.35"
+egui-wgpu = "0.35"
+egui-winit = "0.35"
+rfd = "0.15"
+
+# Splash-Logo (PNG) dekodieren — reine Präsentation, kein Bild-Workflow.
+image = { workspace = true }

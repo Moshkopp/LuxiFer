@@ -33,28 +33,28 @@ Implementierung ersetzen. Ein dauerhafter Parallelbetrieb zweier Frontends ist
 ebenfalls nicht das Ziel: Die Svelte-/Tauri-Anwendung soll vollständig
 entfallen.
 
-`luxifer-core` bleibt die Quelle der Wahrheit für Fachzustand, Geometrie,
+`studio-core` bleibt die Quelle der Wahrheit für Fachzustand, Geometrie,
 Layer, Transformationen, Jobplanung und persistente Modelle. Es soll aber weder
 GUI-Zustand noch Betriebssystemdialoge oder konkrete Hardware-Lebenszyklen
 übernehmen.
 
 ## Entscheidung
 
-LuxiFer wird eine ausschließlich native Desktop-Anwendung. Svelte, WebView,
+Studio wird eine ausschließlich native Desktop-Anwendung. Svelte, WebView,
 Tauri-IPC und das Tauri-Backend werden nach abgeschlossener Funktionsmigration
 gelöscht.
 
-Zwischen nativer GUI und `luxifer-core` wird eine UI-unabhängige Rust-
+Zwischen nativer GUI und `studio-core` wird eine UI-unabhängige Rust-
 Anwendungsschicht eingeführt. Der vorläufige Crate-Name ist
-`luxifer-application`:
+`studio-application`:
 
 ```text
 winit / egui / wgpu
         |
         v
-luxifer-application
+studio-application
         |
-        +--> luxifer-core
+        +--> studio-core
         +--> Projekt-/Asset-Speicher
         +--> Treiber und Geräte-Lebenszyklen
 ```
@@ -65,7 +65,7 @@ vollständigen Anwendungsfällen.
 
 ### Verantwortlichkeiten
 
-`luxifer-core` besitzt:
+`studio-core` besitzt:
 
 - Editor- und Projektmodelle;
 - Geometrie, Auswahl, Transformationen und Layerregeln;
@@ -74,7 +74,7 @@ vollständigen Anwendungsfällen.
 - Vorschau- und Jobplanung;
 - persistente Formate und fachliche Validierung.
 
-`luxifer-application` besitzt:
+`studio-application` besitzt:
 
 - die laufende Editor-/Projekt-Sitzung;
 - vollständige Anwendungsfälle wie Öffnen, Speichern, Versionieren, Import,
@@ -84,7 +84,7 @@ vollständigen Anwendungsfällen.
 - UI-unabhängige Ergebnis- und Statusmodelle;
 - Ressourcen-Lebenszyklen, soweit sie nicht an winit/wgpu/egui gebunden sind.
 
-`luxifer-native` besitzt:
+`studio` besitzt:
 
 - Fenster, Eventloop, Tastatur- und Mausereignisse;
 - Kamera, GPU-Ressourcen, Texturen und Render-Caches;

@@ -139,7 +139,7 @@ Benutzerdefinierte Bindungen werden beim Laden normalisiert:
   Konflikte löst der Dialog vor dem Speichern über die bestätigte
   Umbelegung auf.
 
-Die Charon-Sicherung transportiert das Feld automatisch als Bestandteil der
+Die Hub-Sicherung transportiert das Feld automatisch als Bestandteil der
 globalen `UiSettings`. Shortcuts sind arbeitsplatzbezogen, nicht projekt- oder
 laserprofilbezogen.
 
@@ -243,7 +243,7 @@ aufgelöst. Es gibt keine nur kurz sichtbare Toast-Meldung.
 
 ### 8. Verantwortungsgrenzen
 
-- `luxifer-core`: persistierbare Typen, Defaults, Normalisierung, Validierung;
+- `studio-core`: persistierbare Typen, Defaults, Normalisierung, Validierung;
 - `native/canvas/input`: winit-Taste in `ShortcutKey` übersetzen;
 - `native/canvas/input`: rechte Maustaste als Action-Trigger und temporäre
   Auswahlgeste übersetzen;
@@ -326,7 +326,7 @@ Dialog:
 
 ### Core-Modell und Settings-Migration
 
-`luxifer-core` besitzt nun die UI-freien Typen `ShortcutAction`,
+`studio-core` besitzt nun die UI-freien Typen `ShortcutAction`,
 `ShortcutKey`, `ShortcutChord`, `ShortcutTrigger` und `ShortcutBindings`.
 Defaults, Labels, Kategorien, Reserviert-Prüfung, Deduplizierung, Konfliktsuche,
 Entfernen, Einzel-Reset und atomare Umbelegung liegen an dieser zentralen

@@ -1,0 +1,140 @@
+//! Typisierte UI-Absichten: Ein Panel zeichnet und liefert `UiAction`s zurück,
+//! statt den `App`-Zustand direkt zu mutieren. Der Root führt sie über
+//! `App::dispatch` aus. So bleibt die UI von der Anwendungslogik entkoppelt
+//! (ADR 0011: „UI erzeugt Absicht, App koordiniert").
+//!
+//! Das Enum wächst schnittweise: Es deckt zunächst nur die Aktionen der bereits
+//! migrierten Panels ab. Panels, die noch `&mut App` erhalten, tragen hier noch
+//! nichts bei.
+
+use studio_application::LayerToggle;
+use studio_core::{Align, Distribute, JobAction, PolyShape};
+
+use crate::tools::{Tool, ToolAction, View};
+
+/// Eine vom UI ausgelöste Absicht. Rein beschreibend — kein Verhalten.
+/// Nicht `Copy`, weil einzelne Varianten Eigentum tragen (z. B. Projektname).
+#[derive(Debug, Clone, PartialEq)]
+pub enum UiAction {
+    /// Auswahl ausrichten.
+    Align(Align),
+    /// Auswahl verteilen/Abstände angleichen.
+    Distribute(Distribute),
+    /// Auswahl gruppieren.
+    Group,
+    /// Gruppierung der Auswahl lösen.
+    Ungroup,
+    /// Gemeinsame Auswahlbox numerisch auf Breite/Höhe in mm skalieren.
+    ResizeSelection {
+        width: f64,
+        height: f64,
+    },
+    /// Auswahl mit festem Abstand packen (mm).
+    Nest(f64),
+    /// Bett mit der Auswahl füllen (Abstand mm).
+    NestFill(f64),
+    /// Farbe aktivieren (Farbe = Layer).
+    PickColor([u8; 3]),
+    /// Aktive Polygon-Form wählen (Präsentationszustand).
+    SelectShape(PolyShape),
+    /// Aktives Werkzeug wählen (Präsentationszustand).
+    SelectTool(Tool),
+    /// Sofort-Operation auf der Auswahl (Boolean/Fillet/Offset/…).
+    ToolAction(ToolAction),
+    /// Text-Dialog öffnen.
+    OpenTextDialog,
+    /// Auswahl horizontal spiegeln.
+    MirrorH,
+    /// Auswahl vertikal spiegeln.
+    MirrorV,
+    /// Untersetzer einfügen (`round` = rund statt eckig).
+    InsertCoasters(bool),
+    /// Einen Layer-Schalter umlegen (Index in Layer-Reihenfolge).
+    ToggleLayer(usize, LayerToggle),
+    /// Layer-Parameter-Dialog für diesen Index öffnen.
+    OpenLayerDialog(usize),
+    /// Einen Layer in der Brenn-Reihenfolge verschieben.
+    MoveLayer {
+        from: usize,
+        to: usize,
+    },
+    /// „Neues Projekt"-Maske (Name + Beschreibung) öffnen.
+    OpenProjectSaveDialog,
+    /// Aktuelles Projekt schließen und eine leere Arbeitsfläche beginnen.
+    NewBlankProject,
+    /// Einstellungen-Dialog (Arbeitsplatz, Theme, Raster) öffnen.
+    OpenSettings,
+    /// Aktuelles Projekt als neue Version speichern.
+    SaveProjectVersion,
+    /// Projekt mit diesem Namen öffnen.
+    OpenProject(String),
+    /// Projekt mit diesem Namen löschen.
+    DeleteProject(String),
+    /// Projekt mit diesem Namen exportieren (Zieldialog im Root).
+    ExportProject(String),
+    /// Projekt umbenennen (`from` → `to`).
+    RenameProject {
+        from: String,
+        to: String,
+    },
+    /// Eine Version des offenen Projekts in den Canvas laden (Versions-ID).
+    OpenProjectVersion(String),
+    /// Eine Version des offenen Projekts löschen (Versions-ID).
+    DeleteProjectVersion(String),
+    /// Empfangene Hub-Revision vorerst zurückstellen.
+    DeferInboxRevision(String),
+    /// Zurückgestellte Revision wieder als neu markieren.
+    ReconsiderInboxRevision(String),
+    /// Neues empfangenes Projekt sicher in die lokale Ablage übernehmen.
+    ApplyInboxRevision(String),
+    /// Alle offenen Hub-Revisionen in Empfangsreihenfolge übernehmen.
+    ApplyAllInboxRevisions,
+    /// Empfangene und lokale Projektversion read-only vergleichen.
+    ShowInboxComparison(String),
+    /// Haupt-Ansicht (Reiter) wechseln.
+    SelectView(View),
+    /// Projektansicht direkt mit dem globalen Asset-Katalog öffnen.
+    OpenAssetLibrary,
+    /// Projektansicht direkt mit den von Hub empfangenen Revisionen öffnen.
+    OpenHubInbox,
+    /// Material-Vorlage der Laser-Vorschau wählen.
+    SelectPreviewMaterial(crate::canvas::scene::PreviewMaterial),
+    /// Leerfahrten in der Vorschau ein-/ausblenden.
+    SetPreviewTravel(bool),
+    SetPreviewLaserPath(bool),
+    SetPreviewScanOffset(bool),
+    /// Einen Layer im Laser-Tab vorübergehend für Transformationen freigeben.
+    ToggleLaserEditLayer(usize),
+    /// Rückgängig.
+    Undo,
+    /// Wiederholen.
+    Redo,
+    /// Import-Dialog öffnen (Vektor SVG/DXF oder Bild, nach Endung verzweigt).
+    Import,
+    /// Ein bereits katalogisiertes Bild bzw. eine Vektorquelle wiederverwenden.
+    ImportCatalogAsset(String),
+    /// Asset sicher aus der lokalen Bibliothek entfernen oder ausblenden.
+    DeleteCatalogAsset(String),
+    /// Fehlendes Thumbnail für ein sichtbares Asset im Hintergrund anfordern.
+    RequestAssetThumbnail(String),
+    /// Die aktuelle Fehleranzeige schließen.
+    /// Laser-Profil aktivieren.
+    LaserSelect(String),
+    /// Verbindung zum aktiven Laser ausdrücklich aufbauen oder trennen.
+    LaserConnect,
+    LaserDisconnect,
+    /// Alle vorhandenen Layer gemeinsam für den Laserjob konfigurieren.
+    OpenLayerManager,
+    /// Laser-Job-Aktion ausführen (Start/Pause/Stop/…).
+    LaserRun(JobAction),
+    /// Aktuellen Job als Datei exportieren.
+    LaserExport,
+    /// Laserkopf um (dx, dy) mm bewegen.
+    LaserJog(f64, f64),
+    /// Laserkopf homen.
+    LaserHome,
+    /// Eigenständige Laserprofil-Verwaltung öffnen.
+    OpenLaserManager {
+        create_new: bool,
+    },
+}

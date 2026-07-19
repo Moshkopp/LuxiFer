@@ -584,7 +584,7 @@ temporäre Zustände dürfen nicht nur im Chat stehen.
 - Frontend `npm run check`: 0 Fehler, 0 Warnungen.
 - Frontend-Produktionsbuild erfolgreich.
 - 198 Core-Tests bestanden.
-- Tauri-Backend `cargo check --manifest-path luxifer/frontend/src-tauri/Cargo.toml`
+- Tauri-Backend `cargo check --manifest-path studio/frontend/src-tauri/Cargo.toml`
   erfolgreich.
 - `git diff --check`: sauber.
 

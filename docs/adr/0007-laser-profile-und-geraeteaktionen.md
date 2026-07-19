@@ -5,7 +5,7 @@ Akzeptiert — 2026-07-09
 
 ## Kontext
 
-Das heutige Laserpanel (`luxifer/frontend/src/lib/LaserPanel.svelte`) ist **auf
+Das heutige Laserpanel (`studio/frontend/src/lib/LaserPanel.svelte`) ist **auf
 zwei Geräte gleichzeitig verdrahtet** und vermischt sie:
 
 - ein fester **„G-Code"-Knopf** (`ongenerate`) — reine **GRBL**-Denke,
@@ -80,7 +80,7 @@ Asset-Store).
 **Rollenteilung globale Settings ↔ Laserpanel/Verwaltung:**
 
 - **Globale Settings = Software.** Dort liegen ausschließlich programmweite
-  Themen wie Oberfläche, Charon, Backup/Restore und About. Geräteprofile und
+  Themen wie Oberfläche, Hub, Backup/Restore und About. Geräteprofile und
   Controllerdaten gehören nicht in diesen Dialog.
 - **Laserpanel = auswählen (ständig).** Ein **Dropdown** im Panel listet die
   gespeicherten Laser; die Auswahl setzt den **aktiven** Laser. Laser wechseln

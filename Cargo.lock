@@ -573,15 +573,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
-name = "charon"
-version = "1.0.0"
-dependencies = [
- "luxifer-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -821,6 +812,20 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
+
+[[package]]
+name = "driver-grbl"
+version = "1.0.0"
+dependencies = [
+ "studio-core",
+]
+
+[[package]]
+name = "driver-ruida"
+version = "1.0.0"
+dependencies = [
+ "studio-core",
+]
 
 [[package]]
 name = "dxf"
@@ -1441,6 +1446,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "hub"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "studio-core",
+]
+
+[[package]]
 name = "i_float"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1884,67 +1898,6 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
-
-[[package]]
-name = "luxifer-application"
-version = "1.0.0"
-dependencies = [
- "image",
- "luxifer-core",
- "luxifer-driver-grbl",
- "luxifer-driver-ruida",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "luxifer-core"
-version = "1.0.0"
-dependencies = [
- "cavalier_contours",
- "dxf",
- "i_overlay",
- "image",
- "serde",
- "serde_json",
- "ttf-parser",
- "usvg",
-]
-
-[[package]]
-name = "luxifer-driver-grbl"
-version = "1.0.0"
-dependencies = [
- "luxifer-core",
-]
-
-[[package]]
-name = "luxifer-driver-ruida"
-version = "1.0.0"
-dependencies = [
- "luxifer-core",
-]
-
-[[package]]
-name = "luxifer-native"
-version = "1.0.0"
-dependencies = [
- "bytemuck",
- "egui",
- "egui-wgpu",
- "egui-winit",
- "env_logger",
- "image",
- "log",
- "luxifer-application",
- "luxifer-core",
- "pollster 0.3.0",
- "rfd",
- "serde_json",
- "ttf-parser",
- "wgpu",
- "winit",
-]
 
 [[package]]
 name = "memchr"
@@ -3274,6 +3227,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 dependencies = [
  "float-cmp",
+]
+
+[[package]]
+name = "studio"
+version = "1.0.0"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "env_logger",
+ "image",
+ "log",
+ "pollster 0.3.0",
+ "rfd",
+ "serde_json",
+ "studio-application",
+ "studio-core",
+ "ttf-parser",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "studio-application"
+version = "1.0.0"
+dependencies = [
+ "driver-grbl",
+ "driver-ruida",
+ "image",
+ "serde",
+ "serde_json",
+ "studio-core",
+]
+
+[[package]]
+name = "studio-core"
+version = "1.0.0"
+dependencies = [
+ "cavalier_contours",
+ "dxf",
+ "i_overlay",
+ "image",
+ "serde",
+ "serde_json",
+ "ttf-parser",
+ "usvg",
 ]
 
 [[package]]

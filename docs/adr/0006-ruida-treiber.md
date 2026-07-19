@@ -39,7 +39,7 @@ serialisiert. Keine Fachlogik im Treiber.
 
 ## Entscheidung
 
-**Ein eigenes Crate `luxifer/drivers/ruida` implementiert `MachineDriver`:
+**Ein eigenes Crate `studio/drivers/ruida` implementiert `MachineDriver`:
 Job-Kompilierung (`JobPlan` → Ruida-Bytes) *und* Live-Steuerung über UDP.
 Beides lebt im Treiber; der Core bleibt gerätefrei.**
 
@@ -115,7 +115,7 @@ Rotation (im Plan bereits eingerechnet). Der Treiber **serialisiert nur**.
 
 ### 3. Transport: UDP im Treiber-Crate
 
-Der komplette UDP-Stack lebt in `luxifer/drivers/ruida` — der Core kennt kein
+Der komplette UDP-Stack lebt in `studio/drivers/ruida` — der Core kennt kein
 Socket, keinen Port, keinen Swizzle:
 
 - Senden → **50200**, Empfangen ← **40200** (lokal auf 40200 binden — sonst
@@ -136,8 +136,8 @@ dieser Entscheidung.)
 ### 4. Crate-Struktur
 
 ```
-luxifer/drivers/ruida/
-  Cargo.toml          # dep: luxifer-core (JobPlan, Trait, StartMode, …)
+studio/drivers/ruida/
+  Cargo.toml          # dep: studio-core (JobPlan, Trait, StartMode, …)
   src/lib.rs          # RuidaDriver: impl MachineDriver
   src/protocol.rs     # Swizzle, Encoding, Opcode-Bausteine (rein, testbar)
   src/compile.rs      # JobPlan → Bytes (Preamble→Config→F→Geometrie→Trailer)
@@ -244,7 +244,7 @@ aufschlagen:
 
 ## Invarianten
 
-1. **`luxifer-core` DARF NICHT** Ruida-Bytes, Ports, Swizzle oder Sockets
+1. **`studio-core` DARF NICHT** Ruida-Bytes, Ports, Swizzle oder Sockets
    enthalten. Es definiert nur `JobPlan`, `MachineDriver`, `MachineStatus`,
    `DriverError`, `StartMode`.
 2. Der **`JobPlan` ist die einzige Eingabe** der Kompilierung. Neue Arbeit
@@ -268,7 +268,7 @@ aufschlagen:
 
 ## Konsequenzen
 
-- LuxiFer kann erstmals einen **echten Ruida-Job erzeugen und senden** — und
+- Studio kann erstmals einen **echten Ruida-Job erzeugen und senden** — und
   über `frame`/`jog`/`home` die Maschine vor dem Brennen ausrichten.
 - Der `JobPlan` bekommt seine **zweite Konsumentin** (nach der Preview) und
   beweist damit den Nutzen von ADR 0001: Preview und echter Job teilen sich
@@ -296,7 +296,7 @@ des dort ausgewählten Ruida-Controllers wieder lesen und gezielt ändern. Die
 Grenze bleibt strikt:
 
 - Adressen, Einheiten, Bitmasken, Raw-Register, Schreibschutz und
-  `DA 00`/`DA 01` liegen ausschließlich in `luxifer-driver-ruida`.
+  `DA 00`/`DA 01` liegen ausschließlich in `driver-ruida`.
 - Bekannte Register erscheinen gruppiert und mit physikalischer Einheit;
   zusätzliche X/Y/Z/U(E)-Register bleiben bewusst als Raw-Werte sichtbar.
 - Bitfelder werden aus dem gelesenen Rohwert per Read-Modify-Write geändert.

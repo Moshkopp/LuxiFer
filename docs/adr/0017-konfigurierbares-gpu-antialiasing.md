@@ -18,7 +18,7 @@ Grafikkarten. Eine fest erzwungene hohe MSAA-Stufe wäre deshalb ungeeignet.
   `Aus`, `2×`, `4×`, `8×` und `16×`.
 - Standard sind analytisches Linien-AA und `4×` MSAA.
 - Unterstützen Farb- oder Stencil-Format die gewählte Stufe nicht, verwendet
-  LuxiFer automatisch die höchste unterstützte niedrigere Stufe.
+  Studio automatisch die höchste unterstützte niedrigere Stufe.
 - Canvas-, Bild-, Fill-, Stencil- und egui-Pipelines verwenden dieselbe
   effektive Sample-Zahl.
 - MSAA wird in ein separates Multisample-Farbziel gerendert und erst im letzten

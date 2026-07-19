@@ -5,7 +5,7 @@ Akzeptiert — 2026-07-09
 
 ## Kontext
 
-Bisher zeigt LuxiFer nur das **Design**: die Shapes, die der Nutzer zeichnet.
+Bisher zeigt Studio nur das **Design**: die Shapes, die der Nutzer zeichnet.
 Was der Laser daraus **tatsächlich fährt**, ist unsichtbar — die Kontur-Fahrwege
 (Cut), die Flächen-Scanlines (Fill), später die Rasterzeilen eines Bildes und die
 **Reihenfolge** samt **Leerfahrten** dazwischen. Vor dem ersten echten Job will
@@ -21,7 +21,7 @@ eine zweite, eigene Pfad-Berechnung. Damit hat die Preview dieselbe Wahrheit wie
 der spätere echte Job: Was die Vorschau zeigt, ist per Konstruktion das, was der
 Treiber bekommt.
 
-**Stand des `JobPlan` heute** (`luxifer/core/src/job.rs`): `LayerWork::Cut`
+**Stand des `JobPlan` heute** (`studio/core/src/job.rs`): `LayerWork::Cut`
 (Kontur-Pfade) und `LayerWork::Fill` (Scanline-Segmente, Even-Odd) existieren und
 sind getestet. **`Raster` fehlt noch** (auskommentiert, an den Bild-Job aus ADR
 0004 §5 gekoppelt). Ebenfalls **noch nicht modelliert**: die **Reihenfolge** der
@@ -204,7 +204,7 @@ Der Reiter reserviert dafür bereits den Platz einer Steuerleiste.
   Tauri-Command. Frontend zeichnet nur, die Ordnung lebt im Core.
 - Die Layer-Reihenfolge wird über die bestehende `layers`-Serialisierung
   automatisch **im Projekt persistiert** (ADR 0003) — kein neues Feld.
-- Neues Core-Modul (z. B. `luxifer/core/src/preview.rs`) mit `JobPreview`,
+- Neues Core-Modul (z. B. `studio/core/src/preview.rs`) mit `JobPreview`,
   `PreviewMove`, `MoveKind` und `JobPreview::from_plan`; Tests für Reihenfolge,
   eingefügte Travel-Segmente und Cut/Fill-Abdeckung.
 - Neuer Tauri-Command, der aus der aktuellen `AppState` den `JobPlan` und daraus

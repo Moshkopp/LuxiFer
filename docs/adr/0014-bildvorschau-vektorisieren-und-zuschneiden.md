@@ -13,7 +13,7 @@ Bildbearbeitung bleiben bestehen.
 
 ## Kontext
 
-LuxiFer kann Bilder importieren, ihre Verarbeitungsparameter verändern und aus
+Studio kann Bilder importieren, ihre Verarbeitungsparameter verändern und aus
 ihnen Konturen erzeugen. Der aktuelle native Bilddialog macht das Ergebnis der
 Regler jedoch nicht unmittelbar sichtbar und mischt zwei unterschiedliche
 Arbeitsabsichten:
@@ -28,13 +28,13 @@ eindeutige Aussage darüber, welche Projektdaten beim Anwenden entstehen.
 
 ThorBurn dient als Verhaltensreferenz. Dort besitzt Vektorisieren einen eigenen
 Vorschaudialog mit Trace-Parametern. Zuschneiden ist ein eigener Canvas-Modus
-mit sichtbarer Maske, Griffen und mehreren Auswahlformen. LuxiFer übernimmt
+mit sichtbarer Maske, Griffen und mehreren Auswahlformen. Studio übernimmt
 diese sinnvollen Bediengrenzen, nicht jedoch ThorBurn-Code oder eine
 destruktive Änderung der Asset-Datei.
 
 ## Entscheidung
 
-LuxiFer behandelt **Bild bearbeiten**, **Vektorisieren** und **Zuschneiden** als
+Studio behandelt **Bild bearbeiten**, **Vektorisieren** und **Zuschneiden** als
 drei getrennte Aktionen. Sie dürfen gemeinsame Vorschau- und Bildpipeline-
 Bausteine verwenden, besitzen aber getrennte UI-Zustände und getrennte
 Application-Kommandos.
@@ -211,12 +211,12 @@ einmalig wie ein abgeleitetes Asset behandelt.
 
 ### 5. Schichten und Zuständigkeiten
 
-- `luxifer-core` besitzt Crop-Datenmodell, Validierung, effektive Bildregion,
+- `studio-core` besitzt Crop-Datenmodell, Validierung, effektive Bildregion,
   Trace-Parameter und sämtliche Pixel-/Konturberechnung.
-- `luxifer-application` prüft Auswahl und Objekttyp und wendet Crop,
+- `studio-application` prüft Auswahl und Objekttyp und wendet Crop,
   Bildparameter oder Trace-Ergebnis jeweils atomar mit genau einem
   Undo-Schritt an.
-- `luxifer-native` besitzt Dialogentwürfe, Werkzeugzustand, Preview-Texturen
+- `studio` besitzt Dialogentwürfe, Werkzeugzustand, Preview-Texturen
   und Eingabegesten. Es mutiert keine Core-Strukturen direkt.
 - Maschinen- und Ruida-Treiber kennen weder Crop-Dialog noch Trace-Parameter;
   sie erhalten ausschließlich den bereits kompilierten JobPlan.

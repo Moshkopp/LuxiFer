@@ -6,7 +6,7 @@
 
 ## Ausgangspunkt
 
-LuxiFer soll häufig verwendete Kombinationen aus Material, Prozess und
+Studio soll häufig verwendete Kombinationen aus Material, Prozess und
 Laserparametern wiederverwenden können. Ein Nutzer soll beispielsweise nicht
 jedes Mal Geschwindigkeit, Leistung und Durchläufe für „Pappelsperrholz 3 mm
 schneiden“ neu eingeben müssen.
@@ -68,7 +68,7 @@ eine zweite Parameterzuordnung. Bibliotheksänderungen werden zuerst in einer
 Kopie aufgebaut und per temporärer Datei ersetzt; erst nach erfolgreichem
 Schreiben wird der laufende Zustand aktualisiert. Eine beschädigte Datei wird
 als Fehler gemeldet und niemals still durch eine leere Bibliothek ersetzt.
-Charon sichert die Bibliothek als arbeitsplatzbezogenen Backup-Typ
+Hub sichert die Bibliothek als arbeitsplatzbezogenen Backup-Typ
 `material_profiles`. Wiederherstellen läuft ebenfalls über `MaterialService`,
 damit Validierung, persistente Datei und laufender Zustand konsistent bleiben.
 
@@ -101,7 +101,7 @@ Ein Materialrezept verbindet Material, Prozess, konkrete Parameter und den
 Gültigkeitsbereich. Es ist ein dokumentierter Erfahrungswert, keine
 Materialeigenschaft und keine Garantie für ein Ergebnis.
 
-Der Begriff „Template“ wird in der UI vermieden, weil LuxiFer bereits
+Der Begriff „Template“ wird in der UI vermieden, weil Studio bereits
 Design-/Projektvorlagen kennt und ein Laserrezept semantisch etwas anderes ist.
 
 ## Leitideen für die Diskussion
@@ -117,7 +117,7 @@ Erste Empfehlung:
 - ein selbst angelegtes Rezept gehört standardmäßig zum konkreten
   `LaserProfile`;
 - es darf bewusst dupliziert und einem anderen Profil zugeordnet werden;
-- LuxiFer überträgt Werte nie still auf eine andere Maschine;
+- Studio überträgt Werte nie still auf eine andere Maschine;
 - ein optionaler Gültigkeitsbereich „nicht zugeordnet“ dient nur importierten
   oder noch nicht getesteten Startwerten und wird sichtbar gewarnt.
 
@@ -228,7 +228,7 @@ einen kurzen Sicherheitshinweis: Materialcharge, Fokus, Optik und Maschine
 können abweichen; zuerst Probeschnitt beziehungsweise Testgravur ausführen.
 
 Eingebaute universelle Leistungswerte werden zunächst nicht mitgeliefert. Sie
-würden eine Genauigkeit vortäuschen, die LuxiFer ohne Kenntnis der Maschine
+würden eine Genauigkeit vortäuschen, die Studio ohne Kenntnis der Maschine
 nicht besitzt. Denkbar sind später importierbare Hersteller-/Community-Pakete,
 die immer als ungeprüfte Startwerte gekennzeichnet sind.
 
@@ -239,7 +239,7 @@ Erste Empfehlung:
 - eigene versionierte JSON-Datei im App-Datenverzeichnis;
 - stabile UUID pro Rezept und monoton steigende Rezeptrevision;
 - atomisches Speichern;
-- Einbeziehung in Charon-Backup/Restore;
+- Einbeziehung in Hub-Backup/Restore;
 - Export einzelner Rezepte oder eines Bundles;
 - Import zeigt Dubletten und Profilzuordnung vor dem Schreiben;
 - Löschen eines verwendeten Rezepts beschädigt kein Projekt, da Layer Snapshots
@@ -291,7 +291,7 @@ vorausgewählt, die noch exakt auf der alten Rezeptrevision stehen. Ebenfalls
 manuell abweichende Layer benötigen eine eigene Bestätigung.
 
 Beim Übernehmen kann das Rezept zugleich als „getestet“ markiert werden. Eine
-kurze Ergebnisnotiz ist optional; LuxiFer verlangt zunächst kein umfangreiches
+kurze Ergebnisnotiz ist optional; Studio verlangt zunächst kein umfangreiches
 Versuchsprotokoll. So entsteht der Lernkreislauf:
 
 `Rezept anwenden → real testen → Layer feinjustieren → Rezept verbessern`.
@@ -402,7 +402,7 @@ uncommitted:
 Das automatische Laserjournal und die Ergebnisbewertung sind noch nicht
 implementiert. Diese zweite Scheibe folgt erst nach praktischem Feedback zum
 Grundablauf. Der vollständige Workspace-Test ist mit 255 Core-, 85
-Application-, 54 Native-, 25 Ruida-, 5 GRBL- und 8 Charon-Tests grün.
+Application-, 54 Native-, 25 Ruida-, 5 GRBL- und 8 Hub-Tests grün.
 
 ### Erste Workflow-Korrektur
 
@@ -438,7 +438,7 @@ Headerzeile zwischen Hauptnavigation und Projektname. Material bleibt aus dem
 Header und aus dem Projektformat heraus.
 
 Der vollständige Workspace-Test ist mit 255 Core-, 87 Application-, 55
-Native-, 25 Ruida-, 5 GRBL- und 8 Charon-Tests grün. Der gesamte zweite
+Native-, 25 Ruida-, 5 GRBL- und 8 Hub-Tests grün. Der gesamte zweite
 Prototyp bleibt uncommitted.
 
 Die Fensterhöhe ist an die verfügbare Bildschirmfläche gebunden. Kopfbereich

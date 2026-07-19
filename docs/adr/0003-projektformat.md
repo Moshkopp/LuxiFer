@@ -6,11 +6,11 @@ Akzeptiert — 2026-07-07 · **überarbeitet 2026-07-08 (Versions-Modell)**
 ## Kontext
 
 Zum Testen und Arbeiten muss man Projekte **speichern und wieder laden** können.
-Das Core-Fundament steht (`luxifer/core/src/project.rs`: `ProjectFile`,
+Das Core-Fundament steht (`studio/core/src/project.rs`: `ProjectFile`,
 `save_to_dir`, `load`, `list_projects`), aber es fehlen Tauri-Commands und
-Frontend. Zugleich soll das Format so gebaut sein, dass **Charon** versionierte
+Frontend. Zugleich soll das Format so gebaut sein, dass **Hub** versionierte
 Projektstände zwischen Arbeitsplätzen **verteilen** kann (Invariante: lokales
-Speichern funktioniert immer zuerst und ohne Charon; Charon editiert oder
+Speichern funktioniert immer zuerst und ohne Hub; Hub editiert oder
 merged keine Projektinhalte selbst).
 
 Drei Erkenntnisse prägen die Entscheidung:
@@ -22,7 +22,7 @@ Drei Erkenntnisse prägen die Entscheidung:
   zu kopieren war ThorBurns Import-Fehler. Sie gehören in eine **zentrale,
   projektübergreifende Bibliothek**; Projekte verlinken nur per Referenz.
 - **Es gibt nur Versionen, keinen separaten „Arbeitsstand".** Die erste Fassung
-  trennte einen mutierbaren Arbeitsstand (`projekt.luxi`) von eingefrorenen
+  trennte einen mutierbaren Arbeitsstand (`projekt.laserproj`) von eingefrorenen
   Versionen. Das führte zu **Thumbnail-Drift** und zur Frage „was zeigt die große
   Vorschau" (Workaround: neueste Version). Die Trennung wird aufgehoben: **Die
   aktuelle Version *ist* der Canvas.** Das entfernt die Drift-Quelle vollständig.
@@ -69,14 +69,14 @@ weiter laden):
 - `versions: Vec<VersionInfo>` — die geordnete Versionsliste (mind. V1).
 - `current_version: String` — ID der aktuellen Version (= was im Canvas ist).
 
-Die **Geometrie eines Projekts liegt nicht mehr in `projekt.luxi`**, sondern
-pro Version in `versions/<version-id>.luxi` (`bed`, `layers`, `shapes`).
-`projekt.luxi` hält nur noch **Metadaten + Versionsliste + Zeiger auf die
+Die **Geometrie eines Projekts liegt nicht mehr in `projekt.laserproj`**, sondern
+pro Version in `versions/<version-id>.laserproj` (`bed`, `layers`, `shapes`).
+`projekt.laserproj` hält nur noch **Metadaten + Versionsliste + Zeiger auf die
 aktuelle Version**. Öffnen = `current_version` in den Canvas laden.
 
 `VersionInfo { id, label, created_at, note }` — `label` ist die anzeigbare Nummer
 („V3"), `id` die stabile interne Kennung. Thumbnails liegen als **Datei** neben
-dem Snapshot (nicht im JSON), damit `projekt.luxi` schlank bleibt.
+dem Snapshot (nicht im JSON), damit `projekt.laserproj` schlank bleibt.
 
 ### 2. Ordnerstruktur auf Platte
 
@@ -84,11 +84,11 @@ dem Snapshot (nicht im JSON), damit `projekt.luxi` schlank bleibt.
 <data_root>/
   Projekte/
     <Name>/
-      projekt.luxi        NUR Metadaten (id, Zeitstempel, Beschreibung, tags,
+      projekt.laserproj        NUR Metadaten (id, Zeitstempel, Beschreibung, tags,
                           asset_refs [], versions [], current_version).
                           Enthält KEINE Geometrie.
       versions/
-        <version-id>.luxi Geometrie der Version (bed, layers, shapes)
+        <version-id>.laserproj Geometrie der Version (bed, layers, shapes)
         <version-id>.png  Thumbnail dieser Version
   Assets/                 (später, mit Import) zentrale Bibliothek,
                           projektübergreifend, per ID/Content-Hash
@@ -127,7 +127,7 @@ Der Store selbst kommt mit dem Import (eigene ADR); hier nur das Format-Feld.
 Links Suchfeld + Liste (Name, Tags, „geändert"), rechts Detail-Panel: Thumbnail
 (= aktuelle Version), erstellt/geändert, Tags, Beschreibung, Versionsliste (je
 Thumbnail + **laden** + **löschen** mit Rückfrage), Assets-Bereich („keine"),
-**Charon-Status** (ehrlich „offline — nicht verbunden", bis Charon existiert).
+**Hub-Status** (ehrlich „offline — nicht verbunden", bis Hub existiert).
 Aktionen oben: **Neu**, Speichern. Am gewählten Projekt: Laden, Umbenennen,
 Löschen, Export. Beim Löschen der aktuellen Version wird die vorherige zur
 aktuellen; die letzte verbleibende Version (V1) ist nicht löschbar.
@@ -153,8 +153,8 @@ das war die zentrale Baustelle der ersten Fassung.
 2. **Identität = `id`, nicht der Ordnername.** Umbenennen ändert nie die `id`.
 3. **Assets werden referenziert, nie ins Projekt kopiert.** Der zentrale Store ist
    die einzige Ablage für Bilder/Fonts/DXF/SVG.
-4. **Charon ist nie Voraussetzung.** Speichern/Laden funktioniert vollständig
-   offline; der Charon-Status ist reine Anzeige.
+4. **Hub ist nie Voraussetzung.** Speichern/Laden funktioniert vollständig
+   offline; der Hub-Status ist reine Anzeige.
 5. **Format ist vorwärts-tolerant.** Neue Felder mit serde-`default`; alte Dateien
    laden ohne Migration.
 6. Die **Fachlogik (Format, Versionen, Speichern) liegt im Core** und ist ohne UI
@@ -162,7 +162,7 @@ das war die zentrale Baustelle der ersten Fassung.
 
 ## Konsequenzen
 
-- Charon kann Projektversionen anhand stabiler Projekt-, Versions- und
+- Hub kann Projektversionen anhand stabiler Projekt-, Versions- und
   Eltern-IDs verteilen und geteilte Assets nur einmal ablegen. Parallele
   Änderungen bleiben erkennbare Zweige; Übernehmen, Vergleich und Merge sind
   explizite Clientaktionen.
@@ -173,8 +173,8 @@ das war die zentrale Baustelle der ersten Fassung.
 ## Nicht Teil dieser Entscheidung
 
 - **Import** (Bilder/Fonts/DXF/SVG) und der **eigentliche Asset-Store** — eigene ADR.
-- **Charon-Netzwerkprotokoll** — Charon bleibt vorerst leer.
+- **Hub-Netzwerkprotokoll** — Hub bleibt vorerst leer.
 - **Auto-Save** der aktuellen Version (nur vorgemerkt, nicht jetzt).
-- **Migration des bestehenden Formats** (aktuell: Geometrie in `projekt.luxi`,
+- **Migration des bestehenden Formats** (aktuell: Geometrie in `projekt.laserproj`,
   `versions` als bloße Historie) auf das neue Modell (Geometrie pro Version,
   `current_version`-Zeiger) — Umsetzungs-Detail, folgt beim Code, nicht hier.

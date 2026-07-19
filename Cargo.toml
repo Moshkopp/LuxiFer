@@ -1,17 +1,17 @@
-# LuxiFer — Cargo-Workspace (Core + Application + Native + Charon)
+# Studio — Cargo-Workspace (Core + Application + Native + Hub)
 #
 # Der Core ist die einzige Quelle der Wahrheit für Geometrie, Layer/Farbe,
 # Projektformat und Job-Kompilierung. Application koordiniert die Anwendungsfälle;
-# Native zeichnet und verarbeitet Eingaben. Charon bleibt optional.
+# Native zeichnet und verarbeitet Eingaben. Hub bleibt optional.
 [workspace]
 resolver = "2"
 members = [
-    "luxifer/core",
-    "luxifer/application",
-    "luxifer/native",
-    "luxifer/drivers/grbl",
-    "luxifer/drivers/ruida",
-    "charon",
+    "studio/core",
+    "studio/application",
+    "studio/native",
+    "studio/drivers/grbl",
+    "studio/drivers/ruida",
+    "hub",
 ]
 
 [workspace.package]

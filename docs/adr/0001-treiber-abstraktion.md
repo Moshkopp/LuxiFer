@@ -5,7 +5,7 @@ Akzeptiert — 2026-07-06
 
 ## Kontext
 
-LuxiFer soll **mehrere Laser-Steuerungen** bedienen: **Ruida**, **GRBL**,
+Studio soll **mehrere Laser-Steuerungen** bedienen: **Ruida**, **GRBL**,
 **miniGRBL** und potenziell weitere. Diese sprechen völlig verschiedene
 Sprachen (Ruida: verschlüsselte Binär-Pakete über UDP; GRBL/miniGRBL:
 G-Code-Text über serielle Verbindung).
@@ -48,14 +48,14 @@ Ein Treiber implementiert:
 
 ### 3. Treiber sind eigene Crates
 
-`luxifer/drivers/ruida`, `luxifer/drivers/grbl`, `luxifer/drivers/minigrbl` —
-jedes ein eigenes Crate, das nur `luxifer-core` (JobPlan + Trait) kennt.
+`studio/drivers/ruida`, `studio/drivers/grbl`, `studio/drivers/minigrbl` —
+jedes ein eigenes Crate, das nur `studio-core` (JobPlan + Trait) kennt.
 Vorteile: klar getrennt, unabhängig testbar, und es ist strukturell sichtbar,
 dass Ruida nur ein Treiber ist.
 
 ## Invarianten
 
-1. **`luxifer-core` DARF NICHT** gerätespezifischen Code enthalten (keine
+1. **`studio-core` DARF NICHT** gerätespezifischen Code enthalten (keine
    Ruida-Bytes, kein G-Code). Es definiert nur `JobPlan` und `MachineDriver`.
 2. Der **`JobPlan` ist die einzige Schnittstelle** zwischen Fachlogik und
    Treibern. Neue Schnitt-Arten erweitern den JobPlan, nicht die Treiber.

@@ -5,10 +5,10 @@ Akzeptiert — 2026-07-10
 
 ## Kontext
 
-LuxiFer fühlt sich **träge** an, und das Gefühl wird mit jedem Feature schlimmer.
+Studio fühlt sich **träge** an, und das Gefühl wird mit jedem Feature schlimmer.
 Der Nutzer hat es benannt: „im Canvas ist alles CPU, was von vornherein GPU sein
 sollte" — und der Vergleich sticht: die alte ThorBurn-Version (Qt/QML, also
-GPU-beschleunigt) war **~50× performanter** als das heutige LuxiFer, und daran
+GPU-beschleunigt) war **~50× performanter** als das heutige Studio, und daran
 ändert auch ein Release-Build nichts.
 
 Ausgelöst wurde die Analyse vom Bild-Rastern (ADR 0004 §5, jetzt umgesetzt): ein

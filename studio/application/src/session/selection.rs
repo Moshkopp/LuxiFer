@@ -1,0 +1,106 @@
+use super::EditorSession;
+use crate::AppError;
+
+impl EditorSession {
+    pub fn select_at(&mut self, x: f64, y: f64, tolerance: f64, additive: bool) -> Option<usize> {
+        let hit = self.state.hit_test(x, y, tolerance);
+        match hit {
+            Some(index) if additive => {
+                if let Some(position) = self.state.selected.iter().position(|&item| item == index) {
+                    self.state.selected.remove(position);
+                } else {
+                    self.state.selected.push(index);
+                }
+            }
+            Some(index) if !self.state.selected.contains(&index) => {
+                self.state.selected = vec![index];
+            }
+            None if !additive => self.state.selected.clear(),
+            _ => {}
+        }
+        self.state.expand_selection_to_groups();
+        hit
+    }
+
+    pub fn select_rect(&mut self, start: [f64; 2], end: [f64; 2], inverted: bool) {
+        let crossing = studio_core::interact::marquee_crossing(start[0], end[0], inverted);
+        self.state
+            .select_in_rect(start[0], start[1], end[0], end[1], crossing);
+        self.state.expand_selection_to_groups();
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.state.selected.clear();
+    }
+
+    /// Skaliert die aktuelle Auswahl numerisch auf die gewünschte gemeinsame
+    /// Breite/Höhe. Die linke obere Ecke der Auswahlbox bleibt stehen und die
+    /// gesamte Änderung bildet genau einen Undo-Schritt.
+    pub fn resize_selection(&mut self, width: f64, height: f64) -> Result<(), AppError> {
+        let Some(start) = self.state.selection_bbox() else {
+            return Err(AppError::new(
+                "selection_required",
+                "Zum Skalieren muss mindestens ein Objekt ausgewählt sein.",
+            ));
+        };
+        if !width.is_finite() || !height.is_finite() || width < 0.1 || height < 0.1 {
+            return Err(AppError::new(
+                "invalid_selection_size",
+                "Breite und Höhe müssen mindestens 0,1 mm betragen.",
+            ));
+        }
+        let target = studio_core::BBox::new(start.x, start.y, width, height);
+        self.begin_edit();
+        self.scale_edit(start, target);
+        self.commit_edit();
+        Ok(())
+    }
+
+    /// Wählt alle Objekte auf dem Canvas aus (Strg+A).
+    pub fn select_all(&mut self) {
+        self.state.selected = (0..self.state.shapes.len()).collect();
+    }
+
+    /// Beginnt eine zusammenhängende direkte Manipulation. Beliebig viele
+    /// Zwischenstände bilden danach genau einen Undo-Schritt.
+    pub fn begin_edit(&mut self) {
+        if self.edit_start.is_none() {
+            self.edit_start = Some(self.state.clone());
+            self.state.push_undo();
+        }
+    }
+
+    pub fn edit_active(&self) -> bool {
+        self.edit_start.is_some()
+    }
+
+    pub fn translate_edit(&mut self, dx: f64, dy: f64) {
+        debug_assert!(self.edit_active(), "translate_edit ohne begin_edit");
+        self.state.translate_selected(dx, dy);
+    }
+
+    pub fn scale_edit(&mut self, start: studio_core::BBox, target: studio_core::BBox) {
+        debug_assert!(self.edit_active(), "scale_edit ohne begin_edit");
+        self.state.scale_selection_to(start, target);
+    }
+
+    pub fn rotate_edit_around(&mut self, pivot: [f64; 2], degrees: f64) {
+        debug_assert!(self.edit_active(), "rotate_edit_around ohne begin_edit");
+        self.state
+            .rotate_selection_around((pivot[0], pivot[1]), degrees);
+    }
+
+    pub fn commit_edit(&mut self) {
+        if self.edit_start.take().is_some() {
+            self.state.discard_last_undo_if_no_change();
+        }
+    }
+
+    pub fn cancel_edit(&mut self) -> bool {
+        let Some(start) = self.edit_start.take() else {
+            return false;
+        };
+        self.state = start;
+        true
+    }
+}

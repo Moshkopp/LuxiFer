@@ -18,7 +18,7 @@ persistierte Layouts mehr Oberfläche und Wartung als Nutzen.
 
 ## Entscheidung
 
-LuxiFer verwendet ein statisches, tab-spezifisches Bedienlayout.
+Studio verwendet ein statisches, tab-spezifisches Bedienlayout.
 
 - Der Canvas bleibt die Arbeitsgrundlage.
 - Bedienflächen sitzen in festen Docks, nicht in frei verschiebbaren Panels.
@@ -48,7 +48,7 @@ ignoriert.
 3. Theming kommt aus den GUI-Settings und wird in Native zentral auf die
    `egui::Visuals` abgebildet. Einzelne Panels erfinden keine eigenen
    Grundflächenfarben.
-4. GUI-Settings bleiben offline lokal persistent. Charon sichert versionierte
+4. GUI-Settings bleiben offline lokal persistent. Hub sichert versionierte
    Settings je stabiler Arbeitsplatz-ID; Laden und Übernehmen bleiben
    ausdrückliche Nutzeraktionen auf dem jeweiligen Client.
 5. Unbenutzte Layout-Altlasten bleiben nicht im aktiven Codepfad.
@@ -67,13 +67,13 @@ ignoriert.
 ## Offen / nicht Teil dieser Entscheidung
 
 - Inhaltlicher Ausbau des Monitor-Reiters.
-- Optionale spätere Charon-Sicherung arbeitsplatzbezogener GUI-Settings.
+- Optionale spätere Hub-Sicherung arbeitsplatzbezogener GUI-Settings.
 
 ## Umsetzung 2026-07-16 — Dark Workshop
 
 Die native Oberfläche verwendet eine semantische Graphit-Palette mit getrennten
 Tokens für Hintergrund, Toolbar, Panel, Oberfläche, Rahmen, Text, Sekundärtext,
-Erfolg und Fehler. LuxiFer-Orange ist der neue Standardakzent. Gespeicherte
+Erfolg und Fehler. Studio-Orange ist der neue Standardakzent. Gespeicherte
 benutzerdefinierte Akzentfarben bleiben beim Upgrade erhalten; nur der frühere
 unveränderte Blau/Grau-Standard wird migriert.
 

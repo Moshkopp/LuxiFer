@@ -21,7 +21,7 @@ Zwei Erfahrungen aus ThorBurn (Referenz, docs/referenz/) prägen die Entscheidun
   Bildpipeline war brauchbar bei der Tonwert-LUT (Helligkeit/Kontrast/Gamma/
   Invert), aber schlecht beim Dithering und vermischte Vorschau mit Originaldaten.
   Wir trennen strikt: Die **Datei auf der Platte** (Dialog-Auswahl) wird nur
-  gelesen, nie verändert. Das **Store-Asset** ist LuxiFers eigene Kopie; alle
+  gelesen, nie verändert. Das **Store-Asset** ist Studios eigene Kopie; alle
   Regler sind Parameter, die erst bei Vorschau/Rastern angewandt werden — das
   Asset selbst bleibt unverändert.
 - **ThorBurns Zähigkeit vermeiden.** Dort war „jedes Move/Speichern zäh", weil
@@ -49,7 +49,7 @@ bewusst **vertagt** (siehe „Nicht Teil dieser Entscheidung").
 
 - **Zwei getrennte „Originale".** (1) Die **Quelldatei auf der Platte**, die der
   Nutzer im Dialog wählt — nur gelesen, nie verändert. (2) Das **Store-Asset** =
-  LuxiFers Kopie, die beim Import entsteht. Wenn dieses ADR „Original" sagt, meint
+  Studios Kopie, die beim Import entsteht. Wenn dieses ADR „Original" sagt, meint
   es das Store-Asset.
 - **Beim Import zu Graustufe konvertieren, Farbe verwerfen.** Ist die Quelle
   farbig, wird sie in **voller Auflösung** entsättigt und **die Graustufe** als
@@ -212,7 +212,7 @@ Teil dieses ADR — hier entstehen nur Datenmodell, Import, Bearbeitung und Laye
 ## Invarianten
 
 1. **Quelldatei unantastbar.** Die vom Nutzer gewählte Datei auf der Platte wird
-   nur gelesen. Das Store-Asset (LuxiFers Kopie) wird nach dem Import ebenfalls
+   nur gelesen. Das Store-Asset (Studios Kopie) wird nach dem Import ebenfalls
    nie verändert — alle Bearbeitung ist nicht-destruktiv über `ImageParams`.
 2. **Asset ist Graustufe, volle Auflösung.** Farbe wird beim Import verworfen; das
    Store-Asset ist bereits grau (Laser braucht ohnehin Graustufe). Das Canvas
@@ -226,7 +226,7 @@ Teil dieses ADR — hier entstehen nur Datenmodell, Import, Bearbeitung und Laye
    nur bei tatsächlicher Eingabeänderung (§3a). Persistiert werden nur `asset`-ID
    + `ImageParams`.
 6. **Fachlogik im Core.** Store, Hash, Graustufen-/Schwellwert-/Tonwert-Rechnung
-   liegen UI-frei in `luxifer-core` und sind testbar (CLAUDE.md Regel 1). Das
+   liegen UI-frei in `studio-core` und sind testbar (CLAUDE.md Regel 1). Das
    Frontend zeichnet nur die Vorschau.
 7. **Aus ThorBurn wird kein Code kopiert** (CLAUDE.md Regel 6) — nur die Idee der
    Tonwert-LUT wird im aktuellen Stil neu gebaut.
@@ -234,7 +234,7 @@ Teil dieses ADR — hier entstehen nur Datenmodell, Import, Bearbeitung und Laye
 ## Konsequenzen
 
 - Der Asset-Store (`Assets/`) entsteht jetzt; `asset_refs` (ADR 0003) wird erstmals
-  befüllt. Charon kann Assets später per Hash einmalig ablegen und zusammen mit
+  befüllt. Hub kann Assets später per Hash einmalig ablegen und zusammen mit
   referenzierenden Projektversionen an andere Arbeitsplätze ausliefern.
 - `Geo` bekommt die Variante `Image`; Serialisierung bleibt vorwärts-tolerant.
 - `LayerMode` bekommt `Image`; `Layer` bekommt `bidirectional`.

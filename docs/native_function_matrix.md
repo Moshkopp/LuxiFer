@@ -5,10 +5,10 @@ Gehört zu: [Native-only-Migration](native_only_migration_tasks.md)
 
 ## Legende
 
-- **Core**: Fachoperation existiert bereits im `luxifer-core`; Tauri ist im
+- **Core**: Fachoperation existiert bereits im `studio-core`; Tauri ist im
   Wesentlichen Adapter und wird gelöscht.
 - **Application**: Ablauf, I/O oder Ressourcenkoordination muss aus Tauri und/oder
-  Native in `luxifer-application` extrahiert werden.
+  Native in `studio-application` extrahiert werden.
 - **Native**: Betriebssystem- oder Präsentationsaufgabe bleibt im Native-Crate.
 - **Prüfen**: vorhandene Native-Verdrahtung ist ein Spike und noch nicht als
   vollständig oder korrekt abgenommen.
@@ -36,14 +36,14 @@ Sammelmodul werden; Projekt-, Asset- und Laserabläufe erhalten eigene Services.
 | `redo` | Core/Application | über `EditorSession` | Strg+Shift+Z und Strg+Y; Modal-/Fokus-Gate wirksam |
 | `frontend_ready` | entfällt | entfällt | reiner Tauri/WebView-Lebenszyklus |
 
-Charon (ADR 0012): standardmäßig lokaler Server auf `127.0.0.1:3737`; eine
-interne Netzwerkbindung verlangt `CHARON_BIND` plus
-`CHARON_ALLOW_NETWORK=1`. Versionierter Handshake, Projekt-Outbox/Inbox,
+Hub (ADR 0012): standardmäßig lokaler Server auf `127.0.0.1:3737`; eine
+interne Netzwerkbindung verlangt `HUB_BIND` plus
+`HUB_ALLOW_NETWORK=1`. Versionierter Handshake, Projekt-Outbox/Inbox,
 Push-Verteilung, Asset-Abgleich,
 arbeitsplatzbezogene Settings-Sicherung und exklusive Ethernet-Ruida-Leases.
-LuxiFer hält die Lease per Heartbeat und verbindet den Treiber selbst; Charon
+Studio hält die Lease per Heartbeat und verbindet den Treiber selbst; Hub
 steuert keine Maschine. Lokales Speichern und die Asset-Bibliothek bleiben
-ohne Charon vollständig nutzbar.
+ohne Hub vollständig nutzbar.
 
 ## Editor, Auswahl und Layer
 
@@ -121,7 +121,7 @@ Quelle: `frontend/src-tauri/src/commands/image.rs` sowie Projekt-Assets.
 
 Quelle: `frontend/src-tauri/src/commands/project.rs`. Das frühere
 Native-Duplikat `native/src/project.rs` ist gelöscht; kanonisch ist der
-`ProjectService` in `luxifer-application` (nutzt die Core-`ProjectFile`-Kette).
+`ProjectService` in `studio-application` (nutzt die Core-`ProjectFile`-Kette).
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
@@ -144,7 +144,7 @@ Native-Duplikat `native/src/project.rs` ist gelöscht; kanonisch ist der
 
 Quelle: `frontend/src-tauri/src/commands/laser.rs`. Das frühere Native-Duplikat
 `native/src/laser.rs` ist gelöscht; kanonisch ist der `LaserService` in
-`luxifer-application` (hardwarelos mit Fake-Ruida getestet).
+`studio-application` (hardwarelos mit Fake-Ruida getestet).
 
 | Tauri-Command | Ziel | Native-Stand | Migration/Abnahme |
 |---|---|---|---|
@@ -190,7 +190,7 @@ Zusätzlich, obwohl es keine separaten Commands sind:
 
 ## Befund für den ersten Umsetzungsschnitt (historisch, umgesetzt)
 
-Der damals empfohlene Einstieg (Anlage von `luxifer-application` mit
+Der damals empfohlene Einstieg (Anlage von `studio-application` mit
 `EditorSession`/`AppError`, read-only Sessionzugriff statt DTO, erste
 Mutationen `delete_selected`/`undo`/`redo`, Fehleranzeige, Tests) ist
 vollständig umgesetzt; die Abhängigkeitsgrenze `native → application →

@@ -1,7 +1,7 @@
 # ThorBurn — Vollständige Analyse (belegt am Quellcode)
 
-Analyse der Vorgänger-App **ThorBurn** als Grundlage für den LuxiFer-Neustart
-(Rust-Core + Tauri + Svelte, Server = Charon). Ziel: verstehen, was die Software
+Analyse der Vorgänger-App **ThorBurn** als Grundlage für den Studio-Neustart
+(Rust-Core + Tauri + Svelte, Server = Hub). Ziel: verstehen, was die Software
 **genau macht**, wenn man (a) im Canvas etwas ausführt, (b) ein Projekt
 speichert, (c) den Laser bedienen will. Alle Aussagen sind mit Datei:Zeile
 belegt. **Kein Code wird kopiert** — dies ist die Bauplan-Grundlage.
@@ -225,7 +225,7 @@ liegt in `web/job.js`, `web/controller/*.js`.
 
 ---
 
-## 6. Kern-Erkenntnisse für LuxiFer-Neustart
+## 6. Kern-Erkenntnisse für Studio-Neustart
 
 1. **Rust-Core = einzige Wahrheit.** `state.rs` (Modell + Interaktions-Zustand +
    Undo) und `geometry` (bbox/hit_test/translate/scale) sind direkt übertragbar.

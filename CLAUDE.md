@@ -1,4 +1,4 @@
-# CLAUDE.md — Arbeitsrichtlinien für LuxiFer (Rust / Tauri / Svelte)
+# CLAUDE.md — Arbeitsrichtlinien für Studio (Rust / Tauri / Svelte)
 
 Verbindlich. Regeln mit **MUSS** / **DARF NICHT** sind Architektur-Invarianten;
 Abweichung nur mit ausdrücklicher Zustimmung des Nutzers. Antworten und
@@ -6,43 +6,43 @@ Code-Kommentare auf Deutsch.
 
 ## Projekt in einem Satz
 
-LuxiFer ist eine offline-first Desktop-Anwendung zur Laser-Steuerung.
-**Die GUI ist das Produkt.** Charon (Rust) ist ein optionaler Koordinations-
+Studio ist eine offline-first Desktop-Anwendung zur Laser-Steuerung.
+**Die GUI ist das Produkt.** Hub (Rust) ist ein optionaler Koordinations-
 Server und niemals Voraussetzung für lokale Arbeit.
 
 ## Stack (Native-only seit ADR 0011)
 
-- **luxifer-core** (Rust): Fachmodell, Geometrie, Layer/Farbe, Undo,
+- **studio-core** (Rust): Fachmodell, Geometrie, Layer/Farbe, Undo,
   Projektformat und Job-Kompilierung. **Einzige fachliche Quelle der Wahrheit.**
-- **luxifer-application** (Rust): UI-unabhängige Anwendungsfälle, I/O-
+- **studio-application** (Rust): UI-unabhängige Anwendungsfälle, I/O-
   Koordination, Fehlergrenze und Geräte-Lebenszyklen.
-- **luxifer-native** (Rust): winit + wgpu + egui. Fenster, Eingaben, Rendering
+- **studio** (Rust): winit + wgpu + egui. Fenster, Eingaben, Rendering
   und kurzlebiger Präsentationszustand.
-- **Charon** (Rust): optionaler Koordinationsserver; niemals Voraussetzung für
+- **Hub** (Rust): optionaler Koordinationsserver; niemals Voraussetzung für
   lokale Arbeit und niemals Maschinensteuerung.
 
 ## Verzeichnisse
 
 | Pfad | Inhalt |
 |------|--------|
-| `luxifer/core/` | Rust-Core (UI-frei, testbar) |
-| `luxifer/application/` | UI-unabhängige Anwendungsfälle und Fehlergrenze |
-| `luxifer/native/` | Produktive native Desktop-GUI |
-| `luxifer/drivers/` | Maschinenprotokolle hinter Application-Schnittstellen |
-| `charon/` | Optionaler Koordinationsserver |
+| `studio/core/` | Rust-Core (UI-frei, testbar) |
+| `studio/application/` | UI-unabhängige Anwendungsfälle und Fehlergrenze |
+| `studio/native/` | Produktive native Desktop-GUI |
+| `studio/drivers/` | Maschinenprotokolle hinter Application-Schnittstellen |
+| `hub/` | Optionaler Koordinationsserver |
 | `docs/referenz/` | ThorBurn-Analyse + Funktions-Worksheet (Bauplan) |
 | `nur zur Referenu/` | Altes ThorBurn-Projekt — **nur Referenz, gitignored** |
 
 ## Architektur-Invarianten
 
-1. **Fachlogik gehört in `luxifer-core`** (Rust), nicht in die native UI.
+1. **Fachlogik gehört in `studio-core`** (Rust), nicht in die native UI.
    Geometrie, Hit-Test, Bounds, Skalierung, Layer/Farbe, Undo, Job sind im Core
    und dort testbar. Faustregel: Was ohne UI testbar sein sollte, gehört in den
    Core. **Keine Canvas-Fachlogik doppelt im Frontend** (das war ThorBurns
    Fehler).
 2. Native zeichnet und übersetzt Eingaben in Application-Aufrufe. Vollständige
    Anwendungsfälle, Persistenz und Geräte-Lebenszyklen gehören nach
-   `luxifer-application`; Native hält keinen zweiten fachlichen Wahrheitszustand.
+   `studio-application`; Native hält keinen zweiten fachlichen Wahrheitszustand.
 3. **Farbe = Layer = Parametersatz, automatisch verwaltet.** Der Nutzer legt NIE
    manuell einen Layer an. Farbe klicken → `AppState::activate_color` (bei
    Auswahl Shape in Farb-Layer verschieben, sonst `pending_color` merken); leere
@@ -50,7 +50,7 @@ Server und niemals Voraussetzung für lokale Arbeit.
    docs/referenz/01-thorburn-analyse.md §1.5.
 4. **Undo ist Snapshot-basiert** (`push_undo` vor jeder mutierenden Aktion),
    nicht Command-basiert.
-5. **Charon steuert niemals eine Maschine** und ist nie Voraussetzung für lokale
+5. **Hub steuert niemals eine Maschine** und ist nie Voraussetzung für lokale
    Arbeit.
 
 ## Referenz (ThorBurn)
@@ -70,7 +70,7 @@ cargo clippy
 cargo fmt
 
 # Native Anwendung starten
-cargo run -p luxifer-native
+cargo run -p studio
 ```
 
 7. **Vor jedem Commit:** `cargo build` + `cargo test` grün, `cargo clippy` ohne

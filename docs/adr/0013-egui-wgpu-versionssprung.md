@@ -12,7 +12,7 @@ technisches UI- und Renderfundament.
 
 ## Kontext
 
-Der native LuxiFer-Renderer wurde am 2026-07-12 mit diesem Versionssatz
+Der native Studio-Renderer wurde am 2026-07-12 mit diesem Versionssatz
 begonnen:
 
 ```toml
@@ -30,7 +30,7 @@ wurde dieser Stand ohne dokumentierte Kompatibilitäts- oder Produktanforderung
 
 Zum Zeitpunkt dieser Entscheidung ist `egui 0.35.0` der aktuelle Stand.
 `egui-wgpu 0.35.0` verwendet `wgpu 29` und bleibt mit `winit 0.30` kompatibel.
-Ein isoliertes Update nur des UI-Crates ist daher nicht möglich: LuxiFer
+Ein isoliertes Update nur des UI-Crates ist daher nicht möglich: Studio
 verwendet dieselben wgpu-Typen sowohl im eigenen Canvas-Renderer als auch an
 der egui-Rendergrenze. Unterschiedliche wgpu-Hauptversionen würden getrennte,
 nicht austauschbare Rust-Typen erzeugen.
@@ -42,14 +42,14 @@ führen eine stärker `Ui`-orientierte Wurzel- und Panel-API ein; die bisher
 verwendeten `Context`-, `SidePanel`- und `TopBottomPanel`-Einstiegspunkte sind
 teilweise abgelöst oder als veraltet markiert.
 
-Die Architektur aus ADR 0010/0011 begrenzt das Risiko: `luxifer-core` und
-`luxifer-application` kennen weder egui noch winit oder wgpu. Der
+Die Architektur aus ADR 0010/0011 begrenzt das Risiko: `studio-core` und
+`studio-application` kennen weder egui noch winit oder wgpu. Der
 Versionssprung betrifft damit die native Präsentations- und Rendergrenze, nicht
-Projektformat, Fachlogik, Charon-Protokoll oder Maschinensteuerung.
+Projektformat, Fachlogik, Hub-Protokoll oder Maschinensteuerung.
 
 ## Entscheidung
 
-LuxiFer hebt den nativen UI- und Renderstack jetzt koordiniert auf folgenden
+Studio hebt den nativen UI- und Renderstack jetzt koordiniert auf folgenden
 Zielstand an:
 
 ```toml
@@ -73,9 +73,9 @@ Für die Migration gelten diese Grenzen:
    Render-Pass-Typ verwenden.
 3. Veraltete egui-Einstiegspunkte werden auf die aktuelle API umgestellt, statt
    Warnungen oder Übergangsadapter dauerhaft zu übernehmen.
-4. Anpassungen bleiben in `luxifer-native`. Eine durch das Upgrade ausgelöste
-   Verschiebung von UI- oder Renderdetails in `luxifer-core` oder
-   `luxifer-application` ist nicht zulässig.
+4. Anpassungen bleiben in `studio`. Eine durch das Upgrade ausgelöste
+   Verschiebung von UI- oder Renderdetails in `studio-core` oder
+   `studio-application` ist nicht zulässig.
 5. Fachliche Änderungen, neue UI-Funktionen und visuelle Neugestaltung gehören
    nicht in diesen Migrationsschnitt. Sichtbare Abweichungen werden nur
    korrigiert, soweit sie durch den Versionssprung entstehen.
@@ -111,7 +111,7 @@ Der Versionssprung gilt als abgeschlossen, wenn:
 - Spätere UI-Arbeit verwendet die aktuelle egui-API und muss nicht erneut über
   mehrere Hauptversionen migriert werden.
 - Neuere Fehlerkorrekturen und Verbesserungen in egui, wgpu und deren
-  Plattformintegration stehen LuxiFer zur Verfügung.
+  Plattformintegration stehen Studio zur Verfügung.
 - Der Versionssatz und seine Kopplung sind als bewusste Architekturentscheidung
   dokumentiert.
 
@@ -137,7 +137,7 @@ egui, wgpu und winit erfordern erneut eine explizite technische Prüfung.
 
 ## Umsetzungsstand
 
-- `luxifer-native` verwendet `egui`, `egui-wgpu` und `egui-winit` jeweils in
+- `studio` verwendet `egui`, `egui-wgpu` und `egui-winit` jeweils in
   Version `0.35.0`, `wgpu` in Version `29.0.4` und weiterhin `winit 0.30.13`.
 - Die egui-Wurzel wurde von `Context::run` auf `Context::run_ui` und die
   UI-Komposition auf die neue `Ui`- und `Panel`-API umgestellt.
@@ -149,7 +149,7 @@ egui, wgpu und winit erfordern erneut eine explizite technische Prüfung.
 - Die neue Surface-Status-API behandelt Erfolg, suboptimale Frames,
   Rekonfiguration und vorübergehend nicht darstellbare Frames explizit.
 - Rust `1.96.1` erfüllt den vom aktuellen egui-Stack verlangten Mindeststand.
-- `cargo tree -p luxifer-native --depth 2` zeigt nur `egui 0.35.0` und
+- `cargo tree -p studio --depth 2` zeigt nur `egui 0.35.0` und
   `wgpu 29.0.4`; alte Hauptversionen verbleiben nicht im nativen Baum.
 - `cargo test --workspace` ist vollständig erfolgreich: 352 Tests, keine
   Fehler.

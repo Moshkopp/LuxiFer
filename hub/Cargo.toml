@@ -1,0 +1,12 @@
+[package]
+name = "hub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Hub — optionaler Koordinations-Server für Studio."
+
+[dependencies]
+studio-core = { path = "../studio/core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
