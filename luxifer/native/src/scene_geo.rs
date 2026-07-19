@@ -595,6 +595,29 @@ mod tests {
     }
 
     #[test]
+    fn layer_manager_moduswechsel_erzeugt_im_canvas_einen_fill_batch() {
+        let mut state = AppState::new();
+        state.add_shape(luxifer_core::Geo::Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        });
+        let mut session = luxifer_application::EditorSession::new(state);
+        let mut params = vec![luxifer_application::LayerParams::from_layer(
+            &session.layers[0],
+        )];
+        params[0].mode = luxifer_core::LayerMode::Fill;
+
+        session.set_all_layer_params(&params).unwrap();
+        let (vertices, batches) = solid_fills(&session);
+
+        assert!(!vertices.is_empty());
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].compounds.len(), 1);
+    }
+
+    #[test]
     fn offene_kontur_erzeugt_keine_design_flaeche() {
         let mut state = AppState::new();
         state.add_shape(luxifer_core::Geo::Polyline {

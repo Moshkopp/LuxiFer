@@ -29,9 +29,10 @@ pub(crate) use project::preview_from_state;
 pub use splash::Splash;
 pub use state::{
     CachedProjectDetail, CharonTestStatus, CropKind, GeoOpDialogState, GeoOpKind, ImageDialogPage,
-    ImageDialogState, LaserManagerState, LaserManagerTab, LayerDialogState, PendingProjectAction,
-    ProjectBrowserState, ProjectSaveDialogState, RevisionComparisonState, SelectionSizeState,
-    SettingsDialogState, SettingsSection, TextDialogState,
+    ImageDialogState, LaserManagerState, LaserManagerTab, LayerDialogState, LayerManagerState,
+    MaterialManagerState, PendingProjectAction, ProjectBrowserState, ProjectSaveDialogState,
+    RevisionComparisonState, SelectionSizeState, SettingsDialogState, SettingsSection,
+    TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -82,6 +83,8 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
                 inbox_count,
                 app.ui_settings.charon_enabled,
                 &app.charon_status,
+                &app.laser_backend.registry,
+                app.laser_backend.is_connected(),
             )
         })
         .inner;
@@ -391,6 +394,8 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
         || app.geo_op_dialog.is_some()
         || app.settings_dialog.is_some()
         || app.laser_manager.is_some()
+        || app.material_manager.is_some()
+        || app.layer_manager.is_some()
         || app.project_save_dialog.is_some()
         || app.revision_comparison.is_some()
         || app.pending_project.is_some()
@@ -436,13 +441,13 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
     // Ergebnis (Übernahme über die validierende Session bzw. Verwerfen).
     if let Some(state) = app.layer_dialog.as_mut() {
         match dialogs::layer_dialog_window(ui, &mut state.params) {
-            dialogs::DialogOutcome::None => {}
-            dialogs::DialogOutcome::Commit => {
+            dialogs::LayerDialogOutcome::None => {}
+            dialogs::LayerDialogOutcome::Commit => {
                 if app.commit_layer_dialog() {
                     app.layer_dialog = None;
                 }
             }
-            dialogs::DialogOutcome::Cancel => app.layer_dialog = None,
+            dialogs::LayerDialogOutcome::Cancel => app.layer_dialog = None,
         }
     }
 
@@ -574,6 +579,36 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             dialogs::LaserManagerOutcome::Delete => app.laser_manager_delete(),
             dialogs::LaserManagerOutcome::MachineRead => app.laser_manager_machine_read(),
             dialogs::LaserManagerOutcome::MachineWrite => app.laser_manager_machine_write(),
+        }
+    }
+
+    if app.layer_manager.is_some() && app.material_manager.is_none() {
+        let laser = app.laser_backend.active_profile().cloned();
+        let colors: Vec<_> = app.session.layers.iter().map(|layer| layer.color).collect();
+        let outcome = dialogs::layer_manager_window(
+            ui,
+            app.layer_manager.as_mut().unwrap(),
+            laser.as_ref(),
+            &app.material_library,
+            &colors,
+        );
+        match outcome {
+            dialogs::LayerManagerOutcome::None => {}
+            dialogs::LayerManagerOutcome::Save => app.layer_manager_save(),
+            dialogs::LayerManagerOutcome::Cancel => app.layer_manager = None,
+            dialogs::LayerManagerOutcome::NewMaterial => app.open_material_manager(true),
+            dialogs::LayerManagerOutcome::EditMaterial => app.open_material_manager(false),
+        }
+    }
+
+    // Materialeditor liegt über dem Layer-Manager und kehrt nach Speichern
+    // dorthin zurück.
+    if let Some(state) = app.material_manager.as_mut() {
+        match dialogs::material_manager_window(ui, state) {
+            dialogs::MaterialManagerOutcome::None => {}
+            dialogs::MaterialManagerOutcome::Save => app.material_manager_save(),
+            dialogs::MaterialManagerOutcome::Delete => app.material_manager_delete(),
+            dialogs::MaterialManagerOutcome::Cancel => app.material_manager = None,
         }
     }
 

@@ -376,6 +376,50 @@ fn layer_parameter_vollstaendig_setzen_ist_ein_undo_schritt() {
 }
 
 #[test]
+fn layer_manager_uebernimmt_alle_zeilen_in_einem_undo_schritt() {
+    let mut state = luxifer_core::AppState::new();
+    state.activate_color([255, 0, 0]);
+    state.add_shape(luxifer_core::Geo::Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    state.selected.clear();
+    state.activate_color([0, 0, 255]);
+    state.add_shape(luxifer_core::Geo::Rect {
+        x: 20.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    let before = state.layers.clone();
+    let mut session = EditorSession::new(state);
+    let render_rev_before = session.render_rev();
+    let mut drafts: Vec<_> = session.layers.iter().map(LayerParams::from_layer).collect();
+    drafts[0].mode = luxifer_core::LayerMode::Fill;
+    drafts[0].speed_mm_s = 18.0;
+    drafts[1].speed_mm_s = 220.0;
+    session.set_all_layer_params(&drafts).unwrap();
+    assert_eq!(session.layers[0].speed_mm_s, 18.0);
+    assert_eq!(session.layers[1].speed_mm_s, 220.0);
+    assert_eq!(session.layers[0].mode, luxifer_core::LayerMode::Fill);
+    assert!(session.render_rev() > render_rev_before);
+    assert!(session.undo());
+    assert_eq!(session.layers, before);
+}
+
+#[test]
+fn layer_manager_validiert_alle_zeilen_vor_jeder_mutation() {
+    let mut session = session_with_rect();
+    let before = session.layers.clone();
+    let mut drafts = vec![valid_params()];
+    drafts[0].power_pct = 120.0;
+    assert!(session.set_all_layer_params(&drafts).is_err());
+    assert_eq!(session.layers, before);
+}
+
+#[test]
 fn ungueltige_leistung_ausserhalb_prozentbereich_mutiert_nicht() {
     let mut session = session_with_rect();
     session.state_mut_for_migration().dirty = false;

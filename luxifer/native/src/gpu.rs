@@ -715,10 +715,18 @@ fn vs(@location(0) p: vec2<f32>, @location(1) dir: vec2<f32>,
                       + u.pivot + u.offset;
     var px = (transformed - u.center) * u.scale;
     // Senkrechte zur Segmentrichtung, um HALF_W Pixel zur Seite versetzen.
-    let transformed_dir = normalize(vec2<f32>(
+    let raw_dir = vec2<f32>(
         u.matrix.x * dir.x + u.matrix.y * dir.y,
         u.matrix.z * dir.x + u.matrix.w * dir.y,
-    ));
+    );
+    // Flächenvertices nutzen denselben Shader, haben aber absichtlich keinen
+    // Linienrichtungsvektor. normalize(vec2(0)) ergibt NaN und verwirft damit
+    // das komplette Fill-Dreieck. Nur echte Linienrichtungen normalisieren.
+    var transformed_dir = vec2<f32>(0.0, 0.0);
+    let dir_len = length(raw_dir);
+    if dir_len > 0.000001 {
+        transformed_dir = raw_dir / dir_len;
+    }
     let n = vec2<f32>(-transformed_dir.y, transformed_dir.x);
     let outer = HALF_W + u.line_aa;
     px = px + n * side * outer;

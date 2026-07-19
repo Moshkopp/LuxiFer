@@ -124,6 +124,8 @@ pub enum UiAction {
     /// Verbindung zum aktiven Laser ausdrücklich aufbauen oder trennen.
     LaserConnect,
     LaserDisconnect,
+    /// Alle vorhandenen Layer gemeinsam für den Laserjob konfigurieren.
+    OpenLayerManager,
     /// Laser-Job-Aktion ausführen (Start/Pause/Stop/…).
     LaserRun(JobAction),
     /// Aktuellen Job als Datei exportieren.

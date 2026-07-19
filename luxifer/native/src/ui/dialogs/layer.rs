@@ -7,16 +7,22 @@
 use egui::RichText;
 use luxifer_application::LayerParams;
 
-use super::DialogOutcome;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(in crate::ui) enum LayerDialogOutcome {
+    #[default]
+    None,
+    Commit,
+    Cancel,
+}
 
 /// Zeichnet das Fenster auf `p` (den kurzlebigen Entwurf) und meldet, ob der
 /// Nutzer übernehmen/abbrechen will. Keine Mutation außerhalb des Entwurfs.
 pub(in crate::ui) fn layer_dialog_window(
     root_ui: &mut egui::Ui,
     p: &mut LayerParams,
-) -> DialogOutcome {
+) -> LayerDialogOutcome {
     use luxifer_core::LayerMode;
-    let mut outcome = DialogOutcome::None;
+    let mut outcome = LayerDialogOutcome::None;
     egui::Window::new("Ebene bearbeiten")
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -115,10 +121,10 @@ pub(in crate::ui) fn layer_dialog_window(
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.button("Speichern").clicked() {
-                    outcome = DialogOutcome::Commit;
+                    outcome = LayerDialogOutcome::Commit;
                 }
                 if ui.button("Abbrechen").clicked() {
-                    outcome = DialogOutcome::Cancel;
+                    outcome = LayerDialogOutcome::Cancel;
                 }
             });
         });

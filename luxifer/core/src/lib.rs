@@ -24,6 +24,7 @@ pub mod import;
 pub mod interact;
 pub mod job;
 pub mod laser;
+pub mod materials;
 pub mod model;
 pub mod nesting;
 pub mod pattern_fill;
@@ -58,6 +59,7 @@ pub use laser::{
     BedOrigin, Connection, DriverKind, JobAction, LaserProfile, LaserRegistry, ScanOffsetCal,
     ScanOffsetPoint,
 };
+pub use materials::{MaterialLibrary, MaterialProcess, MaterialProcessDefaults, MaterialProfile};
 pub use model::{Layer, LayerMode, Shape, TextMeta, SWATCH_COLORS};
 pub use project::{
     data_root, delete_project, list_projects, projects_dir, rename_project, version_thumb_path,

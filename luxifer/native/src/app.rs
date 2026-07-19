@@ -25,6 +25,7 @@ mod editor;
 mod image;
 mod laser;
 mod laser_manager;
+mod materials;
 mod project;
 mod settings;
 mod text;
@@ -90,6 +91,10 @@ pub struct App {
     pub settings_dialog: Option<crate::ui::SettingsDialogState>,
     /// Eigenständige Laserprofil-/Controllerverwaltung.
     pub laser_manager: Option<crate::ui::LaserManagerState>,
+    /// Lokale, laserbezogene Materialstandards; bewusst kein Projektinhalt.
+    pub material_library: luxifer_core::MaterialLibrary,
+    pub material_manager: Option<crate::ui::MaterialManagerState>,
+    pub layer_manager: Option<crate::ui::LayerManagerState>,
     /// Präsentationszustand des Projektbrowsers (Auswahl, Drafts, Detail-Cache).
     pub project_browser: crate::ui::ProjectBrowserState,
     /// Kurzlebiger Entwurf der numerischen Auswahlgröße im zweiten Header.
@@ -182,6 +187,7 @@ impl App {
 
         let ui_settings = luxifer_core::UiSettings::load();
         let laser_backend = luxifer_application::LaserService::load();
+        let material_library = luxifer_core::MaterialLibrary::load();
         let charon_runtime = charon::CharonRuntime::new(&ui_settings, &laser_backend.registry)?;
         let project_inbox = luxifer_application::list_inbox().unwrap_or_default();
         let project_integration = project::ProjectIntegrationRuntime::new()?;
@@ -236,6 +242,9 @@ impl App {
             laser_lease_pending: false,
             settings_dialog: None,
             laser_manager: None,
+            material_library,
+            material_manager: None,
+            layer_manager: None,
             project_browser: Default::default(),
             selection_size: Default::default(),
             project_inbox,
@@ -441,6 +450,8 @@ impl App {
             || self.project_save_dialog.is_some()
             || self.settings_dialog.is_some()
             || self.laser_manager.is_some()
+            || self.material_manager.is_some()
+            || self.layer_manager.is_some()
             || self.revision_comparison.is_some()
             || self.pending_project.is_some()
             || self.close_pending
@@ -605,6 +616,7 @@ impl App {
             A::LaserSelect(id) => self.laser_select(&id),
             A::LaserConnect => self.laser_connect(),
             A::LaserDisconnect => self.laser_disconnect(),
+            A::OpenLayerManager => self.open_layer_manager(),
             A::LaserRun(action) => self.laser_run(action),
             A::LaserExport => self.laser_export(),
             A::LaserJog(dx, dy) => self.laser_jog(dx, dy),

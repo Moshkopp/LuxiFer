@@ -19,6 +19,8 @@ pub(super) fn topbar(
     inbox_count: usize,
     charon_enabled: bool,
     charon_status: &CharonTestStatus,
+    lasers: &luxifer_core::LaserRegistry,
+    laser_connected: bool,
 ) -> Vec<UiAction> {
     let mut actions = Vec::new();
     ui.add_space(4.0);
@@ -132,6 +134,47 @@ pub(super) fn topbar(
                     actions.push(UiAction::OpenAssetLibrary);
                 }
                 ui.label(RichText::new(project_name).weak());
+                let active_laser = lasers.active();
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("header_laser")
+                        .selected_text(
+                            active_laser
+                                .map(|profile| profile.name.as_str())
+                                .unwrap_or("Kein Laser"),
+                        )
+                        .width(110.0)
+                        .show_ui(ui, |ui| {
+                            for profile in &lasers.profiles {
+                                if ui
+                                    .selectable_label(
+                                        lasers.active_id.as_deref() == Some(profile.id.as_str()),
+                                        &profile.name,
+                                    )
+                                    .clicked()
+                                {
+                                    actions.push(UiAction::LaserSelect(profile.id.clone()));
+                                }
+                            }
+                        });
+                    if ui
+                        .add_enabled(
+                            active_laser.is_some(),
+                            egui::Button::new(if laser_connected { "●" } else { "○" }),
+                        )
+                        .on_hover_text(if laser_connected {
+                            "Laser trennen"
+                        } else {
+                            "Laser verbinden"
+                        })
+                        .clicked()
+                    {
+                        actions.push(if laser_connected {
+                            UiAction::LaserDisconnect
+                        } else {
+                            UiAction::LaserConnect
+                        });
+                    }
+                });
             });
         });
     });

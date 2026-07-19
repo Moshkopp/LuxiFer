@@ -44,6 +44,35 @@ impl LayerParams {
 }
 
 impl EditorSession {
+    /// Übernimmt den vollständigen Layer-Manager-Entwurf atomar. Entweder sind
+    /// alle Zeilen gültig und bilden einen Undo-Schritt, oder keine mutiert.
+    pub fn set_all_layer_params(&mut self, params: &[LayerParams]) -> Result<(), AppError> {
+        if params.len() != self.state.layers.len() {
+            return Err(AppError::new(
+                "layer_manager_stale",
+                "Die Layerliste hat sich während der Bearbeitung verändert.",
+            ));
+        }
+        for (draft, layer) in params.iter().zip(&self.state.layers) {
+            Self::validate_layer_params(draft, layer.mode)?;
+        }
+        self.state.push_undo();
+        for (layer, draft) in self.state.layers.iter_mut().zip(params) {
+            layer.name = draft.name.clone();
+            layer.mode = draft.mode;
+            layer.speed_mm_s = draft.speed_mm_s;
+            layer.power_pct = draft.power_pct;
+            layer.min_power_pct = draft.min_power_pct;
+            layer.passes = draft.passes;
+            layer.air_assist = draft.air_assist;
+            layer.line_step_mm = draft.line_step_mm;
+            layer.dpi = draft.dpi;
+            layer.bidirectional = draft.bidirectional;
+        }
+        self.state.dirty = true;
+        Ok(())
+    }
+
     pub fn toggle_layer(&mut self, index: usize, toggle: LayerToggle) -> Result<(), AppError> {
         if index >= self.state.layers.len() {
             return Err(Self::invalid_layer(index));

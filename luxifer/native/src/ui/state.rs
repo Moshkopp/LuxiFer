@@ -295,6 +295,17 @@ pub struct LaserManagerState {
     pub machine_confirm_write: bool,
 }
 
+/// Kurzlebiger Entwurf eines lokalen, laserbezogenen Materialprofils.
+pub struct MaterialManagerState {
+    pub draft: luxifer_core::MaterialProfile,
+    pub is_new: bool,
+}
+
+pub struct LayerManagerState {
+    pub layers: Vec<luxifer_application::LayerParams>,
+    pub material_id: Option<String>,
+}
+
 /// Entwurf der „Neues Projekt"-Maske (Strg+S ohne offenes Projekt bzw.
 /// „Neues Projekt…" im Projekt-Reiter): Name + Beschreibung. Kurzlebig —
 /// Anlegen läuft über den validierenden `ProjectService`.

@@ -28,7 +28,17 @@ pub(super) struct LayerRow {
 /// oben (letzte Ebene) nach unten. Gibt die ausgelösten Absichten zurück.
 pub(super) fn layers_panel(ui: &mut egui::Ui, rows: &[LayerRow]) -> Vec<UiAction> {
     let mut actions = Vec::new();
-    ui.label(RichText::new("EBENEN").small().weak());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("EBENEN").small().weak());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(!rows.is_empty(), egui::Button::new("Layer verwalten"))
+                .clicked()
+            {
+                actions.push(UiAction::OpenLayerManager);
+            }
+        });
+    });
     ui.add_space(4.0);
     if rows.is_empty() {
         ui.weak("Keine Ebenen — zeichne etwas.");
