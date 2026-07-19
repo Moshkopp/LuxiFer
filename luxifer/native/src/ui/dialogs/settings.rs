@@ -576,67 +576,39 @@ fn charon_section(
         &mut state.draft.charon_enabled,
         "Charon-Koordination verwenden",
     );
-    ui.add_space(8.0);
-    ui.label("Serveradresse");
-    ui.add_enabled(
-        state.draft.charon_enabled,
-        egui::TextEdit::singleline(&mut state.draft.charon_url).desired_width(320.0),
-    );
-    ui.weak("Der erste Meilenstein unterstützt ausschließlich lokales HTTP.");
     ui.add_space(10.0);
-    if ui
-        .add_enabled(
-            state.draft.charon_enabled,
-            egui::Button::new("Verbindung testen"),
-        )
-        .clicked()
-    {
-        *outcome = SettingsOutcome::CharonTest;
-    }
-    ui.add_space(8.0);
-    match &state.charon_status {
-        CharonTestStatus::Idle => {
-            ui.weak("Noch nicht getestet.");
-        }
-        CharonTestStatus::Syncing(connection) | CharonTestStatus::Connected(connection) => {
-            let syncing = matches!(state.charon_status, CharonTestStatus::Syncing(_));
-            ui.colored_label(
-                if syncing {
-                    egui::Color32::from_rgb(0xfb, 0x92, 0x3c)
-                } else {
-                    egui::Color32::from_rgb(0x34, 0xd3, 0x99)
-                },
-                format!(
-                    "{}: Charon {} · Protokoll {}",
-                    if syncing {
-                        "Synchronisiert"
-                    } else {
-                        "Verbunden"
-                    },
-                    connection.handshake.server_version,
-                    connection.handshake.protocol_version
-                ),
-            );
-            ui.weak(format!("Instanz: {}", connection.handshake.instance_id));
-            ui.add_space(8.0);
-            ui.label("Arbeitsplätze");
-            for workplace in &connection.workplaces {
-                let (color, status) = if workplace.online {
-                    (egui::Color32::from_rgb(0x34, 0xd3, 0x99), "online")
-                } else {
-                    (ui.visuals().weak_text_color(), "offline")
-                };
-                ui.horizontal(|ui| {
-                    ui.colored_label(color, "⏺");
-                    ui.label(&workplace.name);
-                    ui.weak(status);
-                });
-            }
-        }
-        CharonTestStatus::Failed(message) => {
-            ui.colored_label(ui.visuals().error_fg_color, message);
-        }
-    }
+    ui.group(|ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.strong("Verbindung");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add_enabled(state.draft.charon_enabled, egui::Button::new("Testen"))
+                    .clicked()
+                {
+                    *outcome = SettingsOutcome::CharonTest;
+                }
+            });
+        });
+        ui.add_space(4.0);
+        egui::Grid::new("charon_connection")
+            .num_columns(2)
+            .spacing([12.0, 5.0])
+            .show(ui, |ui| {
+                ui.weak("Server");
+                ui.add_enabled(
+                    state.draft.charon_enabled,
+                    egui::TextEdit::singleline(&mut state.draft.charon_url)
+                        .desired_width(f32::INFINITY),
+                );
+                ui.end_row();
+                ui.weak("Status");
+                charon_connection_status(ui, state);
+                ui.end_row();
+            });
+        ui.add_space(2.0);
+        ui.weak("Nur lokales HTTP im vertrauenswürdigen internen Netzwerk.");
+    });
     if let Some(message) = &state.charon_sync_error {
         ui.add_space(6.0);
         ui.colored_label(
@@ -644,51 +616,43 @@ fn charon_section(
             format!("Projekt-Synchronisierung: {message}"),
         );
     }
-    ui.add_space(10.0);
-    if ui
-        .add_enabled(
-            state.draft.charon_enabled,
-            egui::Button::new("Sicherungen laden"),
-        )
-        .clicked()
-    {
-        *outcome = SettingsOutcome::CharonBackups;
-    }
-    let mut groups = std::collections::BTreeMap::new();
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.strong("Sicherungen");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(
+                    state.draft.charon_enabled,
+                    egui::Button::new("Aktualisieren"),
+                )
+                .clicked()
+            {
+                *outcome = SettingsOutcome::CharonBackups;
+            }
+        });
+    });
+    ui.weak("Automatische Stände dieses und anderer Arbeitsplätze.");
+    ui.add_space(5.0);
+    let mut groups: std::collections::BTreeMap<_, std::collections::BTreeMap<_, Vec<_>>> =
+        std::collections::BTreeMap::new();
     for (index, backup) in state.charon_backups.iter().enumerate() {
         groups
-            .entry((backup.workplace_name.clone(), backup.kind))
-            .or_insert_with(Vec::new)
+            .entry(backup.workplace_name.clone())
+            .or_default()
+            .entry(backup.kind)
+            .or_default()
             .push(index);
     }
-    for ((workplace, kind), indices) in groups {
-        let label = backup_kind_label(kind);
+    if groups.is_empty() {
+        ui.weak("Noch keine Sicherungen geladen.");
+    }
+    for (workplace, kinds) in groups {
         ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.strong(format!("{workplace} · {label}"));
-                let latest = &state.charon_backups[indices[0]];
-                ui.weak(format_backup_age(latest.saved_at_unix));
-                if ui.button("Letzten Stand wiederherstellen").clicked() {
-                    *outcome = SettingsOutcome::PrepareRestore(indices[0]);
-                }
-            });
-            if indices.len() > 1 {
-                egui::CollapsingHeader::new(format!(
-                    "Ältere Stände anzeigen ({})",
-                    indices.len() - 1
-                ))
-                .id_salt(("backup_history", &workplace, kind))
-                .show(ui, |ui| {
-                    for &index in indices.iter().skip(1) {
-                        let backup = &state.charon_backups[index];
-                        ui.horizontal(|ui| {
-                            ui.label(format_backup_age(backup.saved_at_unix));
-                            if ui.small_button("Wiederherstellen").clicked() {
-                                *outcome = SettingsOutcome::PrepareRestore(index);
-                            }
-                        });
-                    }
-                });
+            ui.set_width(ui.available_width());
+            ui.strong(&workplace);
+            ui.add_space(2.0);
+            for (kind, indices) in kinds {
+                backup_row(ui, state, outcome, &workplace, kind, &indices);
             }
         });
     }
@@ -711,6 +675,96 @@ fn charon_section(
                     *outcome = SettingsOutcome::CancelRestore;
                 }
             });
+        });
+    }
+}
+
+fn charon_connection_status(ui: &mut egui::Ui, state: &SettingsDialogState) {
+    match &state.charon_status {
+        CharonTestStatus::Idle => {
+            ui.weak("Noch nicht getestet");
+        }
+        CharonTestStatus::Syncing(connection) | CharonTestStatus::Connected(connection) => {
+            let syncing = matches!(state.charon_status, CharonTestStatus::Syncing(_));
+            let color = if syncing {
+                egui::Color32::from_rgb(0xfb, 0x92, 0x3c)
+            } else {
+                egui::Color32::from_rgb(0x34, 0xd3, 0x99)
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(color, "●");
+                ui.colored_label(
+                    color,
+                    format!(
+                        "Charon {} · Protokoll {}",
+                        connection.handshake.server_version, connection.handshake.protocol_version
+                    ),
+                );
+                ui.weak(format!("· {}", connection.handshake.instance_id));
+                for workplace in &connection.workplaces {
+                    ui.weak(format!(
+                        "· {} {}",
+                        workplace.name,
+                        if workplace.online {
+                            "online"
+                        } else {
+                            "offline"
+                        }
+                    ));
+                }
+            });
+        }
+        CharonTestStatus::Failed(message) => {
+            ui.colored_label(ui.visuals().error_fg_color, message);
+        }
+    }
+}
+
+fn backup_row(
+    ui: &mut egui::Ui,
+    state: &SettingsDialogState,
+    outcome: &mut SettingsOutcome,
+    workplace: &str,
+    kind: luxifer_application::CharonBackupKind,
+    indices: &[usize],
+) {
+    let latest = &state.charon_backups[indices[0]];
+    ui.horizontal(|ui| {
+        ui.add_sized([145.0, 24.0], egui::Label::new(backup_kind_label(kind)));
+        ui.add_sized(
+            [95.0, 24.0],
+            egui::Label::new(
+                egui::RichText::new(format_backup_age(latest.saved_at_unix))
+                    .color(ui.visuals().weak_text_color()),
+            ),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button("Wiederherstellen").clicked() {
+                *outcome = SettingsOutcome::PrepareRestore(indices[0]);
+            }
+        });
+    });
+    if indices.len() > 1 {
+        ui.indent(("backup_indent", workplace, kind), |ui| {
+            egui::CollapsingHeader::new(format!("{} ältere Stände", indices.len() - 1))
+                .id_salt(("backup_history", workplace, kind))
+                .show(ui, |ui| {
+                    for &index in indices.iter().skip(1) {
+                        let backup = &state.charon_backups[index];
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [120.0, 22.0],
+                                egui::Label::new(
+                                    egui::RichText::new(format_backup_age(backup.saved_at_unix))
+                                        .color(ui.visuals().weak_text_color()),
+                                ),
+                            );
+                            if ui.small_button("Wiederherstellen").clicked() {
+                                *outcome = SettingsOutcome::PrepareRestore(index);
+                            }
+                        });
+                    }
+                });
         });
     }
 }
