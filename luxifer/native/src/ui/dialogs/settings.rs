@@ -623,7 +623,7 @@ fn charon_section(
             if ui
                 .add_enabled(
                     state.draft.charon_enabled,
-                    egui::Button::new("Aktualisieren"),
+                    egui::Button::new("Backups anzeigen"),
                 )
                 .clicked()
             {
