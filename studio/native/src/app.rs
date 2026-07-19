@@ -24,6 +24,7 @@ mod editor;
 mod hub;
 mod image;
 mod laser;
+pub use laser::LaserMarkers;
 mod laser_manager;
 mod materials;
 mod project;
@@ -114,6 +115,10 @@ pub struct App {
     preview_trace: Option<studio_core::ExecutionTrace>,
     pub laser: LaserUi,
     pub laser_backend: studio_application::LaserService,
+    /// Live gelesener Maschinen-Anzeigestand (Kopf/Benutzerursprung, ADR 0020).
+    pub laser_live: laser::LaserLiveState,
+    /// Offener Nullpunkt-Namensdialog (Anlegen/Umbenennen) oder None.
+    pub saved_origin_dialog: Option<crate::ui::SavedOriginDialogState>,
     /// Zentraler, nutzerlesbarer Fehlerkanal der Anwendungsschicht.
     pub app_error: Option<AppError>,
     /// Aktive Zeichenfarbe für die Palette-Markierung (aus dem Core gespiegelt).
@@ -266,6 +271,8 @@ impl App {
             preview_trace: None,
             laser: LaserUi::default(),
             laser_backend,
+            laser_live: Default::default(),
+            saved_origin_dialog: None,
             app_error: None,
             accent,
             egui_ctx,
@@ -287,6 +294,9 @@ impl App {
             app.canvas.laser_editable_layers = Some(Default::default());
             app.apply_active_laser_workspace();
         }
+        // Zuletzt verwendete Startreferenz des aktiven Lasers wiederherstellen
+        // (lokale Bedienpräferenz, ADR 0020 §E).
+        app.restore_laser_start_reference();
         if let Some(path) = auto_import {
             app.import_path(std::path::Path::new(&path));
             // Beim Auto-Import gleich füllen (Fill-Stresstest sichtbar machen).
@@ -464,6 +474,7 @@ impl App {
             || self.close_pending
             || self.laser_uncoordinated_confirm
             || self.laser_lease_force_confirm.is_some()
+            || self.saved_origin_dialog.is_some()
             || self.splash.is_some()
     }
 
@@ -628,6 +639,8 @@ impl App {
             A::LaserJog(dx, dy) => self.laser_jog(dx, dy),
             A::LaserHome => self.laser_home(),
             A::OpenLaserManager { create_new } => self.open_laser_manager(create_new),
+            A::LaserSelectStartReference(reference) => self.laser_set_start_reference(reference),
+            A::LaserSaveOriginHere => self.laser_save_origin_here(),
         }
     }
 
@@ -718,6 +731,12 @@ impl App {
     }
 
     pub fn render(&mut self) {
+        // Gedrosseltes Live-Lesen der Maschinenposition im Laser-Tab (ADR
+        // 0020). Läuft VOR dem UI-Aufbau, damit Panel und Marker denselben
+        // Anzeigestand dieses Frames sehen.
+        if self.view == crate::tools::View::Laser {
+            self.poll_laser_status();
+        }
         // egui-Frame bauen (Panels): die Closure braucht `&mut App`, daher hier
         // im Root. Der egui-Kontext ist ein billiger Arc-Clone.
         let ui_started = std::time::Instant::now();
@@ -740,7 +759,7 @@ impl App {
                 "{}:{}:{:?}:{}:{:?}",
                 self.session.render_rev(),
                 self.laser.selection_only,
-                self.laser.start_mode,
+                self.laser.start_reference,
                 self.laser.anchor,
                 self.laser_backend.active_profile()
             );
@@ -760,7 +779,7 @@ impl App {
                     .execution_trace(
                         &shapes,
                         &self.session.state().layers,
-                        self.laser.start_mode,
+                        &self.laser.start_reference,
                         self.laser.anchor,
                     )
                     .ok();
@@ -792,15 +811,9 @@ impl App {
                 world_cursor: self.canvas.world(),
                 cam_scale: self.canvas.cam.scale,
                 invert_marquee_direction: self.canvas.invert_marquee_direction,
-                // Startmarker nur im Laser-Tab: Dort wird der Job platziert.
-                job_start: if self.view == crate::tools::View::Laser {
-                    self.session
-                        .job_start_marker(
-                            self.laser.selection_only,
-                            self.laser.start_mode,
-                            studio_core::Anchor::from_index(self.laser.anchor),
-                        )
-                        .map(|(x, y)| [x, y])
+                // Fadenkreuze Start/Ursprung/Kopf nur im Laser-Tab (ADR 0020).
+                laser_markers: if self.view == crate::tools::View::Laser {
+                    Some(self.laser_canvas_markers())
                 } else {
                     None
                 },

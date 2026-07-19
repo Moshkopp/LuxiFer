@@ -1,20 +1,16 @@
 use super::EditorSession;
 
 impl EditorSession {
-    /// Startpunkt-Marker des Jobs (mm): der gewählte Anker auf der Job-BBox
-    /// der aktiven Inhalte. `None` bei Startmodus „Absolut" (der Job liegt,
-    /// wo er gezeichnet ist) oder leerem Job. Die BBox entsteht aus denselben
-    /// rotierten Konturpunkten wie der JobPlan — ohne Fill-/Raster-Rechnung,
-    /// damit der Canvas sie pro Frame abfragen kann.
-    pub fn job_start_marker(
+    /// Der gewählte 3×3-Anker auf der Job-BBox der aktiven Inhalte (mm,
+    /// Editor-Koordinaten). `None` bei leerem Job. Die BBox entsteht aus
+    /// denselben rotierten Konturpunkten wie der JobPlan — ohne Fill-/Raster-
+    /// Rechnung, damit der Canvas sie pro Frame abfragen kann. Wo der Anker
+    /// tatsächlich startet (Startreferenz, ADR 0020), entscheidet der Aufrufer.
+    pub fn job_anchor_marker(
         &self,
         selection_only: bool,
-        start_mode: studio_core::StartMode,
         anchor: studio_core::Anchor,
     ) -> Option<(f64, f64)> {
-        if start_mode == studio_core::StartMode::Absolut {
-            return None;
-        }
         let mut bbox: Option<(f64, f64, f64, f64)> = None;
         for (i, shape) in self.state.shapes.iter().enumerate() {
             let enabled = self

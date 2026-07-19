@@ -101,6 +101,16 @@ fn seed_profile<T: Serialize>(kind: CatalogKind, id: &str, profile: &T) -> Resul
     enqueue_catalog_profile(kind, id, Some(profile))
 }
 
+/// Ob für diese ID eine lokale, noch nicht zum Hub übertragene Änderung in der
+/// Outbox liegt. Solange das gilt, darf ein empfangener (womöglich vor der
+/// Änderung gezogener) Katalogstand die lokale Version nicht überschreiben.
+pub(crate) fn has_pending_change(kind: CatalogKind, id: &str) -> Result<bool, AppError> {
+    Ok(load_catalog_state()?
+        .pending
+        .iter()
+        .any(|change| change.kind == kind && change.id == id))
+}
+
 pub(crate) fn load_catalog_state() -> Result<CatalogSyncState, AppError> {
     let _guard = STATE_LOCK
         .lock()

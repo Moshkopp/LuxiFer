@@ -31,8 +31,8 @@ pub use state::{
     BackupRestoreConfirmation, CachedProjectDetail, CropKind, GeoOpDialogState, GeoOpKind,
     HubTestStatus, ImageDialogPage, ImageDialogState, LaserManagerState, LaserManagerTab,
     LayerDialogState, LayerManagerState, MaterialManagerState, PendingProjectAction,
-    ProjectBrowserState, ProjectSaveDialogState, RevisionComparisonState, SelectionSizeState,
-    SettingsDialogState, SettingsSection, TextDialogState,
+    ProjectBrowserState, ProjectSaveDialogState, RevisionComparisonState, SavedOriginDialogState,
+    SelectionSizeState, SettingsDialogState, SettingsSection, TextDialogState,
 };
 pub use toast::Toasts;
 
@@ -344,6 +344,12 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             origin,
             bed,
         );
+        // Beschriftungen der Laser-Fadenkreuze (ADR 0020 §B): Text an festen,
+        // versetzten Quadranten, mit Hintergrund für Lesbarkeit auf hellem und
+        // dunklem Canvas. Die Kreuze selbst zeichnet das GPU-Overlay.
+        if app.view == View::Laser {
+            laser_marker_labels(ui, app, canvas_rect);
+        }
     }
 
     // Haltesteg-Entwurf: schwebendes Eingabefeld am Linienende — Breite live
@@ -401,8 +407,10 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
         || app.revision_comparison.is_some()
         || app.pending_project.is_some()
         || app.close_pending;
-    let has_dialog =
-        has_dialog || app.laser_uncoordinated_confirm || app.laser_lease_force_confirm.is_some();
+    let has_dialog = has_dialog
+        || app.laser_uncoordinated_confirm
+        || app.laser_lease_force_confirm.is_some()
+        || app.saved_origin_dialog.is_some();
     if has_dialog {
         let alpha = app
             .settings_dialog
@@ -568,6 +576,38 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
             app.laser_lease_force_confirm = None;
         } else if confirm {
             app.force_laser_lease();
+        }
+    }
+
+    // Nullpunkt-Namensdialog (ADR 0020 §D): Anlegen mit frisch gelesener
+    // Position bzw. Umbenennen. Leere Namen lehnt die Application ab; der
+    // Dialog bleibt dann zur Korrektur offen.
+    if let Some(dialog) = app.saved_origin_dialog.as_mut() {
+        let mut commit = false;
+        let mut cancel = false;
+        egui::Window::new("Nullpunkt speichern")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ui, |ui| {
+                let (x, y) = dialog.position;
+                ui.label(format!("Gelesene Position: X {x:.2} mm · Y {y:.2} mm"));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("Name");
+                    let response = ui.text_edit_singleline(&mut dialog.name);
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        commit = true;
+                    }
+                });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    cancel = ui.button("Abbrechen").clicked();
+                    commit |= ui.button("Speichern").clicked();
+                });
+            });
+        if cancel || (commit && app.commit_saved_origin_dialog()) {
+            app.saved_origin_dialog = None;
         }
     }
 
@@ -752,6 +792,64 @@ fn sync_project_browser(app: &mut App, open_name: Option<&str>) {
     }
 }
 
+/// Zeichnet die Textbeschriftungen „Start"/„Ursprung"/„Kopf" an die
+/// zugehörigen Fadenkreuze (feste Quadranten: Start links oberhalb, Ursprung
+/// rechts oberhalb, Kopf rechts unterhalb — ADR 0020 §B). Deckungsgleiche
+/// Marker bleiben so unterscheidbar.
+fn laser_marker_labels(ui: &mut egui::Ui, app: &App, canvas_rect: egui::Rect) {
+    let markers = app.laser_canvas_markers();
+    let ppp = ui.ctx().pixels_per_point();
+    let painter = ui
+        .ctx()
+        .layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("laser_marker_labels"),
+        ))
+        .with_clip_rect(canvas_rect);
+    // `anchor` = welche Ecke des Textkastens am (versetzten) Kreuz hängt.
+    let draw = |world: Option<[f64; 2]>,
+                label: &str,
+                anchor: egui::Align2,
+                offset: egui::Vec2,
+                color: Color32| {
+        let Some(world) = world else {
+            return;
+        };
+        let screen = app.canvas.cam.world_to_screen(world);
+        let pos = egui::pos2(screen[0] / ppp, screen[1] / ppp);
+        if !canvas_rect.contains(pos) {
+            return;
+        }
+        let font = egui::FontId::proportional(12.0);
+        let galley = painter.layout_no_wrap(label.to_owned(), font, color);
+        let rect = anchor.anchor_size(pos + offset, galley.size());
+        painter.rect_filled(rect.expand(3.0), 4.0, Color32::from_black_alpha(160));
+        painter.galley(rect.min, galley, color);
+    };
+    // Farbtöne identisch zu den GPU-Kreuzen (overlay.rs).
+    draw(
+        markers.start,
+        "Start",
+        egui::Align2::RIGHT_BOTTOM, // Text links oberhalb des Kreuzes
+        egui::vec2(-10.0, -8.0),
+        Color32::from_rgb(0x40, 0xc7, 0x73),
+    );
+    draw(
+        markers.origin,
+        "Ursprung",
+        egui::Align2::LEFT_BOTTOM, // rechts oberhalb
+        egui::vec2(10.0, -8.0),
+        Color32::from_rgb(0x40, 0x8c, 0xfa),
+    );
+    draw(
+        markers.head,
+        "Kopf",
+        egui::Align2::LEFT_TOP, // rechts unterhalb
+        egui::vec2(10.0, 8.0),
+        Color32::from_rgb(0xff, 0x9e, 0x26),
+    );
+}
+
 /// Leitet die reine Ebenen-Sicht für `layers_panel` aus der Session ab.
 fn layer_rows(app: &App) -> Vec<layers::LayerRow> {
     let s = app.session.state();
@@ -806,6 +904,36 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
     ];
     let can_export = has(JobAction::ExportFile);
     let connected = app.laser_backend.is_connected();
+    let capabilities = app.laser_backend.driver_capabilities();
+
+    // Nullpunktliste + Gültigkeit aus dem aktiven Profil (ADR 0020).
+    let saved_origins = app
+        .laser_backend
+        .active_profile()
+        .map(|profile| {
+            profile
+                .saved_origins
+                .iter()
+                .map(|origin| laserpanel::SavedOriginRow {
+                    id: origin.id.clone(),
+                    name: origin.name.clone(),
+                    x_mm: origin.x_mm,
+                    y_mm: origin.y_mm,
+                    usable: profile.saved_origin_usable(origin),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    // Verweist die gemerkte Auswahl auf eine gelöschte Nullpunkt-ID? Dann
+    // sichtbar warnen — kein stiller Fallback (ADR 0020 §E). Die Position
+    // selbst zeigt der Canvas über die Fadenkreuze.
+    let reference_missing = app
+        .laser
+        .start_reference
+        .saved_origin_id()
+        .is_some_and(|id| !saved_origins.iter().any(|row| row.id == id));
+    let can_save_origin = connected && capabilities.position_read;
     laserpanel::LaserView {
         profiles,
         active_id,
@@ -813,6 +941,9 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         can_export,
         connected,
         lease_pending: app.laser_lease_pending,
+        saved_origins,
+        reference_missing,
+        can_save_origin,
     }
 }
 

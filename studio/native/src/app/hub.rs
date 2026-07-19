@@ -358,11 +358,13 @@ fn worker(command_rx: Receiver<WorkerCommand>, result_tx: Sender<HubWorkerResult
                                 Err("Hub-Statuskanal wurde geschlossen.".into()),
                             );
                         }
+                        let capabilities = connection.handshake.capabilities.clone();
                         let sync = studio_application::sync_assets(&current.url)
                             .and_then(|mut report| {
                                 let catalog = studio_application::sync_shared_catalog(
                                     &current.url,
                                     &current.workplace_id,
+                                    &capabilities,
                                 )?;
                                 report.backups_uploaded =
                                     studio_application::upload_workplace_backups(

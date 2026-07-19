@@ -40,16 +40,16 @@ impl View {
     }
 }
 
-/// Laser-Bedien-Zustand (UI-seitig). Ohne echten Treiber-Anschluss im nativen
-/// Umbau — die Aktionen loggen vorerst; die Treiber-Verdrahtung kommt später.
+/// Laser-Bedien-Zustand (UI-seitig, kurzlebige Bedienpräferenzen).
 pub struct LaserUi {
     pub jog_step: f64,
     pub jog_speed: f64,
     /// Job-Nullpunkt-Anker (0..8, 4 = Mitte).
     pub anchor: usize,
     pub selection_only: bool,
-    /// Startmodus des Jobs (Absolut / aktuelle Position / Benutzerursprung).
-    pub start_mode: studio_core::StartMode,
+    /// „Starten von": typisierte Startreferenz (ADR 0020). Wird pro Laser in
+    /// den GUI-Settings gemerkt und beim Profilwechsel wiederhergestellt.
+    pub start_reference: studio_core::StartReference,
 }
 
 impl Default for LaserUi {
@@ -59,7 +59,7 @@ impl Default for LaserUi {
             jog_speed: 100.0,
             anchor: 4,
             selection_only: false,
-            start_mode: studio_core::StartMode::Absolut,
+            start_reference: studio_core::StartReference::Absolut,
         }
     }
 }

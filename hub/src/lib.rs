@@ -64,7 +64,7 @@ struct Handshake {
     server_version: &'static str,
     protocol_version: u32,
     instance_id: String,
-    capabilities: [&'static str; 10],
+    capabilities: [&'static str; 11],
 }
 
 #[derive(Serialize)]
@@ -400,6 +400,10 @@ fn route(
                 "workplace_backups",
                 "shared_catalog",
                 "machine_leases",
+                // Schema-Downgrade-Schutz für Laserprofile (ADR 0020). Studio
+                // synchronisiert Version-2-Profile nur mit Hubs, die diese
+                // Capability melden.
+                "laser_profile_schema_v2",
             ],
         })?,
         ("GET", "/api/v1/workplaces") => json_body(&workplace_list(state, now_unix()))?,
@@ -495,6 +499,9 @@ fn route(
                         "422 Unprocessable Entity",
                         r#"{"error":"hash_mismatch"}"#.into(),
                     ));
+                }
+                Err(StoreCatalogError::SchemaDowngrade) => {
+                    return Ok(("409 Conflict", r#"{"error":"schema_downgrade"}"#.into()));
                 }
                 Err(StoreCatalogError::Io(error)) => return Err(error),
             }
@@ -1005,7 +1012,20 @@ fn release_lease(state: &mut ServerState, request: &LeaseRelease) -> bool {
 enum StoreCatalogError {
     Invalid,
     HashMismatch,
+    /// Zurückschreiben mit kleinerer Laserprofil-Schemaversion (ADR 0020):
+    /// Ein alter Client darf eine synchronisierte Nullpunktliste nicht durch
+    /// erneutes Speichern eines ihm unbekannten Profils entfernen.
+    SchemaDowngrade,
     Io(std::io::Error),
+}
+
+/// Schemaversion eines gespeicherten Laserprofil-Payloads. Fehlendes Feld =
+/// Version 1 (Profile vor ADR 0020).
+fn laser_payload_schema_version(payload: &str) -> u64 {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| value.get("schema_version").and_then(|v| v.as_u64()))
+        .unwrap_or(1)
 }
 
 fn store_catalog_change(
@@ -1028,6 +1048,17 @@ fn store_catalog_change(
                 let profile: studio_core::LaserProfile =
                     serde_json::from_str(payload).map_err(|_| StoreCatalogError::Invalid)?;
                 if profile.id != upload.id || profile.name.trim().is_empty() {
+                    return Err(StoreCatalogError::Invalid);
+                }
+                // Nullpunkte prüfen: IDs, Namen, endliche Koordinaten und
+                // keine Duplikate; außerhalb der Bettgrenzen liegende
+                // Koordinaten werden nicht angenommen (ADR 0020).
+                if profile.validate_saved_origins().is_err()
+                    || profile
+                        .saved_origins
+                        .iter()
+                        .any(|origin| !valid_id(&origin.id) || !profile.saved_origin_usable(origin))
+                {
                     return Err(StoreCatalogError::Invalid);
                 }
             }
@@ -1053,6 +1084,22 @@ fn store_catalog_change(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(StoreCatalogError::Io(error)),
     };
+    // Schema-Downgrade ablehnen: Der Hub merkt sich die Version des aktuellen
+    // Profildatensatzes über dessen Payload. Ein Löschen des ganzen Profils
+    // ist kein Downgrade und bleibt möglich.
+    if upload.kind == "laser_profile" {
+        if let (Some(payload), Some(current_payload)) = (
+            upload.payload.as_deref(),
+            current
+                .as_ref()
+                .and_then(|record| record.payload.as_deref()),
+        ) {
+            if laser_payload_schema_version(payload) < laser_payload_schema_version(current_payload)
+            {
+                return Err(StoreCatalogError::SchemaDowngrade);
+            }
+        }
+    }
     if current.as_ref().map(|record| &record.content_hash) != upload.base_hash.as_ref() {
         return Ok(CatalogChangeAck {
             accepted: false,
@@ -1349,6 +1396,7 @@ mod tests {
                 "workplace_backups",
                 "machine_leases",
                 "shared_catalog",
+                "laser_profile_schema_v2",
             ],
         })
         .unwrap()
@@ -1356,6 +1404,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(value["protocol_version"], 3);
         assert_eq!(value["server"], studio_core::branding::HUB_PROTOCOL_ID);
+        assert!(body.contains("laser_profile_schema_v2"));
     }
 
     #[test]
@@ -1416,6 +1465,125 @@ mod tests {
         let records = list_catalog_changes(&dir, 0).unwrap();
         assert_eq!(records.records.len(), 1);
         assert!(records.records[0].deleted);
+    }
+
+    #[test]
+    fn schema_downgrade_wird_abgelehnt_upgrade_und_loeschen_nicht() {
+        let dir =
+            std::env::temp_dir().join(format!("hub-schema-{}-{}", std::process::id(), now_unix()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let upload = |profile: &studio_core::LaserProfile, base_hash: Option<String>| {
+            let payload = serde_json::to_string(profile).unwrap();
+            CatalogChangeUpload {
+                kind: "laser_profile".into(),
+                id: profile.id.clone(),
+                base_hash,
+                deleted: false,
+                content_hash: studio_core::assets::content_hash(payload.as_bytes()),
+                payload: Some(payload),
+                workplace_id: "office".into(),
+            }
+        };
+
+        // Studio→Hub: Version-2-Profil mit Nullpunkt speichern.
+        let mut v2 = studio_core::LaserProfile {
+            id: "laser-a".into(),
+            name: "Laser A".into(),
+            ..Default::default()
+        };
+        v2.saved_origins = vec![studio_core::SavedOrigin {
+            id: "origin-1".into(),
+            name: "Untersetzer Posi".into(),
+            x_mm: 100.0,
+            y_mm: 50.0,
+        }];
+        let first = store_catalog_change(&dir, upload(&v2, None)).unwrap();
+        assert!(first.accepted);
+        let v2_hash = first.current.as_ref().unwrap().content_hash.clone();
+
+        // Hub→Studio-Roundtrip: gespeicherter Payload enthält die Liste
+        // unverändert (der Hub verändert Koordinaten nicht).
+        let records = list_catalog_changes(&dir, 0).unwrap();
+        let stored: studio_core::LaserProfile =
+            serde_json::from_str(records.records[0].payload.as_deref().unwrap()).unwrap();
+        assert_eq!(stored.saved_origins, v2.saved_origins);
+        assert_eq!(stored.schema_version, 2);
+
+        // Alter Client (Version 1, ohne saved_origins) will zurückschreiben →
+        // Schema-Downgrade, wird abgelehnt.
+        let mut v1 = v2.clone();
+        v1.schema_version = 1;
+        v1.saved_origins.clear();
+        assert!(matches!(
+            store_catalog_change(&dir, upload(&v1, Some(v2_hash.clone()))),
+            Err(StoreCatalogError::SchemaDowngrade)
+        ));
+
+        // Gleiche Version mit geänderter Liste bleibt möglich.
+        v2.saved_origins[0].name = "Halterung".into();
+        assert!(
+            store_catalog_change(&dir, upload(&v2, Some(v2_hash)))
+                .unwrap()
+                .accepted
+        );
+
+        // Löschen des ganzen Profils ist kein Downgrade.
+        let current_hash = list_catalog_changes(&dir, 0).unwrap().records[0]
+            .content_hash
+            .clone();
+        let deleted = store_catalog_change(
+            &dir,
+            CatalogChangeUpload {
+                kind: "laser_profile".into(),
+                id: v2.id.clone(),
+                base_hash: Some(current_hash),
+                deleted: true,
+                content_hash: studio_core::assets::content_hash(b""),
+                payload: None,
+                workplace_id: "office".into(),
+            },
+        )
+        .unwrap();
+        assert!(deleted.accepted);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ungueltige_nullpunkte_werden_nicht_angenommen() {
+        let dir = std::env::temp_dir().join(format!(
+            "hub-schema-invalid-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut profile = studio_core::LaserProfile {
+            id: "laser-a".into(),
+            name: "Laser A".into(),
+            bed_mm: (300.0, 200.0),
+            ..Default::default()
+        };
+        // Außerhalb der Bettgrenzen → ungültig.
+        profile.saved_origins = vec![studio_core::SavedOrigin {
+            id: "origin-1".into(),
+            name: "Zu weit".into(),
+            x_mm: 500.0,
+            y_mm: 50.0,
+        }];
+        let payload = serde_json::to_string(&profile).unwrap();
+        let result = store_catalog_change(
+            &dir,
+            CatalogChangeUpload {
+                kind: "laser_profile".into(),
+                id: profile.id.clone(),
+                base_hash: None,
+                deleted: false,
+                content_hash: studio_core::assets::content_hash(payload.as_bytes()),
+                payload: Some(payload),
+                workplace_id: "office".into(),
+            },
+        );
+        assert!(matches!(result, Err(StoreCatalogError::Invalid)));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

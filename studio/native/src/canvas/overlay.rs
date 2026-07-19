@@ -25,9 +25,9 @@ pub struct OverlayInput<'a> {
     pub cam_scale: f32,
     /// Vertauscht grünen Fenster- und roten Kreuz-Auswahlmodus.
     pub invert_marquee_direction: bool,
-    /// Job-Startpunkt (mm) für den Laser-Tab: der Anker der Job-BBox bei
-    /// relativem Startmodus. None = kein Marker (Absolut/leerer Job).
-    pub job_start: Option<[f64; 2]>,
+    /// Laser-Fadenkreuze Start/Ursprung/Kopf (mm) für den Laser-Tab
+    /// (ADR 0020 §B). None = anderer Tab.
+    pub laser_markers: Option<crate::app::LaserMarkers>,
     /// Schwebender Haltesteg-Entwurf (nur beim Bridge-Werkzeug sichtbar).
     pub bridge: Option<super::state::BridgeDraft>,
     pub trim_preview: Option<&'a [(f64, f64)]>,
@@ -39,6 +39,28 @@ pub struct OverlayInput<'a> {
 /// Bildschirm konstant etwa 10 px groß bleibt. Der Hit-Test ist großzügiger.
 pub(crate) fn handle_hw(cam_scale: f32) -> f32 {
     5.0 / cam_scale
+}
+
+/// Feste Farben der Laser-Fadenkreuze (ADR 0020 §B): Start grün, Ursprung
+/// blau, Kopf orange. Die egui-Beschriftungen nutzen dieselben Töne.
+pub const LASER_START_COLOR: [f32; 4] = [0.25, 0.78, 0.45, 1.0];
+pub const LASER_ORIGIN_COLOR: [f32; 4] = [0.25, 0.55, 0.98, 1.0];
+pub const LASER_HEAD_COLOR: [f32; 4] = [1.0, 0.62, 0.15, 1.0];
+
+/// Achsenparalleles Fadenkreuz mit Radius `r` (Welt-mm).
+fn crosshair(v: &mut Vec<Vertex>, mx: f64, my: f64, r: f64, color: [f32; 4]) {
+    scene_geo::push_seg(
+        v,
+        [(mx - r) as f32, my as f32],
+        [(mx + r) as f32, my as f32],
+        color,
+    );
+    scene_geo::push_seg(
+        v,
+        [mx as f32, (my - r) as f32],
+        [mx as f32, (my + r) as f32],
+        color,
+    );
 }
 
 /// Rotate-Handle-Position (mm): mittig über der Auswahl-BBox, mit Abstand.
@@ -113,38 +135,69 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
         }
     }
 
-    // Job-Startmarker (Laser-Tab): grünes Fadenkreuz am Anker der Job-BBox —
-    // dort setzt der Controller bei „Aktuelle Position"/„Benutzerursprung" an.
-    if let Some([mx, my]) = input.job_start {
-        let r = (10.0 / input.cam_scale) as f64;
-        let green = [0.25, 0.7, 0.5, 1.0];
-        scene_geo::push_seg(
-            &mut v,
-            [(mx - r) as f32, my as f32],
-            [(mx + r) as f32, my as f32],
-            green,
-        );
-        scene_geo::push_seg(
-            &mut v,
-            [mx as f32, (my - r) as f32],
-            [mx as f32, (my + r) as f32],
-            green,
-        );
-        // Kleines Quadrat um den Punkt, damit er auch über Konturen auffällt.
-        let q = r * 0.4;
-        let corners = [
-            (mx - q, my - q),
-            (mx + q, my - q),
-            (mx + q, my + q),
-            (mx - q, my + q),
-            (mx - q, my - q),
-        ];
-        for w in corners.windows(2) {
+    // Laser-Fadenkreuze (ADR 0020 §B): drei fachlich getrennte Marker mit
+    // festen Farben und unterschiedlichen Größen/Stilen, damit deckungsgleiche
+    // Koordinaten unterscheidbar bleiben. Die Textbeschriftungen zeichnet der
+    // egui-Layer (ui::mod) an festen, versetzten Quadranten.
+    if let Some(markers) = &input.laser_markers {
+        // Ursprung (blau): größtes Kreuz, zusätzlich kleiner Diamant.
+        if let Some([mx, my]) = markers.origin {
+            let r = (13.0 / input.cam_scale) as f64;
+            crosshair(&mut v, mx, my, r, LASER_ORIGIN_COLOR);
+            let q = r * 0.35;
+            let corners = [
+                (mx, my - q),
+                (mx + q, my),
+                (mx, my + q),
+                (mx - q, my),
+                (mx, my - q),
+            ];
+            for w in corners.windows(2) {
+                scene_geo::push_seg(
+                    &mut v,
+                    [w[0].0 as f32, w[0].1 as f32],
+                    [w[1].0 as f32, w[1].1 as f32],
+                    LASER_ORIGIN_COLOR,
+                );
+            }
+        }
+        // Start (grün): mittleres Kreuz mit kleinem Quadrat.
+        if let Some([mx, my]) = markers.start {
+            let r = (10.0 / input.cam_scale) as f64;
+            crosshair(&mut v, mx, my, r, LASER_START_COLOR);
+            let q = r * 0.4;
+            let corners = [
+                (mx - q, my - q),
+                (mx + q, my - q),
+                (mx + q, my + q),
+                (mx - q, my + q),
+                (mx - q, my - q),
+            ];
+            for w in corners.windows(2) {
+                scene_geo::push_seg(
+                    &mut v,
+                    [w[0].0 as f32, w[0].1 as f32],
+                    [w[1].0 as f32, w[1].1 as f32],
+                    LASER_START_COLOR,
+                );
+            }
+        }
+        // Kopf (orange): kleinstes Kreuz, diagonal gedreht (X-Form dazu).
+        if let Some([mx, my]) = markers.head {
+            let r = (8.0 / input.cam_scale) as f64;
+            crosshair(&mut v, mx, my, r, LASER_HEAD_COLOR);
+            let d = r * 0.5;
             scene_geo::push_seg(
                 &mut v,
-                [w[0].0 as f32, w[0].1 as f32],
-                [w[1].0 as f32, w[1].1 as f32],
-                green,
+                [(mx - d) as f32, (my - d) as f32],
+                [(mx + d) as f32, (my + d) as f32],
+                LASER_HEAD_COLOR,
+            );
+            scene_geo::push_seg(
+                &mut v,
+                [(mx - d) as f32, (my + d) as f32],
+                [(mx + d) as f32, (my - d) as f32],
+                LASER_HEAD_COLOR,
             );
         }
     }
@@ -544,7 +597,7 @@ mod tests {
             world_cursor: [0.0, 0.0],
             cam_scale: 1.0,
             invert_marquee_direction: false,
-            job_start: None,
+            laser_markers: None,
             bridge: None,
             trim_preview: None,
             selection_bbox: session.selection_bbox(),

@@ -12,6 +12,16 @@ use std::path::{Path, PathBuf};
 /// Dateiname der app-globalen Laser-Registry.
 pub const LASER_FILE: &str = "laser-profile.json";
 
+/// Höchste Laserprofil-Schemaversion, die dieses Studio vollständig versteht
+/// (ADR 0020). Version 1 = Profile ohne `saved_origins`, Version 2 = mit
+/// benannten Werkstück-Nullpunkten. Studio schreibt immer diese Version.
+pub const LASER_PROFILE_SCHEMA_VERSION: u32 = 2;
+
+/// Profile ohne `schema_version`-Feld stammen aus der Zeit vor ADR 0020.
+fn default_schema_version() -> u32 {
+    1
+}
+
 /// Welcher Treiber ein Profil bedient. Bestimmt, welche `MachineDriver`-
 /// Implementierung die App erzeugt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -104,6 +114,37 @@ pub struct ScanOffsetCal {
     pub points: Vec<ScanOffsetPoint>,
 }
 
+/// Ein benannter Werkstück-Nullpunkt (ADR 0020): stabile Identität mit Name
+/// und **absoluten Maschinenkoordinaten**. Gehört genau zu einem Laserprofil.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedOrigin {
+    pub id: String,
+    pub name: String,
+    pub x_mm: f64,
+    pub y_mm: f64,
+}
+
+impl SavedOrigin {
+    /// Formale Gültigkeit (ID/Name nicht leer, Koordinaten endlich). Die
+    /// Bettgrenzen prüft [`LaserProfile::saved_origin_usable`], weil sie sich
+    /// mit dem Profil ändern können.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.id.trim().is_empty() {
+            return Err("Nullpunkt ohne ID.".into());
+        }
+        if self.name.trim().is_empty() {
+            return Err("Nullpunkt ohne Namen.".into());
+        }
+        if !self.x_mm.is_finite() || !self.y_mm.is_finite() {
+            return Err(format!(
+                "Nullpunkt „{}“ hat ungültige Koordinaten.",
+                self.name
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Ein gespeicherter Laser (Werkstatt-Gerät).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaserProfile {
@@ -111,6 +152,10 @@ pub struct LaserProfile {
     pub id: String,
     /// Freier Anzeigename, z. B. „Ruida groß (Keller)".
     pub name: String,
+    /// Payload-Schemaversion (ADR 0020). Fehlend = 1; mit `saved_origins` = 2.
+    /// Der Hub lehnt ein Zurückschreiben mit kleinerer Version ab.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     pub kind: DriverKind,
     #[serde(default)]
     pub connection: Connection,
@@ -122,6 +167,9 @@ pub struct LaserProfile {
     /// Reversal-Kalibrierung (nur für Treiber relevant, die sie nutzen).
     #[serde(default)]
     pub scan_offset: ScanOffsetCal,
+    /// Benannte Werkstück-Nullpunkte (absolute Maschinenkoordinaten).
+    #[serde(default)]
+    pub saved_origins: Vec<SavedOrigin>,
 }
 
 impl Default for LaserProfile {
@@ -129,12 +177,52 @@ impl Default for LaserProfile {
         Self {
             id: String::new(),
             name: "Neuer Laser".into(),
+            schema_version: LASER_PROFILE_SCHEMA_VERSION,
             kind: DriverKind::Ruida,
             connection: Connection::default(),
             bed_mm: (600.0, 400.0),
             origin: BedOrigin::default(),
             scan_offset: ScanOffsetCal::default(),
+            saved_origins: Vec::new(),
         }
+    }
+}
+
+impl LaserProfile {
+    /// Nullpunkt per stabiler ID (niemals per Name oder Index).
+    pub fn saved_origin(&self, id: &str) -> Option<&SavedOrigin> {
+        self.saved_origins.iter().find(|origin| origin.id == id)
+    }
+
+    /// Ob ein Eintrag mit der aktuellen Bettgeometrie nutzbar ist. Ungültige
+    /// Einträge bleiben sichtbar, dürfen aber weder angefahren noch als
+    /// Jobreferenz verwendet werden (ADR 0020 §C).
+    pub fn saved_origin_usable(&self, origin: &SavedOrigin) -> bool {
+        origin.validate().is_ok()
+            && origin.x_mm >= 0.0
+            && origin.y_mm >= 0.0
+            && origin.x_mm <= self.bed_mm.0
+            && origin.y_mm <= self.bed_mm.1
+    }
+
+    /// Prüft die gesamte Nullpunktliste: formale Gültigkeit jedes Eintrags und
+    /// keine doppelten IDs/Namen. Bettgrenzen sind hier bewusst KEIN Fehler —
+    /// nach einer Bettverkleinerung bleibt der Eintrag zur Korrektur sichtbar.
+    pub fn validate_saved_origins(&self) -> Result<(), String> {
+        for origin in &self.saved_origins {
+            origin.validate()?;
+        }
+        for (index, origin) in self.saved_origins.iter().enumerate() {
+            for other in &self.saved_origins[index + 1..] {
+                if other.id == origin.id {
+                    return Err(format!("Doppelte Nullpunkt-ID „{}“.", origin.id));
+                }
+                if other.name.trim() == origin.name.trim() {
+                    return Err(format!("Doppelter Nullpunkt-Name „{}“.", origin.name));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -200,12 +288,22 @@ impl LaserRegistry {
         Self::load_from(&crate::project::data_root())
     }
 
-    /// Lädt aus einem Verzeichnis (für Tests).
+    /// Lädt aus einem Verzeichnis (für Tests). Ungültige Nullpunktdaten
+    /// (doppelte IDs, nicht endliche Koordinaten) gelten als beschädigte
+    /// Profildatei und werden abgelehnt — nicht still umgedeutet (ADR 0020).
     pub fn load_from(dir: &Path) -> Self {
-        match std::fs::read_to_string(dir.join(LASER_FILE)) {
+        let registry: Self = match std::fs::read_to_string(dir.join(LASER_FILE)) {
             Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
             Err(_) => Self::default(),
+        };
+        if registry
+            .profiles
+            .iter()
+            .any(|profile| profile.validate_saved_origins().is_err())
+        {
+            return Self::default();
         }
+        registry
     }
 
     /// Speichert nach `<data_root>/laser-profile.json`.
@@ -325,6 +423,92 @@ mod tests {
         }"#;
         let profile: LaserProfile = serde_json::from_str(json).unwrap();
         assert_eq!(profile.origin, BedOrigin::TopLeft);
+    }
+
+    #[test]
+    fn altes_profil_gilt_als_schema_version_1_mit_leerer_nullpunktliste() {
+        let json = r#"{
+            "id":"alt","name":"Alt","kind":"Ruida",
+            "connection":{"art":"netz","ip":"127.0.0.1","port":null},
+            "bed_mm":[300.0,200.0]
+        }"#;
+        let profile: LaserProfile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.schema_version, 1);
+        assert!(profile.saved_origins.is_empty());
+        // Neue Profile schreiben immer die höchste verstandene Version.
+        assert_eq!(
+            LaserProfile::default().schema_version,
+            LASER_PROFILE_SCHEMA_VERSION
+        );
+    }
+
+    fn origin(id: &str, name: &str, x: f64, y: f64) -> SavedOrigin {
+        SavedOrigin {
+            id: id.into(),
+            name: name.into(),
+            x_mm: x,
+            y_mm: y,
+        }
+    }
+
+    #[test]
+    fn nullpunkt_validierung_lehnt_leeres_und_doppeltes_ab() {
+        assert!(origin("a", "Posi", 10.0, 20.0).validate().is_ok());
+        assert!(origin("a", "  ", 10.0, 20.0).validate().is_err());
+        assert!(origin("", "Posi", 10.0, 20.0).validate().is_err());
+        assert!(origin("a", "Posi", f64::NAN, 20.0).validate().is_err());
+
+        let mut profile = LaserProfile {
+            saved_origins: vec![origin("a", "Posi", 1.0, 2.0)],
+            ..Default::default()
+        };
+        assert!(profile.validate_saved_origins().is_ok());
+        profile.saved_origins.push(origin("a", "Anders", 3.0, 4.0));
+        assert!(profile.validate_saved_origins().is_err(), "doppelte ID");
+        profile.saved_origins[1] = origin("b", "Posi", 3.0, 4.0);
+        assert!(profile.validate_saved_origins().is_err(), "doppelter Name");
+    }
+
+    #[test]
+    fn nullpunkt_ausserhalb_des_betts_bleibt_sichtbar_aber_unbrauchbar() {
+        let mut profile = LaserProfile {
+            bed_mm: (300.0, 200.0),
+            saved_origins: vec![origin("a", "Posi", 250.0, 150.0)],
+            ..Default::default()
+        };
+        assert!(profile.saved_origin_usable(&profile.saved_origins[0]));
+        // Bett schrumpft: Eintrag bleibt in der Liste, ist aber ungültig.
+        profile.bed_mm = (200.0, 100.0);
+        assert!(profile.validate_saved_origins().is_ok());
+        assert!(!profile.saved_origin_usable(&profile.saved_origins[0]));
+        assert!(profile.saved_origin("a").is_some());
+        assert!(profile.saved_origin("fehlt").is_none());
+    }
+
+    #[test]
+    fn registry_mit_beschaedigten_nullpunkten_wird_abgelehnt() {
+        let dir = std::env::temp_dir().join(format!(
+            "studio-laser-invalid-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let mut registry = LaserRegistry::default();
+        let mut profile = profil("a");
+        profile.saved_origins = vec![
+            origin("o", "Posi", 1.0, 1.0),
+            origin("o", "Posi 2", 2.0, 2.0),
+        ];
+        registry.add(profile);
+        // Direkt schreiben (ohne Validierung), um eine beschädigte Datei zu
+        // simulieren.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(LASER_FILE),
+            serde_json::to_string_pretty(&registry).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(LaserRegistry::load_from(&dir), LaserRegistry::default());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

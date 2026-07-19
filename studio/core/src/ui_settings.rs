@@ -165,6 +165,11 @@ pub struct UiSettings {
     /// Arbeitsplatzbezogene, konfliktfreie Action-Trigger (ADR 0018).
     #[serde(default)]
     pub shortcut_bindings: crate::shortcuts::ShortcutBindings,
+    /// Zuletzt verwendete Startreferenz **pro Laserprofil-ID** (ADR 0020 §E).
+    /// Lokale Bedienpräferenz — bewusst getrennt von der synchronisierten
+    /// Nullpunktliste, damit ein Auswahlwechsel keinen Katalogkonflikt erzeugt.
+    #[serde(default)]
+    pub laser_start_reference: std::collections::BTreeMap<String, crate::job::StartReference>,
 }
 
 /// Default-Mindestdauer des Splash (ms).
@@ -227,6 +232,7 @@ impl Default for UiSettings {
             hub_enabled: false,
             hub_url: default_hub_url(),
             shortcut_bindings: Default::default(),
+            laser_start_reference: Default::default(),
         }
     }
 }

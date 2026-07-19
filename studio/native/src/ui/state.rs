@@ -289,6 +289,8 @@ pub enum LaserManagerTab {
     Grunddaten,
     Kalibrierung,
     Controller,
+    /// Werkstück-Nullpunkte dieses Lasers (ADR 0020): umbenennen/löschen.
+    Nullpunkte,
 }
 
 pub struct LaserManagerState {
@@ -321,6 +323,15 @@ pub struct ProjectSaveDialogState {
     pub description: String,
     /// Einmal-Flag: das Namensfeld beim ersten Frame fokussieren.
     pub focus_name: bool,
+}
+
+/// Namensdialog beim Speichern eines Werkstück-Nullpunkts (ADR 0020).
+/// Umbenennen/Löschen bestehender Einträge übernimmt die Laser-Verwaltung.
+#[derive(Clone)]
+pub struct SavedOriginDialogState {
+    pub name: String,
+    /// Beim Auslösen frisch gelesene absolute Maschinenposition.
+    pub position: (f64, f64),
 }
 
 /// Gecachte Browser-Detailsicht: Metadaten/Versionen aus der Application und

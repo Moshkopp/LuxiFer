@@ -137,4 +137,9 @@ pub enum UiAction {
     OpenLaserManager {
         create_new: bool,
     },
+    /// „Starten von": Startreferenz wählen (bewegt NIE die Maschine, ADR 0020).
+    /// Angefahren wird der Bezugspunkt nur über die „Ursprung"-Kachel.
+    LaserSelectStartReference(studio_core::StartReference),
+    /// Aktuelle Kopfposition frisch lesen und als Nullpunkt speichern (Dialog).
+    LaserSaveOriginHere,
 }

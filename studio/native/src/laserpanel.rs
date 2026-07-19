@@ -5,14 +5,26 @@
 //! den `LaserService` aus (echte Treiber-Aktionen, hardwarelos getestet).
 
 use egui::{Color32, RichText, Sense, Vec2};
-use studio_core::{JobAction, StartMode};
+use studio_core::{JobAction, StartReference};
 
 use crate::tools::LaserUi;
 use crate::ui::UiAction;
 
+/// Ein gespeicherter Werkstück-Nullpunkt in der Panel-Sicht (ADR 0020).
+pub struct SavedOriginRow {
+    pub id: String,
+    pub name: String,
+    pub x_mm: f64,
+    pub y_mm: f64,
+    /// Innerhalb der aktuellen Bettgeometrie nutzbar? Ungültige Einträge
+    /// bleiben sichtbar, sind aber gesperrt.
+    pub usable: bool,
+}
+
 /// Reine Sicht auf den Laser-Zustand für das Panel (vom Root abgeleitet, damit
 /// das Panel weder Backend noch `App` kennt). `slots` ist die feste 2×3-
-/// Ampelbelegung; ein `None`-Slot bleibt leer.
+/// Ampelbelegung; ein `None`-Slot bleibt leer. Die Positionsinformation zeigt
+/// der Canvas über die Fadenkreuze — das Panel bleibt ruhig.
 pub struct LaserView {
     /// (id, Anzeige-Label) aller Profile.
     pub profiles: Vec<(String, String)>,
@@ -25,6 +37,13 @@ pub struct LaserView {
     /// Bewusst aufgebauter Verbindungszustand des aktiven Profils.
     pub connected: bool,
     pub lease_pending: bool,
+    /// Gespeicherte Nullpunkte des aktiven Lasers (fürs „Starten von"-Dropdown;
+    /// verwaltet werden sie in der Laser-Verwaltung).
+    pub saved_origins: Vec<SavedOriginRow>,
+    /// Verweist die gemerkte Auswahl auf eine gelöschte Nullpunkt-ID?
+    pub reference_missing: bool,
+    /// „Position speichern" möglich (verbunden + Positionslesen unterstützt)?
+    pub can_save_origin: bool,
 }
 
 /// Farb-Ton der Ampel-Kacheln.
@@ -192,33 +211,91 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     ui.separator();
     ui.add_space(8.0);
 
-    // Job-Parameter: Startmodus.
+    // Job-Parameter: Startreferenz („Starten von", ADR 0020). Die bloße
+    // Auswahl bewegt die Maschine nie; angefahren wird der Bezugspunkt nur
+    // über die „Ursprung"-Kachel. Daneben: aktuelle Position als Nullpunkt
+    // speichern (Icon). Verwaltet werden Nullpunkte in der Laser-Verwaltung.
     ui.label(RichText::new("PARAMETER").small().weak());
     ui.add_space(4.0);
-    egui::ComboBox::from_id_salt("startmode")
-        .selected_text(match ui_state.start_mode {
-            StartMode::Absolut => "Absolute Koordinaten",
-            StartMode::AktuellePosition => "Aktuelle Position",
-            StartMode::Benutzerursprung => "Benutzerursprung",
-        })
-        .width(ui.available_width() - 8.0)
-        .show_ui(ui, |ui| {
-            ui.selectable_value(
-                &mut ui_state.start_mode,
-                StartMode::Absolut,
-                "Absolute Koordinaten",
-            );
-            ui.selectable_value(
-                &mut ui_state.start_mode,
-                StartMode::AktuellePosition,
-                "Aktuelle Position",
-            );
-            ui.selectable_value(
-                &mut ui_state.start_mode,
-                StartMode::Benutzerursprung,
-                "Benutzerursprung",
-            );
+    if view.connected {
+        // Positions-Fadenkreuze im Canvas frisch halten (Lesen läuft
+        // gedrosselt im Root-Poll; das Panel liest nie selbst).
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(1000));
+    }
+    let reference_label = |reference: &StartReference| -> String {
+        match reference {
+            StartReference::Absolut => "Absolute Koordinaten".into(),
+            StartReference::AktuellePosition => "Aktuelle Position".into(),
+            StartReference::Benutzerursprung => "Benutzerursprung".into(),
+            StartReference::GespeicherterNullpunkt { id } => view
+                .saved_origins
+                .iter()
+                .find(|row| &row.id == id)
+                .map(|row| row.name.clone())
+                .unwrap_or_else(|| "⚠ Nullpunkt fehlt".into()),
+        }
+    };
+    let selected_text = if view.reference_missing {
+        "⚠ Nullpunkt fehlt — neu wählen".into()
+    } else {
+        reference_label(&ui_state.start_reference)
+    };
+    ui.horizontal(|ui| {
+        // Rechts-nach-links wie beim Laser-Selector: erst das Speichern-Icon,
+        // die Combo füllt exakt den Rest der Panelbreite.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(view.can_save_origin, egui::Button::new("＋"))
+                .on_hover_text("Aktuelle Kopfposition als Nullpunkt speichern")
+                .clicked()
+            {
+                actions.push(UiAction::LaserSaveOriginHere);
+            }
+            egui::ComboBox::from_id_salt("startmode")
+                .selected_text(selected_text)
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for reference in [
+                        StartReference::Absolut,
+                        StartReference::AktuellePosition,
+                        StartReference::Benutzerursprung,
+                    ] {
+                        if ui
+                            .selectable_label(
+                                ui_state.start_reference == reference,
+                                reference_label(&reference),
+                            )
+                            .clicked()
+                        {
+                            actions.push(UiAction::LaserSelectStartReference(reference.clone()));
+                        }
+                    }
+                    for row in &view.saved_origins {
+                        let reference =
+                            StartReference::GespeicherterNullpunkt { id: row.id.clone() };
+                        let label = if row.usable {
+                            row.name.clone()
+                        } else {
+                            format!("{} (ungültig)", row.name)
+                        };
+                        if ui
+                            .selectable_label(ui_state.start_reference == reference, label)
+                            .on_hover_text(format!("X {:.2} mm · Y {:.2} mm", row.x_mm, row.y_mm))
+                            .clicked()
+                        {
+                            actions.push(UiAction::LaserSelectStartReference(reference));
+                        }
+                    }
+                });
         });
+    });
+    if view.reference_missing {
+        ui.colored_label(
+            Color32::from_rgb(0xe0, 0x93, 0x00),
+            "Die gemerkte Startreferenz existiert nicht mehr. Bitte neu wählen.",
+        );
+    }
     ui.add_space(8.0);
     ui.label(RichText::new("JOB-NULLPUNKT").small().weak());
     ui.add_space(4.0);
@@ -429,4 +506,218 @@ fn slider_row(ui: &mut egui::Ui, label: &str, unit: &str, value: &mut f64, min: 
     });
     ui.add(egui::Slider::new(value, min..=max).show_value(false));
     ui.add_space(4.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view_with_origin() -> LaserView {
+        LaserView {
+            profiles: vec![("laser-1".into(), "Test · Ruida".into())],
+            active_id: "laser-1".into(),
+            slots: [None; 6],
+            can_export: false,
+            connected: false,
+            lease_pending: false,
+            saved_origins: vec![SavedOriginRow {
+                id: "origin-1".into(),
+                name: "Untersetzer".into(),
+                x_mm: 326.03,
+                y_mm: 320.06,
+                usable: true,
+            }],
+            reference_missing: false,
+            can_save_origin: false,
+        }
+    }
+
+    /// Alle Textinhalte eines Frames (rekursiv über verschachtelte Shapes).
+    fn frame_texts(shapes: &[egui::epaint::ClippedShape]) -> String {
+        fn collect(shape: &egui::epaint::Shape, out: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    out.push_str(&text.galley.job.text);
+                    out.push('\n');
+                }
+                egui::epaint::Shape::Vec(children) => {
+                    for child in children {
+                        collect(child, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = String::new();
+        for clipped in shapes {
+            collect(&clipped.shape, &mut out);
+        }
+        out
+    }
+
+    /// Headless-Absicherung des Nutzerbefunds „gespeicherter Nullpunkt fehlt
+    /// im Starten-von-Dropdown": Panel rendern, Combo anklicken und prüfen,
+    /// dass der Nullpunkt im geöffneten Popup als Eintrag auftaucht.
+    #[test]
+    fn starten_von_dropdown_listet_gespeicherte_nullpunkte() {
+        let ctx = egui::Context::default();
+        let mut ui_state = crate::tools::LaserUi::default();
+        let view = view_with_origin();
+        let mut run = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(420.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show(ui, &view, &mut ui_state);
+                });
+            })
+        };
+        // Frame 1: Layout aufbauen, Position der Combo aus dem Text der
+        // Auswahl ("Absolute Koordinaten" = Default-Referenz) bestimmen.
+        let first = run(Vec::new());
+        let texts = frame_texts(&first.shapes);
+        assert!(
+            texts.contains("Absolute Koordinaten"),
+            "Combo-Beschriftung fehlt im Panel:\n{texts}"
+        );
+        let combo_pos = first
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::epaint::Shape::Text(text)
+                    if text.galley.job.text == "Absolute Koordinaten" =>
+                {
+                    Some(text.pos + egui::vec2(4.0, 4.0))
+                }
+                _ => None,
+            })
+            .expect("Combo-Text nicht gefunden");
+        // Frame 2+3: Klick auf die Combo (down/up) öffnet das Popup.
+        let click = vec![
+            egui::Event::PointerMoved(combo_pos),
+            egui::Event::PointerButton {
+                pos: combo_pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+            egui::Event::PointerButton {
+                pos: combo_pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            },
+        ];
+        run(click);
+        let open = run(Vec::new());
+        let texts = frame_texts(&open.shapes);
+        assert!(
+            texts.contains("Benutzerursprung"),
+            "Popup hat sich nicht geöffnet:\n{texts}"
+        );
+        assert!(
+            texts.contains("Untersetzer"),
+            "Gespeicherter Nullpunkt fehlt im Dropdown:\n{texts}"
+        );
+    }
+
+    /// Wie in der echten App: Zoom 1.15, Panel im ScrollArea-Seitenpanel, und
+    /// der Nullpunkt wird erst NACH einem ersten Öffnen des Dropdowns
+    /// gespeichert. Auch dann muss er beim erneuten Öffnen erscheinen
+    /// (kein veralteter Popup-/ScrollArea-Cache).
+    #[test]
+    fn dropdown_zeigt_nachtraeglich_gespeicherten_nullpunkt() {
+        let ctx = egui::Context::default();
+        ctx.set_zoom_factor(1.15);
+        let mut ui_state = crate::tools::LaserUi::default();
+        let mut view = view_with_origin();
+        view.saved_origins.clear();
+        let run = |view: &LaserView, ui_state: &mut crate::tools::LaserUi, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 1000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::Panel::right("inspector")
+                        .default_size(340.0)
+                        .show(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| show(ui, view, ui_state));
+                        });
+                });
+            })
+        };
+        let combo_pos = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::epaint::Shape::Text(text)
+                    if text.galley.job.text == "Absolute Koordinaten" =>
+                {
+                    Some(text.pos + egui::vec2(4.0, 4.0))
+                }
+                _ => None,
+            })
+        };
+        let click_at = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: Default::default(),
+                },
+            ]
+        };
+        // Ohne Nullpunkte öffnen (füllt Popup-/ScrollArea-Caches) …
+        let first = run(&view, &mut ui_state, Vec::new());
+        let pos = combo_pos(&first.shapes).expect("Combo nicht gefunden");
+        run(&view, &mut ui_state, click_at(pos));
+        run(&view, &mut ui_state, Vec::new());
+        // … wieder schließen (Escape) und Nullpunkt „speichern".
+        run(
+            &view,
+            &mut ui_state,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        view.saved_origins = view_with_origin().saved_origins;
+        let refreshed = run(&view, &mut ui_state, Vec::new());
+        // Erneut öffnen (Position frisch messen — der Zoomfaktor greift erst
+        // ab dem zweiten Frame): der neue Eintrag muss gelistet sein.
+        let pos = combo_pos(&refreshed.shapes).unwrap_or(pos);
+        run(&view, &mut ui_state, click_at(pos));
+        let open = run(&view, &mut ui_state, Vec::new());
+        let texts = frame_texts(&open.shapes);
+        assert!(
+            texts.contains("Benutzerursprung"),
+            "Popup hat sich nicht geöffnet:\n{texts}"
+        );
+        assert!(
+            texts.contains("Untersetzer"),
+            "Nachträglich gespeicherter Nullpunkt fehlt im Dropdown:\n{texts}"
+        );
+    }
 }

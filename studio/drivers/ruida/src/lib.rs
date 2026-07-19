@@ -371,6 +371,9 @@ impl MachineDriver for RuidaDriver {
     fn capabilities(&self) -> DriverCapabilities {
         DriverCapabilities {
             machine_settings: true,
+            position_read: true,
+            user_origin_read: true,
+            absolute_move: true,
         }
     }
 
@@ -515,6 +518,15 @@ impl MachineDriver for RuidaDriver {
         let t = self.transport()?;
         let mut payload = cmd_set_speed(speed_mm_s);
         payload.extend(cmd_rapid_move_xy(0, 0));
+        t.send(&payload).map_err(to_driver_err)
+    }
+
+    fn move_to(&self, x_mm: f64, y_mm: f64, speed_mm_s: f64) -> Result<(), DriverError> {
+        // Absoluter laserfreier Eilgang (ADR 0020 §F). Speed + Move müssen wie
+        // bei jog/home in EINEM Paket kommen, sonst fährt der Controller nicht.
+        let t = self.transport()?;
+        let mut payload = cmd_set_speed(speed_mm_s);
+        payload.extend(cmd_rapid_move_xy(mm_to_um(x_mm), mm_to_um(y_mm)));
         t.send(&payload).map_err(to_driver_err)
     }
 

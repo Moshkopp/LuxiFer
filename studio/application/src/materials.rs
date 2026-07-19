@@ -193,6 +193,12 @@ impl MaterialService {
         if record.kind != CatalogKind::MaterialProfile {
             return Ok(false);
         }
+        // Lokale, noch nicht übertragene Änderungen gewinnen (wie beim
+        // Laserprofil): ein Datensatz aus einem älteren Sync-Zyklus darf eine
+        // gerade gespeicherte lokale Änderung nicht rückgängig machen.
+        if crate::catalog_sync::has_pending_change(record.kind, &record.id)? {
+            return Ok(false);
+        }
         let mut next = self.library.clone();
         let changed = if record.deleted {
             let existed = next.profiles.iter().any(|profile| profile.id == record.id);

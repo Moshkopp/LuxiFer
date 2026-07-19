@@ -144,6 +144,55 @@ impl JobPlan {
         plan
     }
 
+    /// Verschiebt alle geplanten Punkte um (dx, dy) mm. Reine Translation —
+    /// keine Spiegelung, keine Skalierung.
+    pub fn translated(&self, dx: f64, dy: f64) -> Self {
+        let mut plan = self.clone();
+        for layer in &mut plan.layers {
+            match &mut layer.work {
+                LayerWork::Cut { paths } => {
+                    for path in paths {
+                        for point in &mut path.points {
+                            point.0 += dx;
+                            point.1 += dy;
+                        }
+                    }
+                }
+                LayerWork::Fill { segments } => {
+                    for segment in segments {
+                        segment.x0 += dx;
+                        segment.x1 += dx;
+                        segment.y += dy;
+                    }
+                }
+                LayerWork::Raster { rows, .. } => {
+                    for row in rows {
+                        row.y += dy;
+                        for run in &mut row.runs {
+                            run.0 += dx;
+                            run.1 += dx;
+                        }
+                    }
+                }
+            }
+        }
+        plan.bbox = plan
+            .bbox
+            .map(|(x0, y0, x1, y1)| (x0 + dx, y0 + dy, x1 + dx, y1 + dy));
+        plan
+    }
+
+    /// Legt den gewählten 3×3-Anker der Plan-BBox auf eine absolute Zielkoordinate
+    /// (ADR 0020 §G: gespeicherter Nullpunkt als Jobreferenz). Leerer Plan bleibt
+    /// unverändert.
+    pub fn placed_with_anchor_at(&self, anchor: Anchor, target: (f64, f64)) -> Self {
+        let Some(bbox) = self.bbox else {
+            return self.clone();
+        };
+        let point = anchor.point(bbox);
+        self.translated(target.0 - point.0, target.1 - point.1)
+    }
+
     /// Konvexe Hülle aller tatsächlich geplanten Arbeitspunkte (Monotone Chain).
     /// Dient geräteneutral für konturfolgende Rahmenfahrten (Gummiband).
     pub fn convex_hull(&self) -> Vec<Pt> {
@@ -472,6 +521,46 @@ pub enum StartMode {
     Benutzerursprung,
 }
 
+/// Startreferenz eines Jobs (ADR 0020): typisierte Auswahl unter „Starten von".
+/// Ersetzt das flache [`StartMode`] überall dort, wo eine Referenz mit stabiler
+/// ID gebraucht wird. Der Anzeigename ist nie die Referenz.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "art", rename_all = "snake_case")]
+pub enum StartReference {
+    /// Maschinen-absolute Koordinaten (Ursprung = Maschinen-Null 0/0).
+    #[default]
+    Absolut,
+    /// Relativ zur live gelesenen Kopfposition.
+    AktuellePosition,
+    /// Relativ zum am Ruida-Hardwarepanel gesetzten Benutzerursprung.
+    Benutzerursprung,
+    /// App-seitig gespeicherter Werkstück-Nullpunkt ([`crate::SavedOrigin`]-ID).
+    GespeicherterNullpunkt { id: String },
+}
+
+impl StartReference {
+    /// Controllerseitiger Startmodus dieser Referenz. Ein gespeicherter
+    /// Nullpunkt wird app-seitig absolut aufgelöst (ADR 0020 §G) und ist
+    /// deshalb für den Treiber ein absoluter Job.
+    pub fn start_mode(&self) -> StartMode {
+        match self {
+            StartReference::Absolut | StartReference::GespeicherterNullpunkt { .. } => {
+                StartMode::Absolut
+            }
+            StartReference::AktuellePosition => StartMode::AktuellePosition,
+            StartReference::Benutzerursprung => StartMode::Benutzerursprung,
+        }
+    }
+
+    /// ID des referenzierten gespeicherten Nullpunkts, falls vorhanden.
+    pub fn saved_origin_id(&self) -> Option<&str> {
+        match self {
+            StartReference::GespeicherterNullpunkt { id } => Some(id),
+            _ => None,
+        }
+    }
+}
+
 /// Job-Nullpunkt-Anker (3×3-Raster). Welcher Punkt der Zeichnung auf dem
 /// Bezugspunkt landet — nur relevant, wenn `StartMode` nicht `Absolut` ist.
 /// Reihenfolge = Frontend-Index 0..8 (0 = oben-links, 4 = Mitte, 8 = unten-rechts).
@@ -641,6 +730,13 @@ pub trait MachineDriver {
         Err(DriverError::NotSupported)
     }
 
+    /// Kopf **absolut** und laserfrei nach (x, y) mm bewegen (Eilgang). Für
+    /// „Anfahren" gespeicherter Nullpunkte (ADR 0020 §F); Grenz- und
+    /// Zustandsprüfungen macht die Application vor dem Aufruf.
+    fn move_to(&self, _x_mm: f64, _y_mm: f64, _speed_mm_s: f64) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
     /// Zum am Gerät gesetzten Benutzerursprung fahren (nicht die Maschinen-Null).
     fn go_origin(&self, _speed_mm_s: f64) -> Result<(), DriverError> {
         Err(DriverError::NotSupported)
@@ -709,10 +805,17 @@ pub trait MachineDriver {
     }
 }
 
-/// Fähigkeiten, die nicht jeder Maschinentreiber bereitstellt.
+/// Fähigkeiten, die nicht jeder Maschinentreiber bereitstellt. Die UI zeigt
+/// für fehlende Fähigkeiten „nicht unterstützt" statt erfundener Werte.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DriverCapabilities {
     pub machine_settings: bool,
+    /// Kopfposition/Status live lesbar (`status()`).
+    pub position_read: bool,
+    /// Controllerseitiger Benutzerursprung lesbar (`read_origin()`).
+    pub user_origin_read: bool,
+    /// Absolute laserfreie Bewegung (`move_to()`).
+    pub absolute_move: bool,
 }
 
 /// Einheit eines editierbaren Maschinenparameters.
@@ -1066,6 +1169,55 @@ mod tests {
         s.add_image("fehlt".into(), 0.0, 0.0, 2.0, 2.0);
         let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
         assert!(plan.is_empty(), "unauflösbares Bild = kein Raster-Layer");
+    }
+
+    #[test]
+    fn plan_verschiebung_legt_anker_auf_zielkoordinate() {
+        let mut s = AppState::new();
+        s.add_shape(Geo::Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 50.0,
+            h: 30.0,
+        });
+        let plan = JobPlan::from_shapes(&s.shapes, &s.layers);
+        // NW-Anker der BBox (10,10) soll auf (100,50) landen.
+        let placed = plan.placed_with_anchor_at(Anchor::NW, (100.0, 50.0));
+        assert_eq!(placed.bbox, Some((100.0, 50.0, 150.0, 80.0)));
+        // Mitte-Anker: BBox-Zentrum (35,25) auf (100,50).
+        let centered = plan.placed_with_anchor_at(Anchor::Center, (100.0, 50.0));
+        assert_eq!(centered.bbox, Some((75.0, 35.0, 125.0, 65.0)));
+        // Leerer Plan bleibt unverändert.
+        let empty = JobPlan {
+            layers: Vec::new(),
+            bbox: None,
+        }
+        .placed_with_anchor_at(Anchor::NW, (5.0, 5.0));
+        assert_eq!(empty.bbox, None);
+    }
+
+    #[test]
+    fn startreferenz_kennt_controllermodus_und_id() {
+        assert_eq!(StartReference::Absolut.start_mode(), StartMode::Absolut);
+        assert_eq!(
+            StartReference::AktuellePosition.start_mode(),
+            StartMode::AktuellePosition
+        );
+        assert_eq!(
+            StartReference::Benutzerursprung.start_mode(),
+            StartMode::Benutzerursprung
+        );
+        let saved = StartReference::GespeicherterNullpunkt { id: "o-1".into() };
+        // App-seitig aufgelöst → für den Treiber absolut.
+        assert_eq!(saved.start_mode(), StartMode::Absolut);
+        assert_eq!(saved.saved_origin_id(), Some("o-1"));
+        assert_eq!(StartReference::Absolut.saved_origin_id(), None);
+        // Persistenz-Roundtrip (lokale Bedienpräferenz, ADR 0020 §E).
+        let json = serde_json::to_string(&saved).unwrap();
+        assert_eq!(
+            serde_json::from_str::<StartReference>(&json).unwrap(),
+            saved
+        );
     }
 
     #[test]

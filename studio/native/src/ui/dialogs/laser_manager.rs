@@ -144,6 +144,13 @@ fn detail(ui: &mut egui::Ui, state: &mut LaserManagerState, outcome: &mut LaserM
             "Controller",
             !state.is_new && state.draft.kind == DriverKind::Ruida,
         );
+        tab(
+            ui,
+            state,
+            LaserManagerTab::Nullpunkte,
+            "Nullpunkte",
+            !state.is_new,
+        );
     });
     ui.separator();
     let content_height = ui.available_height();
@@ -155,6 +162,7 @@ fn detail(ui: &mut egui::Ui, state: &mut LaserManagerState, outcome: &mut LaserM
             LaserManagerTab::Grunddaten => basic_data(ui, state),
             LaserManagerTab::Kalibrierung => calibration(ui, state),
             LaserManagerTab::Controller => controller(ui, state, outcome),
+            LaserManagerTab::Nullpunkte => saved_origins(ui, &mut state.draft),
         });
 }
 
@@ -259,6 +267,63 @@ fn basic_data(ui: &mut egui::Ui, state: &mut LaserManagerState) {
                 });
             ui.end_row();
         });
+}
+
+/// Tab „Nullpunkte": Werkstück-Nullpunkte dieses Lasers (ADR 0020) im
+/// Profilentwurf umbenennen und löschen; „Speichern" übernimmt sie validiert
+/// (IDs bleiben stabil). Angelegt werden neue Nullpunkte im Laserpanel aus
+/// der echten Kopfposition.
+fn saved_origins(ui: &mut egui::Ui, profile: &mut studio_core::LaserProfile) {
+    if profile.saved_origins.is_empty() {
+        ui.label(
+            egui::RichText::new(
+                "Noch keine Nullpunkte gespeichert. Im Laserpanel neben „Starten von“ \
+                 die aktuelle Kopfposition speichern.",
+            )
+            .weak(),
+        );
+        return;
+    }
+    let bed = profile.bed_mm;
+    let origin_usable = |origin: &studio_core::SavedOrigin| {
+        origin.x_mm >= 0.0 && origin.y_mm >= 0.0 && origin.x_mm <= bed.0 && origin.y_mm <= bed.1
+    };
+    let mut delete: Option<usize> = None;
+    egui::Grid::new("laser_saved_origins")
+        .num_columns(4)
+        .spacing([16.0, 8.0])
+        .striped(true)
+        .show(ui, |ui| {
+            ui.strong("Name");
+            ui.strong("Position");
+            ui.strong("");
+            ui.strong("");
+            ui.end_row();
+            for (index, origin) in profile.saved_origins.iter_mut().enumerate() {
+                ui.add(egui::TextEdit::singleline(&mut origin.name).desired_width(220.0));
+                ui.label(
+                    egui::RichText::new(format!("X {:.2}  Y {:.2} mm", origin.x_mm, origin.y_mm))
+                        .weak(),
+                );
+                if origin_usable(origin) {
+                    ui.label("");
+                } else {
+                    ui.colored_label(egui::Color32::from_rgb(0xd2, 0x46, 0x3c), "ungültig")
+                        .on_hover_text(
+                            "Liegt außerhalb des Arbeitsbereichs — neu speichern oder entfernen.",
+                        );
+                }
+                if ui.button("🗑").on_hover_text("Nullpunkt löschen").clicked() {
+                    delete = Some(index);
+                }
+                ui.end_row();
+            }
+        });
+    if let Some(index) = delete {
+        profile.saved_origins.remove(index);
+    }
+    ui.add_space(8.0);
+    ui.weak("Umbenennen wirkt nach „Speichern“; die stabile ID bleibt erhalten.");
 }
 
 fn origin_label(origin: BedOrigin) -> &'static str {

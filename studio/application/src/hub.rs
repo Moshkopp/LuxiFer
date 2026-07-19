@@ -10,6 +10,10 @@ use crate::catalog_sync::{catalog_key, load_catalog_state, update_catalog_state,
 use crate::AppError;
 
 const PROTOCOL_VERSION: u32 = 3;
+/// Hub-Capability für die Schema-Downgrade-Prüfung von Laserprofilen
+/// (ADR 0020). Fehlt sie, wird nur der Laserprofil-Sync ausgesetzt — lokale
+/// Arbeit und alle anderen Hub-Funktionen bleiben unberührt.
+pub const LASER_SCHEMA_CAPABILITY: &str = "laser_profile_schema_v2";
 const TIMEOUT: Duration = Duration::from_millis(800);
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10);
 const EVENT_TIMEOUT: Duration = Duration::from_secs(6);
@@ -77,6 +81,10 @@ pub struct SharedCatalogRecord {
 pub struct SharedCatalogSync {
     pub records: Vec<SharedCatalogRecord>,
     pub conflicts: Vec<CatalogConflict>,
+    /// Verständliche Meldung, wenn ein alter Hub ohne Schema-Downgrade-Schutz
+    /// den Laserprofil-Sync blockiert (ADR 0020). Materialprofile und alle
+    /// übrigen Hub-Funktionen laufen weiter.
+    pub laser_sync_blocked: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -612,12 +620,32 @@ pub fn sync_assets(base_url: &str) -> Result<HubSyncReport, AppError> {
 /// Synchronisiert die gemeinsamen Laser- und Materialprofile. Lokale
 /// Änderungen kommen aus einer persistenten Outbox; Serverkonflikte werden
 /// zur bewussten Auflösung gemeldet und niemals still überschrieben.
+///
+/// `hub_capabilities` stammt aus dem Handshake: Ein Hub ohne
+/// [`LASER_SCHEMA_CAPABILITY`] kennt die Schema-Downgrade-Prüfung nicht.
+/// Laserprofile werden dann in KEINE Richtung synchronisiert (Outbox bleibt
+/// erhalten, empfangene Datensätze werden verworfen), damit weder ein alter
+/// Hub noch ein alter Client `saved_origins` still entfernen kann.
 pub fn sync_shared_catalog(
     base_url: &str,
     workplace_id: &str,
+    hub_capabilities: &[String],
 ) -> Result<SharedCatalogSync, AppError> {
     let endpoint = HttpEndpoint::parse(base_url)?;
-    let pending = load_catalog_state()?.pending;
+    let hub_protects_laser_schema = hub_capabilities
+        .iter()
+        .any(|capability| capability == LASER_SCHEMA_CAPABILITY);
+    let laser_sync_blocked = (!hub_protects_laser_schema).then(|| {
+        "Der verbundene Hub kennt den Schemaschutz für Laserprofile noch nicht. \
+         Laserprofile werden vorerst nicht synchronisiert — bitte zuerst den Hub \
+         aktualisieren. Lokale Arbeit ist nicht eingeschränkt."
+            .to_owned()
+    });
+    let pending = load_catalog_state()?
+        .pending
+        .into_iter()
+        .filter(|change| hub_protects_laser_schema || change.kind != CatalogKind::LaserProfile)
+        .collect::<Vec<_>>();
     for change in pending {
         let body = serde_json::to_string(&CatalogChangeUpload {
             kind: change.kind,
@@ -678,6 +706,14 @@ pub fn sync_shared_catalog(
         "",
         UPLOAD_TIMEOUT,
     )?)?;
+    // Von einem ungeschützten Hub werden auch keine Laserprofile übernommen —
+    // sonst könnte ein dort gespeicherter alter Stand die lokalen Nullpunkte
+    // still überschreiben.
+    if !hub_protects_laser_schema {
+        changes
+            .records
+            .retain(|record| record.kind != CatalogKind::LaserProfile);
+    }
     update_catalog_state(|state| {
         for record in &changes.records {
             state.known_hashes.insert(
@@ -699,6 +735,7 @@ pub fn sync_shared_catalog(
     Ok(SharedCatalogSync {
         records: changes.records,
         conflicts: state.conflicts,
+        laser_sync_blocked,
     })
 }
 

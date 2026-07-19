@@ -41,17 +41,13 @@ ausdrückliche Aktionen.**
 
 ### A. Positionsanzeige folgt der gewählten Startreferenz
 
-Das Laserpanel zeigt bei verbundenem Laser die aktuelle absolute Kopfposition.
-Die Referenzzeile darunter hängt von der Auswahl unter „Starten von“ ab:
-
-```text
-POSITION
-
-Kopf aktuell         X 125,40 mm   Y 82,10 mm
-Gewählter Ursprung   X 100,00 mm   Y 50,00 mm
-```
-
-Dabei gilt verbindlich:
+Die Positionsanzeige erfolgt visuell über die Fadenkreuze im Laser-Canvas
+(siehe B): **Kopf** zeigt die live gelesene absolute Kopfposition, **Ursprung**
+die Referenzkoordinate der Auswahl unter „Starten von“. Ein zusätzlicher
+Textblock im Panel entfällt bewusst, damit das Panel ruhig bleibt
+(Bedienentscheid während der Umsetzung); die exakten Zahlenwerte erscheinen im
+Speichern-Dialog und in der Nullpunktverwaltung. Für die Referenzkoordinate
+gilt verbindlich:
 
 | Auswahl | Quelle der Referenzkoordinate | Anzeige als Ursprung |
 |---|---|---|
@@ -205,8 +201,9 @@ Konzepte trotz ähnlicher Nutzung unterscheidbar.
 
 ### D. Speichern der aktuellen Kopfposition
 
-Unter der Positionsanzeige bietet das Panel
-**„Aktuelle Position als Nullpunkt speichern …“** an. Der Ablauf ist:
+Direkt neben dem „Starten von“-Dropdown bietet das Panel ein Icon
+**„Aktuelle Kopfposition als Nullpunkt speichern“** (mit Tooltip) an.
+Der Ablauf ist:
 
 1. Ein aktives Laserprofil und eine ausdrückliche Verbindung sind erforderlich.
 2. Studio liest beim Auslösen die Kopfposition frisch vom Controller. Ein
@@ -215,9 +212,10 @@ Unter der Positionsanzeige bietet das Panel
 4. Ein leerer oder nur aus Leerzeichen bestehender Name wird abgelehnt.
 5. Bestätigen speichert ID, Name und X/Y atomar im aktiven Laserprofil.
 
-Der Nutzer kann einen Eintrag später umbenennen und löschen. Umbenennen ändert
-nicht seine ID. Gleiche Anzeigenamen sollten zur Vermeidung von Verwechslungen
-innerhalb eines Profils nicht zugelassen werden.
+Der Nutzer kann einen Eintrag später umbenennen und löschen — das geschieht in
+der **Laser-Verwaltung** beim jeweiligen Laserprofil, nicht im Laserpanel.
+Umbenennen ändert nicht seine ID. Gleiche Anzeigenamen sollten zur Vermeidung
+von Verwechslungen innerhalb eines Profils nicht zugelassen werden.
 
 ### E. Auswählen bewegt die Maschine nicht
 
@@ -233,9 +231,12 @@ weitere gespeicherte Nullpunkte ...
 ```
 
 Die bloße Auswahl eines Eintrags löst **keine** Maschinenbewegung aus. Eine
-Bewegung erfolgt nur über den gesonderten, eindeutig beschrifteten Befehl
-**„Anfahren“**. Damit kann der Nutzer die Jobreferenz vorbereiten, ohne dass ein
-Dropdown unbeabsichtigt den Kopf bewegt.
+Bewegung erfolgt nur über die gesonderte **„Ursprung“-Kachel** im Job-Grid:
+Sie fährt den Bezugspunkt der gewählten Startreferenz laserfrei an (Absolut →
+Maschinen-Null 0/0, Benutzerursprung → controllerseitiger Ursprung,
+gespeicherter Nullpunkt → dessen Koordinate; bei „Aktuelle Position“ gibt es
+nichts anzufahren). Damit kann der Nutzer die Jobreferenz vorbereiten, ohne
+dass ein Dropdown unbeabsichtigt den Kopf bewegt.
 
 Das bisherige flache `StartMode` reicht für eine Referenz mit stabiler ID nicht
 aus. Das Fachmodell erhält deshalb eine typisierte Auswahl, sinngemäß:
@@ -282,9 +283,10 @@ Laser und benötigt eine bestehende Verbindung. Geschwindigkeit stammt aus dem
 vorhandenen Jog-/Bewegungswert beziehungsweise einer später ausdrücklich
 definierten Profilgrenze.
 
-Die UI deaktiviert „Anfahren“ während eines laufenden Jobs. Der Application-
-Anwendungsfall prüft dies ebenfalls, soweit der Treiber einen Status liefert;
-eine reine UI-Sperre genügt nicht als Sicherheitsgrenze.
+Während eines laufenden Jobs wird nicht angefahren: Der Application-
+Anwendungsfall prüft den Maschinenstatus vor jeder Anfahr-Bewegung, soweit der
+Treiber einen Status liefert; eine reine UI-Sperre genügt nicht als
+Sicherheitsgrenze.
 
 Ruida führt nach dem Einschalten selbstständig eine Referenzfahrt aus. Studio
 fordert deshalb für Ruida kein zusätzliches, derzeit nicht nachgewiesenes

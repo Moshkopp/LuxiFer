@@ -6,8 +6,9 @@
 //! Treibers (z. B. „Job gesendet") bleiben nutzerlesbare Strings.
 
 use studio_core::{
-    Anchor, Connection, DriverKind, JobAction, JobParams, JobPlan, LaserProfile, LaserRegistry,
-    Layer, MachineDriver, MachineSetting, Shape, StartMode,
+    Anchor, Connection, DriverCapabilities, DriverKind, JobAction, JobParams, JobPlan,
+    LaserProfile, LaserRegistry, Layer, MachineDriver, MachineSetting, MachineStatus, SavedOrigin,
+    Shape, StartMode, StartReference, LASER_PROFILE_SCHEMA_VERSION,
 };
 
 use crate::{catalog_sync::enqueue_catalog_profile, AppError, CatalogKind, SharedCatalogRecord};
@@ -49,22 +50,20 @@ impl LaserService {
         &self,
         shapes: &[Shape],
         layers: &[Layer],
-        _start_mode: StartMode,
+        reference: &StartReference,
         anchor_idx: usize,
     ) -> Result<studio_core::ExecutionTrace, AppError> {
         let profile = self
             .active_profile()
             .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
-        let plan = JobPlan::from_shapes_with_assets(shapes, layers, crate::assets::resolve_luma)
-            .transformed_for_bed(profile.origin, profile.bed_mm);
+        let (plan, resolved) = self.resolved_plan(shapes, layers, reference, anchor_idx)?;
         let params = JobParams {
-            // Die Preview bleibt an den Projekt-/Bettkoordinaten des Motivs.
-            // Relative Startmodi und ihr Jobanker werden erst vom Controller
-            // beim Starten bzw. Rahmen auf den realen Bezugspunkt angewendet.
+            // Die Preview bleibt bei relativen Startmodi an den Projekt-/Bett-
+            // koordinaten des Motivs — der Controller wendet den Bezugspunkt
+            // erst beim Starten an. Ein gespeicherter Nullpunkt ist dagegen
+            // schon app-seitig absolut aufgelöst (Plan bereits verschoben).
             start_mode: StartMode::Absolut,
-            anchor: profile
-                .origin
-                .transform_anchor(Anchor::from_index(anchor_idx)),
+            anchor: resolved.anchor,
         };
         driver_for(profile)
             .execution_trace(&plan, layers, &params)
@@ -163,6 +162,12 @@ impl LaserService {
 
     /// Legt ein neues Profil an oder aktualisiert ein bestehendes (nach ID).
     pub fn save_profile(&mut self, mut profile: LaserProfile) -> Result<(), AppError> {
+        // Studio schreibt immer die höchste vollständig verstandene Version;
+        // die Nullpunktliste wird nie still umgedeutet gespeichert.
+        profile.schema_version = LASER_PROFILE_SCHEMA_VERSION;
+        profile
+            .validate_saved_origins()
+            .map_err(|message| AppError::new("origin_invalid", message))?;
         if profile.id.is_empty() {
             let millis = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -205,6 +210,14 @@ impl LaserService {
         if record.kind != CatalogKind::LaserProfile {
             return Ok(false);
         }
+        // Lokale, noch nicht übertragene Änderungen gewinnen: Der Sync-Worker
+        // liefert zyklisch den vollen Katalogstand — ein Datensatz aus einem
+        // Zyklus VOR einer gerade gespeicherten lokalen Änderung (z. B. neuer
+        // Werkstück-Nullpunkt) darf sie nicht rückgängig machen. Der nächste
+        // Zyklus lädt die Outbox hoch bzw. meldet einen echten Konflikt.
+        if crate::catalog_sync::has_pending_change(record.kind, &record.id)? {
+            return Ok(false);
+        }
         let changed = if record.deleted {
             let existed = self
                 .registry
@@ -214,13 +227,32 @@ impl LaserService {
             self.registry.remove(&record.id);
             existed
         } else {
-            let profile: LaserProfile = serde_json::from_str(
-                record
-                    .payload
-                    .as_deref()
-                    .ok_or_else(|| AppError::new("catalog_payload", "Laserprofil fehlt."))?,
-            )
-            .map_err(|error| AppError::new("catalog_payload", error.to_string()))?;
+            let payload = record
+                .payload
+                .as_deref()
+                .ok_or_else(|| AppError::new("catalog_payload", "Laserprofil fehlt."))?;
+            // Schemaversion vor der typisierten Deserialisierung prüfen: Ein
+            // neueres Profil darf gelesen/angezeigt, aber nie verlustbehaftet
+            // in die lokale Registry übernommen werden (ADR 0020).
+            let value: serde_json::Value = serde_json::from_str(payload)
+                .map_err(|error| AppError::new("catalog_payload", error.to_string()))?;
+            let version = value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(1);
+            if version > u64::from(LASER_PROFILE_SCHEMA_VERSION) {
+                return Err(AppError::new(
+                    "catalog_schema",
+                    format!(
+                        "Empfangenes Laserprofil nutzt Schemaversion {version}; dieses Studio versteht nur bis {LASER_PROFILE_SCHEMA_VERSION}. Bitte Studio aktualisieren."
+                    ),
+                ));
+            }
+            let profile: LaserProfile = serde_json::from_value(value)
+                .map_err(|error| AppError::new("catalog_payload", error.to_string()))?;
+            profile
+                .validate_saved_origins()
+                .map_err(|message| AppError::new("catalog_payload", message))?;
             let changed = self
                 .registry
                 .profiles
@@ -260,6 +292,12 @@ impl LaserService {
     /// Sicherungs-Wiederherstellung und verwirft den dazu nicht mehr passenden
     /// lazy Treiber.
     pub fn restore_registry(&mut self, mut registry: LaserRegistry) -> Result<(), AppError> {
+        // Auch wiederhergestellte (ggf. alte) Sicherungen werden mit der
+        // höchsten verstandenen Schemaversion geschrieben — sonst bliebe ihr
+        // Katalog-Upload am Hub-Downgrade-Schutz hängen.
+        for profile in &mut registry.profiles {
+            profile.schema_version = LASER_PROFILE_SCHEMA_VERSION;
+        }
         let previous_ids = self
             .registry
             .profiles
@@ -394,15 +432,59 @@ impl LaserService {
         })
     }
 
-    fn job_params(&self, start_mode: StartMode, anchor_idx: usize) -> JobParams {
+    /// Löst die Startreferenz **genau einmal** in der gemeinsamen
+    /// Ausführungsspur auf (ADR 0020 §G): Ein gespeicherter Nullpunkt
+    /// verschiebt den Plan app-seitig so, dass der gewählte Anker auf der
+    /// absoluten Zielkoordinate liegt; der Treiber erhält einen absoluten Job.
+    /// Fehlende oder ungültige Referenzen sind ein Fehler — kein stiller
+    /// Fallback.
+    fn resolved_plan(
+        &self,
+        shapes: &[Shape],
+        layers: &[Layer],
+        reference: &StartReference,
+        anchor_idx: usize,
+    ) -> Result<(JobPlan, JobParams), AppError> {
+        let plan = self.plan(shapes, layers);
         let anchor = Anchor::from_index(anchor_idx);
-        JobParams {
-            start_mode,
-            anchor: self
-                .active_profile()
-                .map(|profile| profile.origin.transform_anchor(anchor))
-                .unwrap_or(anchor),
-        }
+        let Some(profile) = self.active_profile() else {
+            return Ok((
+                plan,
+                JobParams {
+                    start_mode: reference.start_mode(),
+                    anchor,
+                },
+            ));
+        };
+        let anchor = profile.origin.transform_anchor(anchor);
+        let plan = match reference {
+            StartReference::GespeicherterNullpunkt { id } => {
+                let origin = profile.saved_origin(id).ok_or_else(|| {
+                    AppError::new(
+                        "origin_missing",
+                        "Der gewählte gespeicherte Nullpunkt existiert im aktiven Laserprofil nicht. Bitte eine neue Startreferenz wählen.",
+                    )
+                })?;
+                if !profile.saved_origin_usable(origin) {
+                    return Err(AppError::new(
+                        "origin_invalid",
+                        format!(
+                            "Nullpunkt „{}“ liegt außerhalb des Arbeitsbereichs. Bitte neu speichern oder entfernen.",
+                            origin.name
+                        ),
+                    ));
+                }
+                plan.placed_with_anchor_at(anchor, (origin.x_mm, origin.y_mm))
+            }
+            _ => plan,
+        };
+        Ok((
+            plan,
+            JobParams {
+                start_mode: reference.start_mode(),
+                anchor,
+            },
+        ))
     }
 
     /// Führt eine Job-Aktion aus und gibt die Rückmeldung des Treibers zurück.
@@ -411,11 +493,10 @@ impl LaserService {
         action: JobAction,
         shapes: &[Shape],
         layers: &[Layer],
-        start_mode: StartMode,
+        reference: &StartReference,
         anchor_idx: usize,
     ) -> Result<String, AppError> {
-        let plan = self.plan(shapes, layers);
-        let jp = self.job_params(start_mode, anchor_idx);
+        let (plan, jp) = self.resolved_plan(shapes, layers, reference, anchor_idx)?;
         self.with_driver(needs_connection(action), |d| {
             d.run_action(action, &plan, layers, &jp).map_err(|e| {
                 AppError::wrap(
@@ -433,11 +514,10 @@ impl LaserService {
         path: &std::path::Path,
         shapes: &[Shape],
         layers: &[Layer],
-        start_mode: StartMode,
+        reference: &StartReference,
         anchor_idx: usize,
     ) -> Result<(), AppError> {
-        let plan = self.plan(shapes, layers);
-        let jp = self.job_params(start_mode, anchor_idx);
+        let (plan, jp) = self.resolved_plan(shapes, layers, reference, anchor_idx)?;
         // Export kompiliert nur — dafür braucht es kein erreichbares Gerät.
         let bytes = self.with_driver(false, |d| {
             d.compile_with(&plan, layers, &jp)
@@ -465,6 +545,316 @@ impl LaserService {
             d.home(speed)
                 .map_err(|e| AppError::wrap("laser_home", "Home fehlgeschlagen.", e.to_string()))
         })
+    }
+
+    // --- Positionslesen und Werkstück-Nullpunkte (ADR 0020) -----------------
+
+    /// Fähigkeiten des aktiven Treibers (für „nicht unterstützt"-Anzeigen).
+    pub fn driver_capabilities(&mut self) -> DriverCapabilities {
+        self.with_driver(false, |driver| Ok(driver.capabilities()))
+            .unwrap_or_default()
+    }
+
+    /// Liest den aktuellen Maschinenstatus (Kopfposition) frisch vom Treiber.
+    /// Eine ausdrückliche Verbindung ist Voraussetzung; Treiber ohne
+    /// Lesefähigkeit melden „nicht unterstützt" statt erfundener Koordinaten.
+    pub fn read_status(&mut self) -> Result<MachineStatus, AppError> {
+        self.with_driver(true, |driver| {
+            if !driver.capabilities().position_read {
+                return Err(AppError::new(
+                    "position_unsupported",
+                    "Der aktive Lasertreiber unterstützt kein Positionslesen.",
+                ));
+            }
+            driver.status().map_err(|error| {
+                AppError::wrap(
+                    "laser_status",
+                    "Maschinenstatus lesen fehlgeschlagen.",
+                    error.to_string(),
+                )
+            })
+        })
+    }
+
+    /// Liest den am Ruida-Hardwarepanel gesetzten Benutzerursprung. Wird nur
+    /// bei angewählter Referenz `Benutzerursprung` gebraucht — Studio setzt
+    /// oder verschiebt diesen Ursprung nie.
+    pub fn read_user_origin(&mut self) -> Result<(f64, f64), AppError> {
+        self.with_driver(true, |driver| {
+            if !driver.capabilities().user_origin_read {
+                return Err(AppError::new(
+                    "user_origin_unsupported",
+                    "Der aktive Lasertreiber unterstützt kein Lesen des Benutzerursprungs.",
+                ));
+            }
+            driver.read_origin().map_err(|error| {
+                AppError::wrap(
+                    "laser_origin_read",
+                    "Benutzerursprung lesen fehlgeschlagen.",
+                    error.to_string(),
+                )
+            })
+        })
+    }
+
+    /// Frisch gelesene, endliche und innerhalb des Profils liegende
+    /// Kopfposition — Voraussetzung für Speichern und absolutes Anfahren
+    /// (ADR 0020 §F). Scheitert das Statuslesen, bleibt die Aktion gesperrt.
+    pub fn read_plausible_position(&mut self) -> Result<MachineStatus, AppError> {
+        let bed = self
+            .active_profile()
+            .map(|profile| profile.bed_mm)
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
+        let status = self.read_status()?;
+        let (x, y) = (status.pos_x_mm, status.pos_y_mm);
+        if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 || x > bed.0 || y > bed.1 {
+            return Err(AppError::new(
+                "position_implausible",
+                format!(
+                    "Gelesene Kopfposition ({x:.2}/{y:.2} mm) liegt nicht plausibel im Arbeitsbereich."
+                ),
+            ));
+        }
+        Ok(status)
+    }
+
+    /// Mutiert die Nullpunktliste des aktiven Profils, validiert, speichert
+    /// atomar und stellt die Änderung in die Katalog-Outbox — ohne den
+    /// verbundenen Treiber zu verwerfen (die Verbindungsparameter ändern sich
+    /// hier nicht).
+    fn mutate_active_origins(
+        &mut self,
+        mutate: impl FnOnce(&mut Vec<SavedOrigin>),
+    ) -> Result<(), AppError> {
+        let mut profile = self
+            .active_profile()
+            .cloned()
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
+        mutate(&mut profile.saved_origins);
+        // Studio schreibt immer die höchste vollständig verstandene Version.
+        profile.schema_version = LASER_PROFILE_SCHEMA_VERSION;
+        profile
+            .validate_saved_origins()
+            .map_err(|message| AppError::new("origin_invalid", message))?;
+        self.registry.update(profile.clone());
+        self.registry.save().map_err(|error| {
+            AppError::new(
+                "laser_registry_write",
+                format!("Laserprofile speichern fehlgeschlagen: {error}"),
+            )
+        })?;
+        enqueue_catalog_profile(CatalogKind::LaserProfile, &profile.id, Some(&profile))
+    }
+
+    /// Speichert eine bereits **frisch gelesene** Kopfposition unter dem Namen
+    /// als neuen Nullpunkt im aktiven Laserprofil (ADR 0020 §D: die beim
+    /// Auslösen gelesene Position wird gespeichert; ein gecachter Anzeigewert
+    /// ist nie die Quelle).
+    pub fn add_saved_origin(
+        &mut self,
+        name: &str,
+        x_mm: f64,
+        y_mm: f64,
+    ) -> Result<SavedOrigin, AppError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::new(
+                "origin_name",
+                "Der Name des Nullpunkts darf nicht leer sein.",
+            ));
+        }
+        let profile = self
+            .active_profile()
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
+        let bed = profile.bed_mm;
+        if !x_mm.is_finite()
+            || !y_mm.is_finite()
+            || x_mm < 0.0
+            || y_mm < 0.0
+            || x_mm > bed.0
+            || y_mm > bed.1
+        {
+            return Err(AppError::new(
+                "position_implausible",
+                format!("Position ({x_mm:.2}/{y_mm:.2} mm) liegt nicht im Arbeitsbereich."),
+            ));
+        }
+        if profile
+            .saved_origins
+            .iter()
+            .any(|origin| origin.name.trim() == name)
+        {
+            return Err(AppError::new(
+                "origin_name_duplicate",
+                format!("Es gibt bereits einen Nullpunkt „{name}“ für diesen Laser."),
+            ));
+        }
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+        let origin = SavedOrigin {
+            id: format!("origin-{millis}-{}", profile.saved_origins.len()),
+            name: name.to_owned(),
+            x_mm,
+            y_mm,
+        };
+        let stored = origin.clone();
+        self.mutate_active_origins(move |origins| origins.push(origin))?;
+        Ok(stored)
+    }
+
+    /// Liest die Kopfposition frisch vom Controller (nie einen gecachten
+    /// Anzeigewert) und speichert sie unter dem Namen als neuen Nullpunkt im
+    /// aktiven Laserprofil (ADR 0020 §D).
+    pub fn save_current_position_as_origin(&mut self, name: &str) -> Result<SavedOrigin, AppError> {
+        let status = self.read_plausible_position()?;
+        self.add_saved_origin(name, status.pos_x_mm, status.pos_y_mm)
+    }
+
+    /// Benennt einen Nullpunkt um. Die stabile ID bleibt unverändert.
+    pub fn rename_saved_origin(&mut self, id: &str, name: &str) -> Result<(), AppError> {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Err(AppError::new(
+                "origin_name",
+                "Der Name des Nullpunkts darf nicht leer sein.",
+            ));
+        }
+        let id = id.to_owned();
+        let mut found = false;
+        self.mutate_active_origins(|origins| {
+            if let Some(origin) = origins.iter_mut().find(|origin| origin.id == id) {
+                origin.name = name;
+                found = true;
+            }
+        })?;
+        if !found {
+            return Err(AppError::new(
+                "origin_missing",
+                "Der gespeicherte Nullpunkt existiert nicht mehr.",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Löscht einen Nullpunkt aus dem aktiven Laserprofil.
+    pub fn delete_saved_origin(&mut self, id: &str) -> Result<(), AppError> {
+        let id = id.to_owned();
+        self.mutate_active_origins(|origins| origins.retain(|origin| origin.id != id))
+    }
+
+    /// Fährt den Kopf laserfrei und absolut nach (x, y) mm. Prüft endliche
+    /// Werte, die Bettgrenzen des aktiven Profils und dass kein Job läuft —
+    /// die UI-Sperre allein ist keine Sicherheitsgrenze (ADR 0020 §F).
+    pub fn move_to_position(&mut self, x_mm: f64, y_mm: f64, speed: f64) -> Result<(), AppError> {
+        let bed = self
+            .active_profile()
+            .map(|profile| profile.bed_mm)
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
+        if !x_mm.is_finite()
+            || !y_mm.is_finite()
+            || x_mm < 0.0
+            || y_mm < 0.0
+            || x_mm > bed.0
+            || y_mm > bed.1
+        {
+            return Err(AppError::new(
+                "move_out_of_bed",
+                format!(
+                    "Zielposition ({x_mm:.2}/{y_mm:.2} mm) liegt außerhalb des Arbeitsbereichs."
+                ),
+            ));
+        }
+        let status = self.read_plausible_position()?;
+        if status.is_running {
+            return Err(AppError::new(
+                "laser_busy",
+                "Während eines laufenden Jobs wird nicht angefahren.",
+            ));
+        }
+        self.with_driver(true, |driver| {
+            if !driver.capabilities().absolute_move {
+                return Err(AppError::new(
+                    "move_unsupported",
+                    "Der aktive Lasertreiber unterstützt kein absolutes Anfahren.",
+                ));
+            }
+            driver.move_to(x_mm, y_mm, speed).map_err(|error| {
+                AppError::wrap("laser_move", "Anfahren fehlgeschlagen.", error.to_string())
+            })
+        })
+    }
+
+    /// Fährt einen gespeicherten Nullpunkt an. Die ID wird ausschließlich im
+    /// aktiven Laserprofil aufgelöst; ungültige Einträge bleiben gesperrt.
+    pub fn move_to_saved_origin(&mut self, id: &str, speed: f64) -> Result<(), AppError> {
+        let profile = self
+            .active_profile()
+            .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
+        let origin = profile.saved_origin(id).ok_or_else(|| {
+            AppError::new(
+                "origin_missing",
+                "Der gespeicherte Nullpunkt existiert im aktiven Laserprofil nicht.",
+            )
+        })?;
+        if !profile.saved_origin_usable(origin) {
+            return Err(AppError::new(
+                "origin_invalid",
+                format!(
+                    "Nullpunkt „{}“ liegt außerhalb des Arbeitsbereichs. Bitte neu speichern oder entfernen.",
+                    origin.name
+                ),
+            ));
+        }
+        let (x, y) = (origin.x_mm, origin.y_mm);
+        self.move_to_position(x, y, speed)
+    }
+
+    /// „Ursprung" anfahren: bewegt den Kopf laserfrei zum Bezugspunkt der
+    /// gewählten Startreferenz. Absolut → Maschinen-Null 0/0, Benutzerursprung
+    /// → controllerseitiger Ursprung, gespeicherter Nullpunkt → dessen
+    /// Koordinate. Bei „Aktuelle Position" gibt es nichts anzufahren.
+    /// Gibt die nutzerlesbare Rückmeldung zurück.
+    pub fn goto_reference(
+        &mut self,
+        reference: &StartReference,
+        speed: f64,
+    ) -> Result<String, AppError> {
+        match reference {
+            StartReference::Absolut => {
+                self.move_to_position(0.0, 0.0, speed)?;
+                Ok("Maschinen-Nullpunkt wird angefahren.".into())
+            }
+            StartReference::AktuellePosition => {
+                Ok("Referenz ist die aktuelle Kopfposition — keine Bewegung nötig.".into())
+            }
+            StartReference::Benutzerursprung => {
+                // Nicht während eines laufenden Jobs — soweit der Treiber
+                // einen Status liefert (ADR 0020 §F).
+                if self.driver_capabilities().position_read && self.read_status()?.is_running {
+                    return Err(AppError::new(
+                        "laser_busy",
+                        "Während eines laufenden Jobs wird nicht angefahren.",
+                    ));
+                }
+                self.with_driver(true, |driver| {
+                    driver.go_origin(speed).map_err(|error| {
+                        AppError::wrap(
+                            "laser_move",
+                            "Benutzerursprung anfahren fehlgeschlagen.",
+                            error.to_string(),
+                        )
+                    })
+                })?;
+                Ok("Benutzerursprung wird angefahren.".into())
+            }
+            StartReference::GespeicherterNullpunkt { id } => {
+                let id = id.clone();
+                self.move_to_saved_origin(&id, speed)?;
+                Ok("Gespeicherter Nullpunkt wird angefahren.".into())
+            }
+        }
     }
 }
 

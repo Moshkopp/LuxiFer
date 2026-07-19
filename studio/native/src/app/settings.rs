@@ -212,7 +212,12 @@ impl App {
             super::hub::HubWorkerResult::Connected(connection, sync) => {
                 match sync {
                     Ok((report, catalog)) => {
-                        self.hub_sync_error = if catalog.conflicts.is_empty() {
+                        // Sichtbare, aber nicht blockierende Meldungen: ein
+                        // alter Hub setzt nur den Laserprofil-Sync aus (ADR
+                        // 0020); Konflikte verlangen eine bewusste Auflösung.
+                        self.hub_sync_error = if let Some(blocked) = &catalog.laser_sync_blocked {
+                            Some(blocked.clone())
+                        } else if catalog.conflicts.is_empty() {
                             None
                         } else {
                             Some(format!(

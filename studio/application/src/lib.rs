@@ -24,7 +24,7 @@ pub use hub::{
     sync_assets, sync_project_revisions, sync_shared_catalog, upload_pending_revisions,
     upload_workplace_backups, wait_for_project_event, CatalogKind, HubBackupKind, HubConnection,
     HubHandshake, HubLease, HubProjectEvent, HubSyncReport, HubWorkplace, HubWorkplaceBackup,
-    LeaseUsage, SharedCatalogRecord, SharedCatalogSync,
+    LeaseUsage, SharedCatalogRecord, SharedCatalogSync, LASER_SCHEMA_CAPABILITY,
 };
 pub use laser::LaserService;
 pub use materials::MaterialService;
