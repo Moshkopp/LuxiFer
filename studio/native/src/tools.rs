@@ -40,10 +40,19 @@ impl View {
     }
 }
 
+/// Obergrenze des Z-Jog-Speeds (mm/s). Über der Gewindestange gehen bei zu
+/// hohem Speed Schritte verloren, daher hart gedeckelt (ADR 0021).
+pub const Z_JOG_SPEED_MAX: f64 = 100.0;
+
 /// Laser-Bedien-Zustand (UI-seitig, kurzlebige Bedienpräferenzen).
 pub struct LaserUi {
     pub jog_step: f64,
     pub jog_speed: f64,
+    /// Eigener Jog-Speed der Z-Achse (mm/s), hart auf [`Z_JOG_SPEED_MAX`]
+    /// begrenzt.
+    pub z_jog_speed: f64,
+    /// Achsen-Jog-Modus: true = Dauerlauf (Taste halten), false = fester Schritt.
+    pub continuous_jog: bool,
     /// Job-Nullpunkt-Anker (0..8, 4 = Mitte).
     pub anchor: usize,
     pub selection_only: bool,
@@ -57,6 +66,8 @@ impl Default for LaserUi {
         Self {
             jog_step: 10.0,
             jog_speed: 100.0,
+            z_jog_speed: 100.0,
+            continuous_jog: false,
             anchor: 4,
             selection_only: false,
             start_reference: studio_core::StartReference::Absolut,

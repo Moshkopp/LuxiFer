@@ -53,6 +53,13 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
     use crate::tools::View;
     // Oben: globale Aktionen | Ansichten | kompakte Systemzustände.
     let view = app.view;
+    // Sicherheit: Ein laufender Achsen-Dauerlauf wird sofort gestoppt, sobald
+    // der Laser-Tab nicht mehr sichtbar ist (das Panel meldet dann keinen
+    // Halte-Wunsch mehr). Ohne das könnte ein Tab-Wechsel die Achse laufen
+    // lassen.
+    if view != View::Laser && app.laser_hold.is_some() {
+        app.laser_hold_cancel();
+    }
     let project_name = app
         .project
         .open_name()

@@ -24,7 +24,7 @@ mod editor;
 mod hub;
 mod image;
 mod laser;
-pub use laser::LaserMarkers;
+pub use laser::{HoldJog, LaserMarkers};
 mod laser_manager;
 mod materials;
 mod project;
@@ -115,6 +115,12 @@ pub struct App {
     preview_trace: Option<studio_core::ExecutionTrace>,
     pub laser: LaserUi,
     pub laser_backend: studio_application::LaserService,
+    /// Aktiver Achsen-Dauerlauf (Achse+Richtung) oder None. Watchdog-Zustand:
+    /// die UI meldet pro Frame den gehaltenen Wunsch; weicht er ab, wird
+    /// gestartet bzw. gestoppt. Stoppt auch bei Loslassen/Fokusverlust.
+    pub laser_hold: Option<laser::HoldJog>,
+    /// Zeitpunkt des letzten „gehalten"-Signals (Karenzzeit gegen Frame-Aussetzer).
+    pub laser_hold_seen: Option<std::time::Instant>,
     /// Live gelesener Maschinen-Anzeigestand (Kopf/Benutzerursprung, ADR 0020).
     pub laser_live: laser::LaserLiveState,
     /// Offener Nullpunkt-Namensdialog (Anlegen/Umbenennen) oder None.
@@ -272,6 +278,8 @@ impl App {
             preview_trace: None,
             laser: LaserUi::default(),
             laser_backend,
+            laser_hold: None,
+            laser_hold_seen: None,
             laser_live: Default::default(),
             saved_origin_dialog: None,
             app_error: None,
@@ -638,6 +646,8 @@ impl App {
             A::LaserRun(action) => self.laser_run(action),
             A::LaserExport => self.laser_export(),
             A::LaserJog(dx, dy) => self.laser_jog(dx, dy),
+            A::LaserJogAxis(axis, dir) => self.laser_jog_axis_step(axis, dir),
+            A::LaserHoldFrame(hold) => self.laser_hold_frame(hold),
             A::LaserHome => self.laser_home(),
             A::OpenLaserManager { create_new } => self.open_laser_manager(create_new),
             A::LaserSelectStartReference(reference) => self.laser_set_start_reference(reference),

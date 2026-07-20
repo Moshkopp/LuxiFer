@@ -131,6 +131,11 @@ pub enum UiAction {
     LaserExport,
     /// Laserkopf um (dx, dy) mm bewegen.
     LaserJog(f64, f64),
+    /// Zusatzachse (Z/U) einen Schritt in eine Richtung tippen.
+    LaserJogAxis(studio_core::MachineAxis, studio_core::AxisDir),
+    /// Pro-Frame-Meldung des Dauerlauf-Wunsches (gehaltene Achse+Richtung oder
+    /// None). Speist den Watchdog: startet/stoppt den Achsen-Dauerlauf.
+    LaserHoldFrame(Option<crate::app::HoldJog>),
     /// Laserkopf homen.
     LaserHome,
     /// Eigenständige Laserprofil-Verwaltung öffnen.
