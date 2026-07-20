@@ -145,6 +145,9 @@ impl App {
     }
 
     pub fn laser_disconnect(&mut self) {
+        // Zwingend vor dem Trennen: danach verschluckt jog_axis jedes HoldStop
+        // als No-op und das Stop-Telegramm erreicht den Controller nie mehr.
+        self.laser_hold_cancel();
         self.laser_backend.disconnect();
         self.hub_runtime.release_lease();
         self.hub_runtime

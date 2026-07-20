@@ -346,15 +346,16 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
         &mut actions,
         &mut hold,
     );
-    if ui_state.continuous_jog {
-        // Kontinuierlich neu zeichnen, solange etwas zu tun ist: eine Zelle
-        // gehalten wird ODER noch ein Dauerlauf aktiv ist (Watchdog-Karenz).
-        if hold.is_some() || view.hold_active {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(16));
-        }
-        actions.push(UiAction::LaserHoldFrame(hold));
+    // Kontinuierlich neu zeichnen, solange etwas zu tun ist: eine Zelle
+    // gehalten wird ODER noch ein Dauerlauf aktiv ist (Watchdog-Karenz).
+    if hold.is_some() || view.hold_active {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
     }
+    // Auch im Schritt-Modus melden — dort ist `hold` immer None. Ohne diese
+    // Meldung bliebe ein Dauerlauf beim Umschalten „Dauer“ → „Schritt“ ewig
+    // stehen: das Panel hörte schlicht auf zu senden, während die Achse lief.
+    actions.push(UiAction::LaserHoldFrame(hold));
 
     ui.add_space(8.0);
     slider_row(ui, "Schritt", "mm", &mut ui_state.jog_step, 0.1, 100.0);

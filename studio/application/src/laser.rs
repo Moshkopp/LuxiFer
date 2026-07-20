@@ -612,8 +612,10 @@ impl LaserService {
     }
 
     /// Einachsiges Jog (Z/U bzw. Dauerlauf jeder Achse). `motion` = Tippen oder
-    /// Halten (ADR 0021). Beim Stoppen sanft ohne Verbindung durchlassen, damit
-    /// der Watchdog beim Trennen nicht in einen Fehler läuft.
+    /// Halten (ADR 0021). Ein HoldStop ohne Verbindung ist ein No-op: dann ist
+    /// ohnehin nichts mehr sendbar (Verbindungsabriss). Das ist ausdrücklich
+    /// KEIN Ersatz für einen Stopp vor dem Trennen — dieser muss vorher
+    /// erfolgen, solange die Verbindung noch steht (siehe laser_disconnect).
     pub fn jog_axis(
         &mut self,
         axis: studio_core::MachineAxis,
