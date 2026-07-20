@@ -246,7 +246,7 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
         // die Combo füllt exakt den Rest der Panelbreite.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .add_enabled(view.can_save_origin, egui::Button::new("＋"))
+                .add_enabled(view.can_save_origin, egui::Button::new("+"))
                 .on_hover_text("Aktuelle Kopfposition als Nullpunkt speichern")
                 .clicked()
             {
@@ -504,7 +504,11 @@ fn slider_row(ui: &mut egui::Ui, label: &str, unit: &str, value: &mut f64, min: 
             ui.add(egui::DragValue::new(value).range(min..=max).speed(0.5));
         });
     });
-    ui.add(egui::Slider::new(value, min..=max).show_value(false));
+    // Slider über die volle Panelbreite (egui-Default sind starre 100 px).
+    ui.scope(|ui| {
+        ui.spacing_mut().slider_width = ui.available_width();
+        ui.add(egui::Slider::new(value, min..=max).show_value(false));
+    });
     ui.add_space(4.0);
 }
 
@@ -553,6 +557,61 @@ mod tests {
             collect(&clipped.shape, &mut out);
         }
         out
+    }
+
+    /// y-Zentrum eines Textes im Frame (Panik, wenn er fehlt).
+    fn text_y_center(shapes: &[egui::epaint::ClippedShape], needle: &str) -> f32 {
+        fn find(shape: &egui::epaint::Shape, needle: &str) -> Option<f32> {
+            match shape {
+                egui::epaint::Shape::Text(t) if t.galley.job.text == needle => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()).center().y)
+                }
+                egui::epaint::Shape::Vec(v) => v.iter().find_map(|s| find(s, needle)),
+                _ => None,
+            }
+        }
+        shapes
+            .iter()
+            .find_map(|c| find(&c.shape, needle))
+            .unwrap_or_else(|| panic!("Text {needle:?} nicht im Frame"))
+    }
+
+    /// Regressionstest zum egui-0.35-Befund „Zeileninhalte um 4 px versetzt":
+    /// `horizontal()` nimmt `interact_size.y` als Zeilenhöhe an; ist die
+    /// kleiner als die Button-Höhe, sitzen Button-, Combo- und Label-Texte
+    /// einer Zeile nicht mehr auf einer Linie. Das Theme muss die Zeilenhöhe
+    /// deshalb an die tatsächliche Button-Höhe koppeln.
+    #[test]
+    fn zeileninhalte_sitzen_auf_einer_linie() {
+        let ctx = egui::Context::default();
+        let style = crate::ui::theme_style(&studio_core::Theme::default());
+        ctx.all_styles_mut(|s| *s = style.clone());
+        let mut ui_state = crate::tools::LaserUi::default();
+        let view = view_with_origin();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(420.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, &view, &mut ui_state);
+            });
+        });
+        for (left, right) in [
+            ("Test · Ruida", "Verwalten"),
+            ("⏺ Getrennt", "Verbinden"),
+            ("Absolute Koordinaten", "+"),
+            ("Schritt", "10.0"),
+        ] {
+            let dy = (text_y_center(&out.shapes, left) - text_y_center(&out.shapes, right)).abs();
+            assert!(
+                dy < 0.5,
+                "{left:?} und {right:?} sind vertikal um {dy:.1} px versetzt"
+            );
+        }
     }
 
     /// Headless-Absicherung des Nutzerbefunds „gespeicherter Nullpunkt fehlt

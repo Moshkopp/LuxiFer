@@ -158,9 +158,6 @@ impl App {
         trim_cursor: Option<winit::window::CustomCursor>,
     ) -> Result<Self, AppError> {
         let egui_ctx = egui::Context::default();
-        // Moderate, vom Monitor-DPI unabhängige Vergrößerung für lesbare
-        // Beschriftungen und ausreichend große Trefferflächen.
-        egui_ctx.set_zoom_factor(1.15);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -190,6 +187,10 @@ impl App {
         cam.fit_bbox([0.0, 0.0, state.bed_w_mm, state.bed_h_mm], 0.85);
 
         let ui_settings = studio_core::UiSettings::load();
+        // UI-Skalierung des Arbeitsplatzes, zusätzlich zum Monitor-DPI
+        // (Full HD will typischerweise weniger als WQHD; einstellbar in den
+        // Einstellungen, Default die bisherige moderate Vergrößerung).
+        egui_ctx.set_zoom_factor(ui_settings.ui_scale);
         let laser_backend = studio_application::LaserService::load();
         let material_service = studio_application::MaterialService::load()?;
         studio_application::seed_shared_catalog(

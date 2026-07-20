@@ -11,7 +11,7 @@ impl App {
     pub fn open_settings_dialog(&mut self) {
         self.settings_dialog = Some(SettingsDialogState {
             draft: self.ui_settings.clone(),
-            section: SettingsSection::Oberflaeche,
+            section: SettingsSection::Arbeitsplatz,
             hub_status: self.hub_status.clone(),
             hub_sync_error: self.hub_sync_error.clone(),
             hub_backups: Vec::new(),
@@ -191,6 +191,7 @@ impl App {
             self.renderer.invalidate_scene();
         }
         self.canvas.invert_marquee_direction = draft.invert_marquee_direction;
+        self.egui_ctx.set_zoom_factor(draft.ui_scale);
         self.ui_settings = draft;
         self.hub_runtime.configure(
             &self.ui_settings,

@@ -5,6 +5,7 @@ use crate::ui::state::{HubTestStatus, SettingsDialogState, SettingsSection, Shor
 use egui::RichText;
 use studio_core::ui_settings::{
     GRID_SIZE_MAX, GRID_SIZE_MIN, INTENSITY_MAX, INTENSITY_MIN, SPLASH_MS_MAX, SPLASH_MS_MIN,
+    UI_SCALE_MAX, UI_SCALE_MIN,
 };
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -18,6 +19,27 @@ pub(in crate::ui) enum SettingsOutcome {
     PrepareRestore(usize),
     ConfirmRestore(usize),
     CancelRestore,
+}
+
+/// Einzige Quelle der Wahrheit für Reihenfolge und Beschriftung der Sektionen.
+/// Sidebar-Navigation und Überschrift lesen daraus, damit sie nie auseinander
+/// laufen.
+const SECTIONS: &[(SettingsSection, &str)] = &[
+    (SettingsSection::Arbeitsplatz, "Arbeitsplatz"),
+    (SettingsSection::Editor, "Editor"),
+    (SettingsSection::Darstellung, "Darstellung"),
+    (SettingsSection::FensterUndStart, "Fenster & Start"),
+    (SettingsSection::Tastaturkuerzel, "Tastenkürzel"),
+    (SettingsSection::Hub, "Hub"),
+    (SettingsSection::Ueber, "Über"),
+];
+
+fn section_label(section: SettingsSection) -> &'static str {
+    SECTIONS
+        .iter()
+        .find(|(candidate, _)| *candidate == section)
+        .map(|(_, label)| *label)
+        .unwrap_or("")
 }
 
 pub(in crate::ui) fn settings_dialog_window(
@@ -45,20 +67,15 @@ pub(in crate::ui) fn settings_dialog_window(
                         ui.set_width(130.0);
                         ui.set_height(body_height - 16.0);
                         ui.vertical(|ui| {
-                            for (section, label) in [
-                                (SettingsSection::Oberflaeche, "Oberfläche"),
-                                (SettingsSection::Tastaturkuerzel, "Tastenkürzel"),
-                                (SettingsSection::Hub, "Hub"),
-                                (SettingsSection::Ueber, "Über"),
-                            ] {
+                            for (section, label) in SECTIONS {
                                 if ui
                                     .add_sized(
                                         [ui.available_width(), 26.0],
-                                        egui::Button::selectable(st.section == section, label),
+                                        egui::Button::selectable(st.section == *section, *label),
                                     )
                                     .clicked()
                                 {
-                                    st.section = section;
+                                    st.section = *section;
                                 }
                             }
                         });
@@ -66,18 +83,16 @@ pub(in crate::ui) fn settings_dialog_window(
                 ui.vertical(|ui| {
                     ui.set_height(body_height);
                     ui.add_space(2.0);
-                    ui.heading(match st.section {
-                        SettingsSection::Oberflaeche => "Oberfläche",
-                        SettingsSection::Tastaturkuerzel => "Tastenkürzel",
-                        SettingsSection::Hub => "Hub",
-                        SettingsSection::Ueber => "Über",
-                    });
+                    ui.heading(section_label(st.section));
                     ui.add_space(6.0);
                     egui::ScrollArea::vertical()
                         .id_salt("settings_content")
                         .auto_shrink([false, false])
                         .show(ui, |ui| match st.section {
-                            SettingsSection::Oberflaeche => ui_section(ui, st),
+                            SettingsSection::Arbeitsplatz => workplace_section(ui, st),
+                            SettingsSection::Editor => editor_section(ui, st),
+                            SettingsSection::Darstellung => appearance_section(ui, st),
+                            SettingsSection::FensterUndStart => window_section(ui, st),
                             SettingsSection::Tastaturkuerzel => shortcuts_section(ui, st),
                             SettingsSection::Hub => hub_section(ui, st, &mut outcome),
                             SettingsSection::Ueber => about_section(ui),
@@ -297,15 +312,29 @@ fn theme_color_row(ui: &mut egui::Ui, color: &mut studio_core::ThemeColor) {
         );
     });
 }
-fn ui_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
+/// Arbeitsplatz-Identität: Name (und alles Weitere, das den Arbeitsplatz als
+/// solchen kennzeichnet). Bewusst schlank, damit die Sektion nicht wieder zur
+/// Resterampe wird.
+fn workplace_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
     let s = &mut st.draft;
-    egui::Grid::new("settings_ui")
+    egui::Grid::new("settings_workplace")
         .num_columns(2)
         .spacing([12.0, 10.0])
         .show(ui, |ui| {
-            ui.label("Arbeitsplatz");
-            ui.add(egui::TextEdit::singleline(&mut s.workplace).desired_width(220.0));
+            ui.label("Name");
+            ui.add(egui::TextEdit::singleline(&mut s.workplace).desired_width(220.0))
+                .on_hover_text("Sichtbarer Name dieses Arbeitsplatzes, z. B. im Hub.");
             ui.end_row();
+        });
+}
+
+/// Editor-Verhalten beim Zeichnen und Auswählen.
+fn editor_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
+    let s = &mut st.draft;
+    egui::Grid::new("settings_editor")
+        .num_columns(2)
+        .spacing([12.0, 10.0])
+        .show(ui, |ui| {
             ui.label("Raster (mm)");
             ui.add(
                 egui::DragValue::new(&mut s.grid_size_mm)
@@ -326,9 +355,43 @@ fn ui_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
                     "Aus: Zeichenwerkzeug bleibt aktiv, die neue Form wird aber abgewählt.",
                 );
             ui.end_row();
-            ui.label("Fensterstart");
-            ui.checkbox(&mut s.open_maximized, "Maximiert öffnen")
-                .on_hover_text("Wird beim nächsten Programmstart angewendet.");
+        });
+}
+
+/// Darstellung: Skalierung, Theme-Farben, Dialog-Abdunklung und die
+/// GPU-Bildqualität. Alles, was das Aussehen bestimmt.
+fn appearance_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
+    let s = &mut st.draft;
+    egui::Grid::new("settings_appearance")
+        .num_columns(2)
+        .spacing([12.0, 10.0])
+        .show(ui, |ui| {
+            ui.label("UI-Größe");
+            ui.add(
+                egui::Slider::new(&mut s.ui_scale, UI_SCALE_MIN..=UI_SCALE_MAX)
+                    .custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
+                    .custom_parser(|text| {
+                        text.trim()
+                            .trim_end_matches('%')
+                            .trim()
+                            .parse::<f64>()
+                            .ok()
+                            .map(|percent| percent / 100.0)
+                    }),
+            )
+            .on_hover_text(
+                "Skalierung der Oberfläche für diesen Arbeitsplatz — \
+                 z. B. kleiner auf Full HD, größer auf 4K. Gilt beim Speichern.",
+            );
+            ui.end_row();
+            ui.label("Akzentfarbe");
+            theme_color_row(ui, &mut s.theme.accent);
+            ui.end_row();
+            ui.label("Buttonfarbe");
+            theme_color_row(ui, &mut s.theme.button);
+            ui.end_row();
+            ui.label("Dialog-Hintergrund");
+            ui.add(egui::Slider::new(&mut s.modal_backdrop_alpha, 0..=255).text("Abdunklung"));
             ui.end_row();
             ui.label("Linienglättung");
             ui.checkbox(&mut s.line_antialiasing, "Analytisches GPU-AA")
@@ -349,14 +412,23 @@ fn ui_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
                     }
                 });
             ui.end_row();
-            ui.label("Akzentfarbe");
-            theme_color_row(ui, &mut s.theme.accent);
-            ui.end_row();
-            ui.label("Buttonfarbe");
-            theme_color_row(ui, &mut s.theme.button);
-            ui.end_row();
-            ui.label("Dialog-Hintergrund");
-            ui.add(egui::Slider::new(&mut s.modal_backdrop_alpha, 0..=255).text("Abdunklung"));
+        });
+    ui.add_space(10.0);
+    if ui.button("Theme zurücksetzen").clicked() {
+        s.theme = Default::default();
+    }
+}
+
+/// Fenster-Chrome und Start-Verhalten (Maximieren, Splash).
+fn window_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
+    let s = &mut st.draft;
+    egui::Grid::new("settings_window")
+        .num_columns(2)
+        .spacing([12.0, 10.0])
+        .show(ui, |ui| {
+            ui.label("Fensterstart");
+            ui.checkbox(&mut s.open_maximized, "Maximiert öffnen")
+                .on_hover_text("Wird beim nächsten Programmstart angewendet.");
             ui.end_row();
             ui.label("Splash beim Start");
             ui.checkbox(&mut s.show_splash, "");
@@ -370,10 +442,6 @@ fn ui_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
             );
             ui.end_row();
         });
-    ui.add_space(10.0);
-    if ui.button("Theme zurücksetzen").clicked() {
-        s.theme = Default::default();
-    }
 }
 
 fn shortcuts_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {

@@ -1009,15 +1009,23 @@ pub(crate) fn theme_style(theme: &studio_core::Theme) -> egui::Style {
     v.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.5));
     v.widgets.hovered.corner_radius = r;
+    v.widgets.hovered.expansion = 1.0;
     // Aktiv/gedrückt: Akzent trägt.
     v.widgets.active.bg_fill = accent_fill;
     v.widgets.active.weak_bg_fill = accent_fill;
     v.widgets.active.fg_stroke = Stroke::new(1.0, text);
     v.widgets.active.bg_stroke = Stroke::new(1.0, accent);
     v.widgets.active.corner_radius = r;
+    v.widgets.active.expansion = 1.0;
     // „open" (ComboBox aufgeklappt etc.)
     v.widgets.open.bg_fill = button_fill;
     v.widgets.open.corner_radius = r;
+
+    // Seit 0.30 geänderte Defaults, auf deren alte Werte das Layout
+    // abgestimmt ist: Clip-Rand (sonst wirken Ränder abgeschnitten) und
+    // runde Slider-Griffe statt der neuen rechteckigen.
+    v.clip_rect_margin = 3.0;
+    v.handle_shape = egui::style::HandleShape::Circle;
 
     let mut style = egui::Style {
         visuals: v,
@@ -1029,5 +1037,25 @@ pub(crate) fn theme_style(theme: &studio_core::Theme) -> egui::Style {
     style.spacing.button_padding = egui::vec2(10.0, 6.0);
     style.spacing.window_margin = egui::Margin::same(12);
     style.spacing.menu_margin = egui::Margin::same(8);
+    // Zeilenhöhe = tatsächliche Button-Höhe (Button-Text ≈ 14 px + 2×6 px
+    // Padding). `horizontal()` nimmt `interact_size.y` als Zeilenhöhe an;
+    // beim egui-Default 18 laufen unsere Buttons über und Combo/Label/Button
+    // sitzen um 4 px versetzt.
+    style.spacing.interact_size = egui::vec2(40.0, 26.0);
+
+    // Textmaße wie vor dem Upgrade (0.35 vergrößerte Body/Button auf 13.0,
+    // Monospace auf 13.0) — die Panel-Breiten sind auf die alten Maße gebaut.
+    use egui::{FontFamily, FontId, TextStyle};
+    style
+        .text_styles
+        .insert(TextStyle::Body, FontId::new(12.5, FontFamily::Proportional));
+    style.text_styles.insert(
+        TextStyle::Button,
+        FontId::new(12.5, FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        TextStyle::Monospace,
+        FontId::new(12.0, FontFamily::Monospace),
+    );
     style
 }

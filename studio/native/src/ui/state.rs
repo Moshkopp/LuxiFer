@@ -232,9 +232,16 @@ pub struct ProjectBrowserState {
 }
 
 /// Sektion des Einstellungen-Dialogs (Navigation links, wie das Tauri-Modal).
+/// Die frühere Sammel-Sektion „Oberfläche" ist nach Thema aufgeteilt:
+/// Arbeitsplatz (Identität), Editor (Zeichenverhalten), Darstellung
+/// (Theme/Rendering), Fenster & Start (Chrome/Splash) — sonst wächst eine
+/// einzelne Sektion unkontrolliert mit jeder neuen Einstellung.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsSection {
-    Oberflaeche,
+    Arbeitsplatz,
+    Editor,
+    Darstellung,
+    FensterUndStart,
     Tastaturkuerzel,
     Hub,
     Ueber,

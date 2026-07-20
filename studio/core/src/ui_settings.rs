@@ -156,6 +156,11 @@ pub struct UiSettings {
     /// Deckkraft der dunklen Fläche hinter modalen Dialogen.
     #[serde(default = "default_modal_backdrop_alpha")]
     pub modal_backdrop_alpha: u8,
+    /// UI-Skalierung (egui-Zoomfaktor) dieses Arbeitsplatzes. Zusätzlich zum
+    /// Monitor-DPI: Full-HD-Arbeitsplätze wollen typischerweise weniger als
+    /// WQHD. Geklemmt auf einen sinnvollen Bereich.
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: f32,
     /// Optionalen Hub-Koordinationsdienst verwenden.
     #[serde(default)]
     pub hub_enabled: bool,
@@ -179,6 +184,11 @@ fn default_splash_ms() -> u32 {
 
 fn default_modal_backdrop_alpha() -> u8 {
     200
+}
+
+/// Default-UI-Skalierung: die bisher fest verdrahtete moderate Vergrößerung.
+fn default_ui_scale() -> f32 {
+    1.15
 }
 
 fn default_hub_url() -> String {
@@ -212,6 +222,10 @@ pub const GRID_SIZE_MAX: f64 = 500.0;
 pub const SPLASH_MS_MIN: u32 = 0;
 pub const SPLASH_MS_MAX: u32 = 10_000;
 
+/// Grenzen der UI-Skalierung: klein genug für Full HD, groß genug für 4K.
+pub const UI_SCALE_MIN: f32 = 0.7;
+pub const UI_SCALE_MAX: f32 = 2.0;
+
 impl Default for UiSettings {
     fn default() -> Self {
         UiSettings {
@@ -229,6 +243,7 @@ impl Default for UiSettings {
             show_splash: true,
             splash_ms: default_splash_ms(),
             modal_backdrop_alpha: default_modal_backdrop_alpha(),
+            ui_scale: default_ui_scale(),
             hub_enabled: false,
             hub_url: default_hub_url(),
             shortcut_bindings: Default::default(),
@@ -248,6 +263,10 @@ impl UiSettings {
         }
         self.grid_size_mm = self.grid_size_mm.clamp(GRID_SIZE_MIN, GRID_SIZE_MAX);
         self.splash_ms = self.splash_ms.clamp(SPLASH_MS_MIN, SPLASH_MS_MAX);
+        if !self.ui_scale.is_finite() {
+            self.ui_scale = default_ui_scale();
+        }
+        self.ui_scale = self.ui_scale.clamp(UI_SCALE_MIN, UI_SCALE_MAX);
         if !matches!(self.msaa_samples, 1 | 2 | 4 | 8 | 16) {
             self.msaa_samples = default_msaa_samples();
         }
@@ -370,6 +389,7 @@ mod tests {
         assert!(back.show_splash);
         assert_eq!(back.splash_ms, default_splash_ms());
         assert_eq!(back.modal_backdrop_alpha, default_modal_backdrop_alpha());
+        assert_eq!(back.ui_scale, default_ui_scale());
         assert!(!back.hub_enabled);
         assert_eq!(back.hub_url, default_hub_url());
         assert_eq!(back.shortcut_bindings, crate::ShortcutBindings::default());
@@ -416,6 +436,23 @@ mod tests {
         };
         s.sanitize();
         assert_eq!(s.splash_ms, SPLASH_MS_MAX);
+    }
+
+    #[test]
+    fn ui_scale_wird_geklemmt_und_nan_faellt_auf_default() {
+        let mut s = UiSettings {
+            ui_scale: 9.0,
+            ..UiSettings::default()
+        };
+        s.sanitize();
+        assert_eq!(s.ui_scale, UI_SCALE_MAX);
+
+        let mut s = UiSettings {
+            ui_scale: f32::NAN,
+            ..UiSettings::default()
+        };
+        s.sanitize();
+        assert_eq!(s.ui_scale, default_ui_scale());
     }
 
     #[test]
