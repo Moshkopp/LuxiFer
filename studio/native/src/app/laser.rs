@@ -93,6 +93,9 @@ impl App {
     }
 
     pub fn laser_select(&mut self, id: &str) {
+        // Profilwechsel kann trennen: erst stoppen, dann umschalten (siehe
+        // laser_disconnect).
+        self.laser_hold_cancel();
         self.laser_backend.set_active(id);
         self.apply_active_laser_workspace();
         // Anzeigenwerte gehören zum vorherigen Gerät; Referenz pro Laser
@@ -222,11 +225,17 @@ impl App {
             }
             super::hub::LeaseWorkerResult::Released => {}
             super::hub::LeaseWorkerResult::ReleaseRequested => {
+                // Vor dem Trennen stoppen, solange die Verbindung noch steht:
+                // danach verschluckt jog_axis jedes HoldStop als No-op.
+                self.laser_hold_cancel();
                 self.laser_backend.disconnect();
                 self.toasts
                     .success("Ruida-Verbindung an anderen Arbeitsplatz übergeben.");
             }
             super::hub::LeaseWorkerResult::Lost(message) => {
+                // Meist ist die Verbindung ohnehin weg; der Versuch kostet
+                // nichts und räumt in jedem Fall den Halte-Zustand auf.
+                self.laser_hold_cancel();
                 self.laser_backend.disconnect();
                 self.app_error = Some(studio_application::AppError::new(
                     "hub_lease_lost",

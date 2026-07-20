@@ -86,6 +86,8 @@ impl App {
         };
         let original_id = profile.id.clone();
         let was_connected = self.laser_backend.is_connected();
+        // Verbindungs- oder achsenrelevante Änderungen trennen den Treiber.
+        self.laser_hold_cancel();
         if let Err(error) = self.laser_backend.save_profile(profile) {
             self.app_error = Some(error);
             return;
@@ -131,6 +133,7 @@ impl App {
             return;
         };
         let was_connected = self.laser_backend.is_connected();
+        self.laser_hold_cancel();
         if let Err(error) = self.laser_backend.delete_profile(&id) {
             self.app_error = Some(error);
             return;
@@ -319,6 +322,10 @@ impl App {
             .as_ref()
             .and_then(|state| state.selected_id.clone())
         {
+            // set_active kann trennen (anderes Profil). Ein laufender Dauerlauf
+            // muss vorher gestoppt sein, solange die Verbindung noch steht —
+            // danach ist HoldStop ein No-op. Idempotent, kostet sonst nichts.
+            self.laser_hold_cancel();
             self.laser_backend.set_active(&id);
             self.apply_active_laser_workspace();
         }
