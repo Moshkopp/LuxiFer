@@ -57,27 +57,49 @@ Achsen-Jog. (C) Achsen-Inversion ist pro Achse im Laserprofil konfigurierbar.
 ### (A) Achsen-Verfügbarkeit aus den Vendor-Settings
 
 Studio leitet die vorhandenen Zusatzachsen aus dem Controller ab, nicht aus
-manueller Eingabe. Der Ruida-Treiber liest dafür die Achs-Control-Register
-(Z: `0x0040`, U: `0x0050` — bereits Teil des vorhandenen Settings-Blocks in
-`settings.rs`) und meldet die Verfügbarkeit geräteneutral über die
+manueller Eingabe. **Wichtig — zwei getrennte Rotary-Mechanismen** (recherchiert,
+LightBurn-/RDWorks-Doku und -Foren):
+
+- **Rotary über Y** (klassisch): Der vorhandene Settings-Block (`settings.rs`,
+  Gruppe „Rotary") liest bereits `0x0226` **rotary_enable** (`bit_mask:
+  Some(1)`), `0x021F` **pulses_per_rot** („circle pulse", Mikroschritte pro
+  Umdrehung) und `0x0221` **rotary_diameter**. `rotary_enable` schaltet den
+  Controller in den Y-Rotary-Modus: die **Y-Bewegung wird zur Drehung** (der
+  Y-Motor ist dann typischerweise abgeklemmt und die Rotary an den Y-Ausgang
+  gesteckt). Diese Register betreffen **nicht** die U-Achse.
+
+- **Rotary über U** (Firmware-Patch): Eine eigenständige 4. Achse mit eigenen
+  Move-Kommandos (`D9 03 …`, Positionsregister `0x0451`) — das, was auf dem
+  Branch gejoggt wurde. `0x0226` sagt darüber nichts aus.
+
+Daraus folgt für die Verfügbarkeit:
+
+- **Y-Rotary** ist über `0x0226 rotary_enable` sicher erkennbar (Bit bekannt).
+- **U-Achse** hat noch **keine** sicher identifizierte Enable-Quelle. Kandidat
+  ist das Achs-Control-Register `0x0050` (U); sein Enable-Bit ist noch zu
+  dekodieren. Bis dahin liefert der Treiber `has_u_axis` konservativ (`false`).
+- **Z-Achse**: analog, Kandidat `0x0040`, Enable-Bit noch zu dekodieren →
+  `has_z_axis` konservativ `false`.
+
+Der Ruida-Treiber meldet die Verfügbarkeit geräteneutral über die
 `DriverCapabilities`:
 
 ```
 pub struct DriverCapabilities {
     …
-    pub has_z_axis: bool,
-    pub has_u_axis: bool,
+    pub has_z_axis: bool,      // aus 0x0040 (Enable-Bit noch zu dekodieren)
+    pub has_u_axis: bool,      // aus 0x0050 (Enable-Bit noch zu dekodieren)
+    pub rotary_on_y: bool,     // aus 0x0226 rotary_enable (bekannt)
 }
 ```
 
-Die konkreten Achs-Enable-Bits in `0x0040`/`0x0050` sind noch nicht dekodiert;
-das ist die erste Umsetzungsaufgabe (Register lesen, mit an-/abgeklemmter Achse
-vergleichen). Bis die Bits sicher sind, liefert der Treiber die Capability
-konservativ (`false`), sodass die Bedienelemente eher gesperrt als fälschlich
-freigegeben sind. Solange nicht verbunden, sind Zusatzachsen ebenfalls gesperrt
-(wie schon Jog/Home).
+Die Pulse/Umdrehung und der Durchmesser (`0x021F`/`0x0221`) sind für den Jog
+irrelevant, aber die Grundlage der späteren Rotary-**Gravur** über Y (siehe (D)
+und das Gravur-ADR) — sie müssen dort **nicht neu erfunden** werden, der
+Controller hält sie bereits.
 
-Die UI (Jog-Kreuz-Ecken für Z/U) ist genau dann klickbar, wenn verbunden **und**
+Solange nicht verbunden, sind Zusatzachsen gesperrt (wie schon Jog/Home). Die
+UI (Jog-Kreuz-Ecken für Z/U) ist genau dann klickbar, wenn verbunden **und**
 die jeweilige Capability `true` ist — analog zum bestehenden Muster, das
 `position_read`/`user_origin_read` bereits für andere Bedienelemente nutzt.
 
@@ -134,16 +156,20 @@ pub enum RotaryMode {
 
 - **`UAchse`**: wie auf diesem Branch — U ist eine eigenständige Achse; Jog und
   (später) Gravur nutzen U zusätzlich zur X/Y-Ebene.
-- **`YAchse`**: Rotary läuft über den Y-Ausgang. Für den **Jog** heißt das: die
-  U-Bedienelemente entfallen, die Y-Bewegung *ist* die Drehung. Für die
-  **Gravur** (späteres ADR) wird die Y-Koordinate über Umfang/Schritte-pro-
-  Umdrehung skaliert (die etablierte DSP-Rotary-Rechnung), statt eine separate
-  U-Achse anzusteuern.
+- **`YAchse`**: Rotary läuft über den Y-Ausgang; im Controller ist
+  `0x0226 rotary_enable` gesetzt. Der Controller behandelt die Y-Bewegung
+  selbst als Drehung und skaliert sie über seine `pulses_per_rot`/`diameter`
+  (`0x021F`/`0x0221`). Für den **Jog** heißt das: die U-Bedienelemente
+  entfallen, die Y-Pfeile *sind* die Drehung — es braucht **keine** app-seitige
+  Skalierung, der Controller macht sie. Für die **Gravur** ist damit im
+  einfachsten Fall nichts Besonderes zu tun: ein normaler Y-Job wird vom
+  Controller als Rotary interpretiert, solange `rotary_enable` an ist (Details
+  klärt das Gravur-ADR).
 
 Dieses ADR legt nur den **Modus im Profil und sein Jog-Verhalten** fest. Die
-eigentliche Rotary-**Gravur** (Y-Skalierung, Objektdurchmesser, Schritte pro
-Umdrehung) ist Gegenstand eines eigenen späteren ADR — hier wird nur der Platz
-dafür geschaffen und der Y-Fall nicht verbaut.
+eigentliche Rotary-**Gravur** ist Gegenstand eines eigenen späteren ADR. Der
+Y-Fall wird hier nicht verbaut, und die Controller-Register (`0x0226`/`0x021F`/
+`0x0221`) sind bereits im Settings-System verfügbar.
 
 ## Konsequenzen
 
@@ -159,9 +185,10 @@ dafür geschaffen und der Y-Fall nicht verbaut.
 
 **Aufwand / Risiko**
 
-- Die Achs-Enable-Bits in `0x0040`/`0x0050` müssen erst an Hardware dekodiert
-  werden (mit/ohne angeschlossener Achse vergleichen). Bis dahin konservativ
-  gesperrt.
+- Y-Rotary-Verfügbarkeit ist bereits abgedeckt (`0x0226 rotary_enable`, Bit
+  bekannt). Die **U**- und **Z**-Enable-Bits (`0x0050`/`0x0040`) müssen noch an
+  Hardware dekodiert werden (Register mit/ohne angeschlossener Achse
+  vergleichen); bis dahin `has_u_axis`/`has_z_axis` konservativ gesperrt.
 - `LaserProfile` und `DriverCapabilities` wachsen um Felder; die Serialisierung
   bleibt über `serde(default)` rückwärtskompatibel (bestehende Profile laden
   weiter, Zusatzachsen zunächst aus/gesperrt).
@@ -171,8 +198,9 @@ dafür geschaffen und der Y-Fall nicht verbaut.
 
 ## Umsetzungsreihenfolge (nach Annahme des ADR)
 
-1. `DriverCapabilities` um `has_z_axis`/`has_u_axis`; Ruida liest die Register
-   (zunächst konservativ), UI sperrt Z/U-Ecken entsprechend.
+1. `DriverCapabilities` um `has_z_axis`/`has_u_axis`/`rotary_on_y`; Ruida liest
+   `0x0226` (Y-Rotary, bekannt) und — sobald dekodiert — `0x0050` (U) / `0x0040`
+   (Z); UI sperrt Z/U-Ecken entsprechend.
 2. Trait auf `jog(axis, dir, motion, speed)` vereinheitlichen; Inversion +
    Kommando-Auswahl in den Treiber ziehen; `hold_dir`/`step_dir` entfernen.
 3. `AxisConfig` (Inversion) ins `LaserProfile` + Bedienung in der
