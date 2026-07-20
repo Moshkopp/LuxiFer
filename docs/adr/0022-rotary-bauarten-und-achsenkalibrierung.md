@@ -127,6 +127,39 @@ Schreibzugriff auf `$$`) melden `false`; die UI blendet die Kalibrierfunktion
 dann aus, statt sie ins Leere laufen zu lassen. Ruida meldet `true`
 (`write_machine_settings` + die vorhandenen `*_step_length`-Register).
 
+### (D) Verortung in der UI: Laser-Verwaltung, pro Laser
+
+Die Achs-Steps-Kalibrierung ist eine **Geräteeigenschaft** und gehört damit in
+die **Laser-Verwaltung** (pro Laser), nicht in globale Settings. Die Verwaltung
+hat bereits ein Tab-Layout (Grunddaten, Kalibrierung, Controller, Nullpunkte).
+
+**Namensklärung — es gibt zwei verschiedene „Kalibrierungen":**
+
+- Das **bestehende** Tab „Kalibrierung" ist die **Scan-Offset-/Reversal-**
+  Korrektur (geschwindigkeitsabhängiger Versatz beim bidirektionalen Scannen,
+  `scan_offset`). Das bleibt, wird aber zur Unterscheidung präziser benannt
+  (z. B. „Scan-Offset").
+- Neu kommt die **Achs-Steps-Kalibrierung** (Soll/Ist → Schrittweite) als
+  eigener Bereich mit je einer Zeile pro Achse:
+
+  ```
+  Achskalibrierung
+    X   [Soll mm] [Ist mm]  [Kalibrieren]
+    Y   [Soll mm] [Ist mm]  [Kalibrieren]
+    Z   [Soll mm] [Ist mm]  [Kalibrieren]   (nur wenn has_z_axis)
+    U   [Soll mm] [Ist mm]  [Kalibrieren]   (nur wenn has_u_axis)
+  ```
+
+  Pro Achse: der Nutzer gibt Soll (gewünschte Strecke) und Ist (gemessene
+  Strecke) ein, „Kalibrieren" liest den aktuellen Steps-Wert, rechnet (Core)
+  und schreibt zurück (Treiber). Eine Achszeile erscheint nur, wenn die Achse
+  existiert (Capabilities aus ADR 0021); der ganze Bereich nur, wenn
+  `axis_step_calibration` — sonst ausgeblendet.
+
+Ob das ein eigenes Tab „Achskalibrierung" neben „Scan-Offset" wird oder beide
+Kalibrierungen ein gemeinsames Tab mit zwei Abschnitten teilen, ist eine
+Feinheit der Umsetzung; fachlich sind es zwei getrennte Dinge.
+
 ## Konsequenzen
 
 **Positiv**
