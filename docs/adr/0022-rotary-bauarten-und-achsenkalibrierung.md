@@ -219,9 +219,11 @@ Feinheit der Umsetzung; fachlich sind es zwei getrennte Dinge.
   `steps_per_mm` + `calibrated_step_length`) mit Tests.
 - `DriverCapabilities` und `LaserProfile` wachsen (Rotary-Parameter, gewählte
   Bauart) — rückwärtskompatibel über `serde(default)`.
-- Die **Roller-Formel** ist bewusst auf „nur Walzendurchmesser" festgelegt; das
-  ist an einer echten Kalibrierung zu bestätigen. Falls sich ein Aufbau anders
-  verhält, bleibt `RotaryKind` erweiterbar.
+- Die **Roller-Formel** ist bewusst auf „nur Walzendurchmesser" festgelegt.
+  **An Hardware bestätigt (2026-07-20):** 52-mm-Walze, 1250 Pulse pro
+  Umdrehung, Gravur eines 20×20-mm-Rechtecks auf einer Dose — maßhaltig, ohne
+  dass der Dosendurchmesser irgendwo eingeht. Falls sich ein anderer Aufbau
+  abweichend verhält, bleibt `RotaryKind` erweiterbar.
 - Der Ruida-Y-Rotary-Fall schreibt Werte, die der Controller selbst anwendet;
   Studio muss dort seine eigene Rechnung und die Controller-Register konsistent
   halten (Detail des Gravur-ADR).

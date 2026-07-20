@@ -1,6 +1,8 @@
 # ADR 0023: Rotary-Gravur
 
-- Status: **Entwurf — nicht umgesetzt, zur Prüfung**
+- Status: **Teilweise umgesetzt** — Einrichtung und Controller-Register stehen,
+  die Job-Seite ist offen. Die Modus-Frage ist an Hardware geklärt (siehe
+  „Befund an der Maschine").
 - Datum: 2026-07-20
 - Betrifft: studio-core (Job-Kompilierung), Treiber (Ruida), Application,
   Laserprofile, Laserpanel
@@ -40,6 +42,50 @@ Daraus folgt die zentrale Feststellung dieses Entwurfs:
 Das ist der gefährlichste denkbare Fehler in diesem Bereich, und er entsteht
 gerade dann, wenn man „Rotary-Gravur" als *einen* Fall behandelt.
 
+## Befund an der Maschine (2026-07-20)
+
+Am RDC6445G gemessen und recherchiert — das korrigiert die Annahmen aus
+ADR 0021 §D:
+
+1. **Die Rotary-Register gelten nur für Y.** Mit `rotary_enable` an ändert sich
+   das Verhalten der **Y**-Achse (langsamer, eingeschränkter Weg); die U-Achse
+   bleibt unberührt. Ein Jog auf U ändert sich nicht, wenn man
+   `rotary_diameter` verstellt.
+2. **U als Rotary-Achse gibt es im Serien-Ruida nicht.** Es existiert eine
+   inoffizielle Firmware (`RDC6445G-V15.01.22-LIB`), die die Y-Pulse auf den
+   U-Ausgang **umleitet**. Auch dort bleibt der Job ein Y-Job — es gibt keine
+   U-Koordinate im Protokoll. Im Controller-Menü der offiziellen Firmware gibt
+   es entsprechend keine Y/U-Auswahl.
+3. **Das Job-Format kennt nur X und Y.** `cmd_move_abs`/`cmd_cut_abs` tragen
+   zwei Koordinaten. Eine dritte Bewegungsachse ließe sich nicht in eine
+   Schnittbahn schreiben, auch wenn man wollte.
+
+**Folge:** Rotary am Ruida heißt Rotary über Y — entweder per Firmware-Patch
+umgeleitet oder durch Umstecken des Motorkabels. Der Modus `RotaryMode::UAchse`
+aus ADR 0021 ist für die **Gravur** damit gegenstandslos; für den **Jog** bleibt
+U eine normale, nutzbare Achse.
+
+### Y-Rotary an Hardware bestätigt (2026-07-20)
+
+Motorkabel getauscht (Rotary an Y, Y-Motor an U), `rotary_enable` samt Pulsen
+und Durchmesser über den Rotary-Dialog geschrieben, Controller neu gestartet:
+
+- **§B trägt.** Studio sendet einen unveränderten X/Y-Job; die Y-Werte sind
+  gewöhnliche Millimeter. Der Controller rechnet die Drehung selbst. Eine
+  app-seitige Skalierung fand nicht statt und darf auch nicht dazukommen.
+- Maßhaltig: 20×20 mm auf einer Dose, 52-mm-Walze, 1250 Pulse.
+- Praxisgriff des Nutzers: erst mit echtem Y-Motor homen, **dann** umstecken.
+  Der alte Y-Motor an U hält den Portalarm über den Haltestrom fest, damit er
+  beim Rastern in X nicht wandert.
+- Wohin der Kopf nach dem Job fährt, ist eine **Controller-Einstellung**
+  (Ausgangspunkt bzw. Referenzfahrt) — Studio muss dafür nichts in den Job
+  schreiben.
+
+Für G-Code-Steuerungen (GRBL/grblHAL/FluidNC) liegt der Fall anders: dort ist
+die A-Achse gleichberechtigt und steht als eigener Buchstabe in jeder Zeile
+(`G1 X.. Y.. A..`). Ein späterer Treiber dorthin ist der saubere Weg zu echter
+Mehrachsigkeit.
+
 ## Entscheidung (Vorschlag)
 
 **(A) Rotary-Gravur ist kein eigener Job-Typ, sondern eine Eigenschaft der
@@ -69,17 +115,18 @@ Nutzereinstellungen) oder nur **prüft und warnt** (Risiko: Nutzer graviert mit
 falscher Skalierung). Der Entwurf neigt zu *prüfen und warnen*, weil das
 Schreiben von Registern ohne Not eine fremde Maschinenkonfiguration verändert.
 
-### (C) `UAchse`: der Core rechnet
+### (C) `UAchse`: entfällt am Ruida — gilt später für G-Code-Treiber
 
-Hier ersetzt U die Y-Achse. Der Core rechnet die Y-Koordinate jedes Pfadpunkts
-in eine U-Strecke um, über `Rotary::steps_per_mm()` bzw. die Abwicklung aus ADR
-0022. Chuck und Roller unterscheiden sich dabei genau so, wie ADR 0022 es
-festlegt — der Gravur-Pfad kennt den Unterschied nicht, er fragt das Modell.
+Ursprünglich stand hier „der Core rechnet die Y-Koordinate in eine U-Strecke
+um". Das ist am Ruida **nicht umsetzbar**: das Job-Format trägt nur X und Y
+(siehe Befund oben). Der Abschnitt bleibt als Vorgabe für einen späteren
+G-Code-Treiber stehen, wo A eine echte Achse ist.
 
-Offen zur Klärung: ob U in mm-Abwicklung oder in Grad ausgedrückt wird. Der
-Entwurf neigt zu **mm-Abwicklung**, weil dann Geometrie, Vorschub und
-Materialparameter in derselben Einheit bleiben und die Bauart im Modell
-gekapselt ist.
+Dort gilt: Der Core rechnet die abgewickelte Strecke über `Rotary` aus ADR
+0022, der Treiber setzt sie in die Einheit seiner Achse um. Bei GRBL/FluidNC
+ist das **Grad** (`steps_per_mm` einer A-Achse bedeutet dort faktisch
+Schritte pro Grad), nicht mm — die Umrechnung mm-Abwicklung → Grad gehört in
+den Treiber, nicht in den Core.
 
 ### (D) Verortung
 

@@ -157,8 +157,15 @@ pub enum RotaryMode {
 }
 ```
 
-- **`UAchse`**: wie auf diesem Branch — U ist eine eigenständige Achse; Jog und
-  (später) Gravur nutzen U zusätzlich zur X/Y-Ebene.
+- **`UAchse`**: U ist eine eigenständige Achse; der **Jog** nutzt sie
+  zusätzlich zur X/Y-Ebene.
+
+  > **Korrektur 2026-07-20 (an Hardware geprüft):** Für die **Gravur** ist
+  > dieser Modus am Ruida gegenstandslos. Die Rotary-Register wirken nur auf Y,
+  > und das Job-Format trägt ohnehin nur X/Y — eine U-Bewegung lässt sich nicht
+  > in eine Schnittbahn schreiben. U-Rotary am Ruida gibt es nur über eine
+  > inoffizielle Firmware, die Y-Pulse auf den U-Ausgang umleitet; auch dann
+  > bleibt der Job ein Y-Job. Einzelheiten in ADR 0023.
 - **`YAchse`**: Rotary läuft über den Y-Ausgang; im Controller ist
   `0x0226 rotary_enable` gesetzt. Der Controller behandelt die Y-Bewegung
   selbst als Drehung und skaliert sie über seine `pulses_per_rot`/`diameter`
