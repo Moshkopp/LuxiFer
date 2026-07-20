@@ -611,6 +611,30 @@ impl LaserService {
         })
     }
 
+    /// Einachsiges Jog (Z/U bzw. Dauerlauf jeder Achse). `motion` = Tippen oder
+    /// Halten (ADR 0021). Beim Stoppen sanft ohne Verbindung durchlassen, damit
+    /// der Watchdog beim Trennen nicht in einen Fehler läuft.
+    pub fn jog_axis(
+        &mut self,
+        axis: studio_core::MachineAxis,
+        dir: studio_core::AxisDir,
+        motion: studio_core::JogMotion,
+        speed: f64,
+    ) -> Result<(), AppError> {
+        if matches!(motion, studio_core::JogMotion::HoldStop) && !self.is_connected() {
+            return Ok(());
+        }
+        self.with_driver(true, |d| {
+            d.jog_axis(axis, dir, motion, speed).map_err(|e| {
+                AppError::wrap(
+                    "laser_jog_axis",
+                    "Achsen-Jog fehlgeschlagen.",
+                    e.to_string(),
+                )
+            })
+        })
+    }
+
     // --- Positionslesen und Werkstück-Nullpunkte (ADR 0020) -----------------
 
     /// Fähigkeiten des aktiven Treibers (für „nicht unterstützt"-Anzeigen).

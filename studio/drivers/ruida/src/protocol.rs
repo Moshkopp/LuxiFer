@@ -48,10 +48,15 @@ pub fn encode_value(mut value: u64, length: usize) -> Vec<u8> {
     out
 }
 
-/// 5-Byte-Koordinate in µm (35-Bit-Maske für Zweierkomplement).
+/// 5-Byte-Koordinate in µm (32-Bit-Zweierkomplement, auf 5×7-Bit verteilt).
+///
+/// Negative Werte nutzen die 32-Bit-Breite von `i32` (oberstes 7-Bit-Byte
+/// trägt nur die verbleibenden 4 Bits, also ≤ `0x0F`). An echter Hardware
+/// (RDC6445G) über Referenz-Mitschnitte negativer Z-/U-Moves bestätigt. Für
+/// positive Werte identisch zur früheren 35-Bit-Maske — bestehende Jobs (nur
+/// positive Bett-Koordinaten) bleiben Byte-gleich.
 pub fn encode_coord(um: i32) -> Vec<u8> {
-    let mask: i64 = (1 << 35) - 1;
-    encode_value((um as i64 & mask) as u64, 5)
+    encode_value(um as u32 as u64, 5)
 }
 
 /// Leistung 0–100 % → 14-Bit-Wert (2 Byte).
@@ -138,14 +143,64 @@ pub fn cmd_rapid_move_xy(x_um: i32, y_um: i32) -> Vec<u8> {
     v
 }
 
+// --- Einachs-Jog: Schritt (D9 <achse> 02) und Dauerlauf (D9 D8) --------------
+//
+// Achs-Index: X=0, Y=1, Z=2, U=3. Beide Kommandofamilien an echter Hardware
+// (RDC6445G) über Referenz-Mitschnitte aller Achsen in beiden Richtungen
+// verifiziert. WICHTIG (ADR 0021 §B): Schritt-Move und Dauerlauf laufen pro
+// Achse GEGENEINANDER invertiert — das gleicht der Treiber intern aus
+// (`cmd_axis_step`/`cmd_hold_axis` bekommen bereits die aufgelöste Richtung).
+
+/// Einzelachsiger Eilgang absolut, Laser AUS: `D9 <achse> 02 <coord>`. Der
+/// Controller interpretiert den Wert relativ (Referenz-Mitschnitt: kein
+/// Positions-Read davor). `02` = „Move ohne Optionen".
+fn cmd_rapid_move_axis(axis_index: u8, um: i32) -> Vec<u8> {
+    let mut v = vec![0xD9, axis_index, 0x02];
+    v.extend(encode_coord(um));
+    v
+}
+
+/// Vollständige Schritt-Jog-Sequenz einer Achse **byte-getreu nach dem
+/// Referenz-Mitschnitt**: Speed setzen, zwei Leistungs-Register auf 0, dann der
+/// Achs-Move. Die beiden `C6`-Register sind Teil der aufgezeichneten Sequenz;
+/// ohne sie führt der Controller den Move nach vorheriger Bewegung nicht aus.
+pub fn cmd_axis_step(axis_index: u8, um: i32, speed_mm_s: f64) -> Vec<u8> {
+    let mut v = cmd_set_speed(speed_mm_s);
+    v.extend(cmd_set_power_min(0.0)); // C6 01 00 00
+    v.extend_from_slice(&[0xC6, 0x21, 0x00, 0x00]);
+    v.extend(cmd_rapid_move_axis(axis_index, um));
+    v
+}
+
+/// Dauerlauf-Jog einer Achse: fährt kontinuierlich (`stop=false`) bzw. stoppt
+/// (`stop=true`) — `D9 D8 <flags>` mit
+/// `flags = 0x20 | (achse << 1) | richtung | stop`
+/// (Richtung 0=vorwärts/1=rückwärts, Stop-Bit 0x10). Der Aufrufer setzt vor dem
+/// Start die Geschwindigkeit ([`cmd_set_speed`]).
+pub fn cmd_hold_axis(axis_index: u8, backward: bool, stop: bool) -> Vec<u8> {
+    let flags = 0x20 | (axis_index << 1) | (backward as u8) | if stop { 0x10 } else { 0 };
+    vec![0xD9, 0xD8, flags]
+}
+
 // --- Register-Abfrage (Status/Position) -------------------------------------
 
+// Positions-Register folgen der Systematik `0x04<achse><art>` (zweite Stelle
+// Achse 2=X/3=Y/4=Z/5=U, letzte 1=Position/4=Origin), an HW verifiziert.
 pub const ADDR_STATUS: u16 = 0x0400;
 pub const ADDR_POS_X: u16 = 0x0421;
 pub const ADDR_POS_Y: u16 = 0x0431;
+/// U-Achsenposition (Rotary). An HW als gültig bestätigt (Wert folgte einer
+/// echten Drehung).
+pub const ADDR_POS_U: u16 = 0x0451;
+/// Z-Achsenposition (Kandidat, folgt dem Muster). Zeigte im Test zeitweise
+/// konstant 3200 — noch nicht sicher als Ist-Position bestätigt.
+pub const ADDR_POS_Z: u16 = 0x0441;
 /// Benutzerursprung (am Panel gesetzt), an HW verifiziert (gotoorigin.pcap).
 pub const ADDR_ORIGIN_X: u16 = 0x0424;
 pub const ADDR_ORIGIN_Y: u16 = 0x0434;
+/// „Rotary aktiv" (klassische Rotary über Y). Bit 0 = an. Bereits im
+/// Settings-Block als `rotary_enable` geführt (ADR 0021/0022).
+pub const ADDR_ROTARY_ENABLE: u16 = 0x0226;
 
 /// Register lesen (`DA 00 <hi> <lo>`). Antwort: `DA 01 <hi> <lo> <5-Byte-Wert>`.
 pub fn cmd_read_reg(addr: u16) -> Vec<u8> {
@@ -264,5 +319,57 @@ mod tests {
     #[test]
     fn pause_nutzt_referenzkommando() {
         assert_eq!(cmd_pause(), vec![0xD8, 0x02]);
+    }
+
+    #[test]
+    fn achs_move_entspricht_hw_mitschnitt() {
+        // U-Move (Achse 3) +10 mm: D9 03 02 + coord(10000).
+        assert_eq!(
+            cmd_rapid_move_axis(3, 10_000),
+            vec![0xD9, 0x03, 0x02, 0x00, 0x00, 0x00, 0x4E, 0x10]
+        );
+        // U −10 mm (32-Bit-Zweierkomplement) — exakt die Mitschnitt-Bytes.
+        assert_eq!(
+            cmd_rapid_move_axis(3, -10_000),
+            vec![0xD9, 0x03, 0x02, 0x0F, 0x7F, 0x7F, 0x31, 0x70]
+        );
+        // Z-Move (Achse 2) ±30 mm aus dem Z-Mitschnitt.
+        assert_eq!(
+            cmd_rapid_move_axis(2, 30_000),
+            vec![0xD9, 0x02, 0x02, 0x00, 0x00, 0x01, 0x6A, 0x30]
+        );
+        assert_eq!(
+            cmd_rapid_move_axis(2, -30_000),
+            vec![0xD9, 0x02, 0x02, 0x0F, 0x7F, 0x7E, 0x15, 0x50]
+        );
+    }
+
+    #[test]
+    fn axis_step_ist_vollstaendige_mitschnitt_sequenz() {
+        // U-Schritt +10 mm bei 50 mm/s — exakt die aufgezeichnete Byte-Folge:
+        // C9 02 (speed) + C6 01 00 00 + C6 21 00 00 + D9 03 02 (move).
+        assert_eq!(
+            cmd_axis_step(3, 10_000, 50.0),
+            vec![
+                0xC9, 0x02, 0x00, 0x00, 0x03, 0x06, 0x50, // set_speed(50)
+                0xC6, 0x01, 0x00, 0x00, // Leistungsregister 1 = 0
+                0xC6, 0x21, 0x00, 0x00, // Leistungsregister 2 = 0
+                0xD9, 0x03, 0x02, 0x00, 0x00, 0x00, 0x4E, 0x10, // Move U auf 10 mm
+            ]
+        );
+    }
+
+    #[test]
+    fn dauerlauf_entspricht_hw_mitschnitt() {
+        // Alle vier Achsen, beide Richtungen, Start und Stop — Byte-genau aus
+        // den Referenz-Mitschnitten. Achs-Index X=0/Y=1/Z=2/U=3.
+        assert_eq!(cmd_hold_axis(0, false, false), vec![0xD9, 0xD8, 0x20]); // X vor
+        assert_eq!(cmd_hold_axis(1, false, false), vec![0xD9, 0xD8, 0x22]); // Y vor
+        assert_eq!(cmd_hold_axis(2, false, false), vec![0xD9, 0xD8, 0x24]); // Z vor
+        assert_eq!(cmd_hold_axis(3, false, false), vec![0xD9, 0xD8, 0x26]); // U vor
+        assert_eq!(cmd_hold_axis(0, true, false), vec![0xD9, 0xD8, 0x21]); // X rück
+        assert_eq!(cmd_hold_axis(3, true, false), vec![0xD9, 0xD8, 0x27]); // U rück
+        assert_eq!(cmd_hold_axis(0, false, true), vec![0xD9, 0xD8, 0x30]); // X stop
+        assert_eq!(cmd_hold_axis(3, true, true), vec![0xD9, 0xD8, 0x37]); // U rück stop
     }
 }

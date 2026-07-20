@@ -19,8 +19,9 @@ pub use transport::{RuidaTransport, TransportError};
 
 use protocol::*;
 use studio_core::{
-    Anchor, DriverCapabilities, DriverError, JobAction, JobLayer, JobParams, JobPlan, Layer,
-    LayerWork, MachineDriver, MachineSetting, MachineStatus, StartMode,
+    Anchor, AxisDir, DriverCapabilities, DriverError, JobAction, JobLayer, JobParams, JobPlan,
+    JogMotion, Layer, LayerWork, MachineAxis, MachineDriver, MachineSetting, MachineStatus,
+    StartMode,
 };
 
 /// Maschinenspezifische Ruida-Kalibrierung. Der Treiber trägt sie als Zustand
@@ -30,6 +31,9 @@ use studio_core::{
 pub struct RuidaConfig {
     /// Geschwindigkeitsabhängige Reversal-Korrektur fürs bidirektionale Rastern.
     pub scan_offset: ScanOffset,
+    /// Nutzerdefinierte Richtungs-Inversion der Zusatzachsen (Profil, ADR 0021).
+    pub invert_z: bool,
+    pub invert_u: bool,
 }
 
 /// Der Ruida-Treiber.
@@ -67,7 +71,11 @@ impl RuidaDriver {
                 })
                 .collect(),
         };
-        Self::new(RuidaConfig { scan_offset })
+        Self::new(RuidaConfig {
+            scan_offset,
+            invert_z: profile.axes.invert_z,
+            invert_u: profile.axes.invert_u,
+        })
     }
 
     fn transport(&self) -> Result<&RuidaTransport, DriverError> {
@@ -491,12 +499,66 @@ impl MachineDriver for RuidaDriver {
         let st = read_reg(t, ADDR_STATUS)?;
         let x = read_reg(t, ADDR_POS_X)?;
         let y = read_reg(t, ADDR_POS_Y)?;
+        // Z/U-Position mitlesen (Anzeige); ein Lesefehler einer Einzelachse
+        // lässt den Status nicht scheitern (dann „—"/None).
+        let z = read_reg(t, ADDR_POS_Z).ok();
+        let u = read_reg(t, ADDR_POS_U).ok();
+        // Achsen-Verfügbarkeit (ADR 0021 §A): rotary_on_y aus 0x0226 (Bit 0,
+        // bekannt). Z/U-Enable-Bits (0x0040/0x0050) sind noch nicht dekodiert →
+        // konservativ false, bis an Hardware verifiziert.
+        let rotary_on_y = read_reg_optional(t, ADDR_ROTARY_ENABLE)
+            .ok()
+            .flatten()
+            .is_some_and(|v| v & 0x01 != 0);
         Ok(MachineStatus {
             is_running: st & 0x01 != 0,
             is_paused: st & 0x02 != 0,
             pos_x_mm: x as f64 / 1000.0,
             pos_y_mm: y as f64 / 1000.0,
+            pos_z_mm: z.map(|v| v as f64 / 1000.0),
+            pos_u_mm: u.map(|v| v as f64 / 1000.0),
+            rotary_on_y,
         })
+    }
+
+    fn jog_axis(
+        &self,
+        axis: MachineAxis,
+        dir: AxisDir,
+        motion: JogMotion,
+        speed_mm_s: f64,
+    ) -> Result<(), DriverError> {
+        let t = self.transport()?;
+        let idx = axis_index(axis);
+        // Nutzer-Inversion pro Achse (Profil-Einstellung) vorschalten; die
+        // treiberinterne Schritt/Dauer-Inversion folgt in den Helfern.
+        let invert = match axis {
+            MachineAxis::Z => self.config.invert_z,
+            MachineAxis::U => self.config.invert_u,
+            _ => false,
+        };
+        let dir = if invert { flip_axis_dir(dir) } else { dir };
+        match motion {
+            JogMotion::Step(mm) => {
+                // Schritt-Kommando: Richtung ggf. treiberintern invertieren
+                // (Schritt läuft pro Achse gegen den Dauerlauf — ADR 0021 §B).
+                let signed = if step_backward(axis, dir) { -mm } else { mm };
+                let payload = cmd_axis_step(idx, mm_to_um(signed), speed_mm_s);
+                t.send(&payload).map_err(to_driver_err)
+            }
+            JogMotion::HoldStart => {
+                // Dauerlauf: Speed + Start-Flag; Richtung ggf. invertieren.
+                t.send(&cmd_set_speed(speed_mm_s)).map_err(to_driver_err)?;
+                let back = hold_backward(axis, dir);
+                t.send(&cmd_hold_axis(idx, back, false))
+                    .map_err(to_driver_err)
+            }
+            JogMotion::HoldStop => {
+                let back = hold_backward(axis, dir);
+                t.send(&cmd_hold_axis(idx, back, true))
+                    .map_err(to_driver_err)
+            }
+        }
     }
 
     fn jog(&self, dx_mm: f64, dy_mm: f64, speed_mm_s: f64) -> Result<(), DriverError> {
@@ -669,6 +731,51 @@ impl MachineDriver for RuidaDriver {
 
 fn to_driver_err(e: TransportError) -> DriverError {
     DriverError::Transport(e.to_string())
+}
+
+/// Achs-Index im Ruida-Protokoll: X=0, Y=1, Z=2, U=3.
+fn axis_index(axis: MachineAxis) -> u8 {
+    match axis {
+        MachineAxis::X => 0,
+        MachineAxis::Y => 1,
+        MachineAxis::Z => 2,
+        MachineAxis::U => 3,
+    }
+}
+
+// Richtungs-Auflösung (ADR 0021 §B): Schritt-Move (`D9 <achse> 02`) und
+// Dauerlauf (`D9 D8`) laufen bei Ruida pro Achse GEGENEINANDER invertiert. Wir
+// legen EINE fachliche Referenz-Richtung pro Achse fest (an HW bestätigt) und
+// invertieren jeweils den anderen Pfad — Tippen und Halten fahren dann gleich.
+// An HW beobachtet: X + U im Dauerlauf gegenüber Schritt gedreht, Z im Schritt
+// gegenüber Dauerlauf. Diese Tabelle ist die einzige Stelle der Inversion.
+
+/// Kehrt eine fachliche Achsenrichtung um (für die Nutzer-Inversion).
+fn flip_axis_dir(dir: AxisDir) -> AxisDir {
+    match dir {
+        AxisDir::Forward => AxisDir::Backward,
+        AxisDir::Backward => AxisDir::Forward,
+    }
+}
+
+/// Soll der Schritt-Move für diese Achse/Richtung rückwärts (negativ) fahren?
+fn step_backward(axis: MachineAxis, dir: AxisDir) -> bool {
+    let backward = dir == AxisDir::Backward;
+    // Z: Schritt-Pfad ist gegenüber der Referenz (Dauerlauf) invertiert.
+    match axis {
+        MachineAxis::Z => !backward,
+        _ => backward,
+    }
+}
+
+/// Soll der Dauerlauf für diese Achse/Richtung das Rückwärts-Bit setzen?
+fn hold_backward(axis: MachineAxis, dir: AxisDir) -> bool {
+    let backward = dir == AxisDir::Backward;
+    // X und U: Dauerlauf-Pfad ist gegenüber der Referenz (Schritt) invertiert.
+    match axis {
+        MachineAxis::X | MachineAxis::U => !backward,
+        _ => backward,
+    }
 }
 
 /// Register lesen und als Wert (µm bzw. Status-Bits) dekodieren.
@@ -1137,6 +1244,7 @@ mod tests {
         let ohne = RuidaDriver::default().build_job(&plan);
         let mit = RuidaDriver::new(RuidaConfig {
             scan_offset: ScanOffset::from_linear(0.001, 100.0),
+            ..Default::default()
         })
         .build_job(&plan);
         assert_ne!(ohne, mit, "aktiver Scan-Offset muss den Job verändern");

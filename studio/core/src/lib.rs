@@ -53,13 +53,13 @@ pub use geo_ops::BoolOp;
 pub use geometry::{Axis, BBox, Geo, ImageMode, ImageParams, Pt};
 pub use interact::{keep_aspect, resize_to_cursor, Handle};
 pub use job::{
-    Anchor, DriverCapabilities, DriverError, JobLayer, JobParams, JobPlan, LayerWork,
-    MachineDriver, MachineSetting, MachineSettingUnit, MachineStatus, Path, StartMode,
-    StartReference,
+    Anchor, AxisDir, DriverCapabilities, DriverError, JobLayer, JobParams, JobPlan, JogMotion,
+    LayerWork, MachineAxis, MachineDriver, MachineSetting, MachineSettingUnit, MachineStatus, Path,
+    StartMode, StartReference,
 };
 pub use laser::{
-    BedOrigin, Connection, DriverKind, JobAction, LaserProfile, LaserRegistry, SavedOrigin,
-    ScanOffsetCal, ScanOffsetPoint, LASER_PROFILE_SCHEMA_VERSION,
+    AxisConfig, BedOrigin, Connection, DriverKind, JobAction, LaserProfile, LaserRegistry,
+    SavedOrigin, ScanOffsetCal, ScanOffsetPoint, LASER_PROFILE_SCHEMA_VERSION,
 };
 pub use materials::{MaterialLibrary, MaterialProcess, MaterialProcessDefaults, MaterialProfile};
 pub use model::{Layer, LayerMode, Shape, TextMeta, SWATCH_COLORS};

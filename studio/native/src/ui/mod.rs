@@ -53,6 +53,13 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
     use crate::tools::View;
     // Oben: globale Aktionen | Ansichten | kompakte Systemzustände.
     let view = app.view;
+    // Sicherheit: Ein laufender Achsen-Dauerlauf wird sofort gestoppt, sobald
+    // der Laser-Tab nicht mehr sichtbar ist (das Panel meldet dann keinen
+    // Halte-Wunsch mehr). Ohne das könnte ein Tab-Wechsel die Achse laufen
+    // lassen.
+    if view != View::Laser && app.laser_hold.is_some() {
+        app.laser_hold_cancel();
+    }
     let project_name = app
         .project
         .open_name()
@@ -930,6 +937,20 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         .saved_origin_id()
         .is_some_and(|id| !saved_origins.iter().any(|row| row.id == id));
     let can_save_origin = connected && capabilities.position_read;
+    // Z/U-Verfügbarkeit ist eine Profil-Einstellung (nicht aus dem Controller,
+    // ADR 0021 §A). Aus dem aktiven Profil, unabhängig von der Verbindung.
+    let axes = app
+        .laser_backend
+        .active_profile()
+        .map(|profile| profile.axes)
+        .unwrap_or_default();
+    let live = &app.laser_live;
+    let pos = laserpanel::AxisPositions {
+        x: live.head.map(|(x, _)| x),
+        y: live.head.map(|(_, y)| y),
+        z: live.pos_z,
+        u: live.pos_u,
+    };
     laserpanel::LaserView {
         profiles,
         active_id,
@@ -940,6 +961,10 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         saved_origins,
         reference_missing,
         can_save_origin,
+        has_z_axis: axes.has_z_axis,
+        has_u_axis: axes.has_u_axis,
+        pos,
+        hold_active: app.laser_hold.is_some(),
     }
 }
 

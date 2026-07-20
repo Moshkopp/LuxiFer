@@ -623,6 +623,39 @@ pub struct JobParams {
     pub anchor: Anchor,
 }
 
+/// Eine steuerbare Maschinenachse (geräteneutral). X/Y bilden die Ebene, Z ist
+/// Fokus/Betthöhe, U die Rotary/Drehachse. Der Treiber bildet sie auf sein
+/// Protokoll ab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MachineAxis {
+    X,
+    Y,
+    Z,
+    U,
+}
+
+/// Richtung einer Achsenbewegung (geräteneutral). Die *fachliche* Richtung; ob
+/// „vorwärts" mechanisch links/rechts/hoch/runter bedeutet und ob ein Treiber
+/// intern invertieren muss, ist Sache des Treibers (ADR 0021).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisDir {
+    Forward,
+    Backward,
+}
+
+/// Art der Jog-Auslösung. Es gibt fachlich EINE Achsenbewegung mit EINER
+/// Richtung; nur das Auslösen kennt zwei Arten (ADR 0021 §B): antippen fährt
+/// einen festen Schritt, halten fährt bis zum Stopp. `HoldStart`/`HoldStop`
+/// rahmen einen gehaltenen Lauf; der Aufrufer (Watchdog) stellt das Stoppen
+/// sicher.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JogMotion {
+    /// Fester Schritt in mm (Betrag; die Richtung liefert `AxisDir`).
+    Step(f64),
+    HoldStart,
+    HoldStop,
+}
+
 /// Momentaufnahme des Maschinenzustands (geräteneutral, mm).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MachineStatus {
@@ -630,6 +663,14 @@ pub struct MachineStatus {
     pub is_paused: bool,
     pub pos_x_mm: f64,
     pub pos_y_mm: f64,
+    /// Z-/U-Achsenposition (mm), sofern der Treiber sie liest. `None` = nicht
+    /// gelesen. (Ein Wert sagt nichts über *Vorhandensein* der Achse — das ist
+    /// eine Profil-Einstellung, ADR 0021 §A.)
+    pub pos_z_mm: Option<f64>,
+    pub pos_u_mm: Option<f64>,
+    /// Rotary läuft klassisch über die Y-Achse (`rotary_enable` im Controller).
+    /// Das IST ein echter Gerätezustand (im Gegensatz zur Z/U-Verfügbarkeit).
+    pub rotary_on_y: bool,
 }
 
 /// Fehler der Live-Steuerung — geräteneutral gehalten (der Treiber wandelt
@@ -720,8 +761,25 @@ pub trait MachineDriver {
         Err(DriverError::NotSupported)
     }
 
-    /// Kopf **relativ** um (dx, dy) mm mit `speed` bewegen (Jog-Tippen).
+    /// Kopf **relativ** um (dx, dy) mm mit `speed` bewegen (X/Y-Ebenen-Jog,
+    /// Tippen — kann diagonal, liest die Position).
     fn jog(&self, _dx_mm: f64, _dy_mm: f64, _speed_mm_s: f64) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Einachsiges Jog einer Achse in eine Richtung (ADR 0021 §B). `motion`
+    /// wählt Tippen (`Step`) oder gehaltenen Dauerlauf (`HoldStart`/`HoldStop`).
+    /// Die *fachliche* Richtung `dir` gilt für beide Auslöse-Arten identisch —
+    /// eine etwaige Protokoll-Inversion (Schritt- vs. Dauerlauf-Kommando) löst
+    /// der Treiber intern auf, nicht der Aufrufer. Nur Treiber mit der Achse
+    /// unterstützen das.
+    fn jog_axis(
+        &self,
+        _axis: MachineAxis,
+        _dir: AxisDir,
+        _motion: JogMotion,
+        _speed_mm_s: f64,
+    ) -> Result<(), DriverError> {
         Err(DriverError::NotSupported)
     }
 

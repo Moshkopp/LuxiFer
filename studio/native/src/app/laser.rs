@@ -1,5 +1,13 @@
 use super::App;
 
+/// Eine im Dauerlauf gehaltene Achse samt Richtung (Watchdog-Wunsch). Die UI
+/// meldet sie pro Frame; die App gleicht sie gegen den laufenden Zustand ab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HoldJog {
+    pub axis: studio_core::MachineAxis,
+    pub dir: studio_core::AxisDir,
+}
+
 /// Live gelesener Maschinen-Anzeigestand (ADR 0020): der zuletzt erfolgreich
 /// gelesene Wert oder ein sichtbarer Fehler-/Unbekannt-Zustand. Native erfindet
 /// keine Position und behält nach einem Fehler keinen veralteten Wert ohne
@@ -8,6 +16,12 @@ use super::App;
 pub struct LaserLiveState {
     /// Kopfposition in absoluten Maschinen-mm (zuletzt erfolgreich gelesen).
     pub head: Option<(f64, f64)>,
+    /// Z-/U-Achsenposition (mm), sofern der Treiber sie liefert.
+    pub pos_z: Option<f64>,
+    pub pos_u: Option<f64>,
+    /// Rotary läuft klassisch über Y (`rotary_enable`, echter Controller-Zustand).
+    /// Z/U-Verfügbarkeit steht dagegen im Profil, nicht hier (ADR 0021 §A).
+    pub rotary_on_y: bool,
     /// Sichtbare Begründung, warum keine (frische) Kopfposition vorliegt.
     pub head_note: Option<String>,
     /// Benutzerursprung (nur bei angewählter Referenz gelesen).
@@ -257,6 +271,97 @@ impl App {
         self.request_laser_status_refresh();
     }
 
+    /// Jog-Speed für eine Achse: Z nutzt den eigenen, hart gedeckelten Wert
+    /// (Gewindestange), alle anderen den gemeinsamen Jog-Speed.
+    fn jog_speed_for(&self, axis: studio_core::MachineAxis) -> f64 {
+        match axis {
+            studio_core::MachineAxis::Z => {
+                self.laser.z_jog_speed.min(crate::tools::Z_JOG_SPEED_MAX)
+            }
+            _ => self.laser.jog_speed,
+        }
+    }
+
+    /// Schritt-Jog einer Zusatzachse (Tippen). Kein Status-Refresh (die Anzeige
+    /// zieht über den regulären Poll nach).
+    pub fn laser_jog_axis_step(
+        &mut self,
+        axis: studio_core::MachineAxis,
+        dir: studio_core::AxisDir,
+    ) {
+        let speed = self.jog_speed_for(axis);
+        let motion = studio_core::JogMotion::Step(self.laser.jog_step);
+        if let Err(error) = self.laser_backend.jog_axis(axis, dir, motion, speed) {
+            self.app_error = Some(error);
+        }
+    }
+
+    /// Watchdog für den Achsen-Dauerlauf (ADR 0021). `wanted` ist der pro Frame
+    /// gemeldete Halte-Wunsch der UI (gehaltene Achse+Richtung oder None). Ein
+    /// `Some` startet/wechselt den Dauerlauf; ein `None` stoppt erst, wenn die
+    /// Karenzzeit seit dem letzten `Some` verstrichen ist — so überbrücken
+    /// einzelne Frames ohne Pointer-Info den Lauf, während echtes Loslassen
+    /// (dauerhaft `None`) sicher stoppt.
+    pub fn laser_hold_frame(&mut self, wanted: Option<HoldJog>) {
+        const GRACE: std::time::Duration = std::time::Duration::from_millis(150);
+        use studio_core::JogMotion::{HoldStart, HoldStop};
+
+        match wanted {
+            Some(next) => {
+                self.laser_hold_seen = Some(std::time::Instant::now());
+                if self.laser_hold == Some(next) {
+                    return; // läuft bereits (gleiche Achse+Richtung)
+                }
+                if let Some(active) = self.laser_hold.take() {
+                    let _ = self.laser_backend.jog_axis(
+                        active.axis,
+                        active.dir,
+                        HoldStop,
+                        self.jog_speed_for(active.axis),
+                    );
+                }
+                let speed = self.jog_speed_for(next.axis);
+                match self
+                    .laser_backend
+                    .jog_axis(next.axis, next.dir, HoldStart, speed)
+                {
+                    Ok(()) => self.laser_hold = Some(next),
+                    Err(error) => self.app_error = Some(error),
+                }
+            }
+            None => {
+                let Some(active) = self.laser_hold else {
+                    return;
+                };
+                if self.laser_hold_seen.is_some_and(|t| t.elapsed() < GRACE) {
+                    return; // Karenz: Frame-Aussetzer überbrücken
+                }
+                let _ = self.laser_backend.jog_axis(
+                    active.axis,
+                    active.dir,
+                    HoldStop,
+                    self.jog_speed_for(active.axis),
+                );
+                self.laser_hold = None;
+                self.laser_hold_seen = None;
+            }
+        }
+    }
+
+    /// Sofortiger Abbruch eines laufenden Achsen-Dauerlaufs (ohne Karenz) —
+    /// z. B. beim Verlassen des Laser-Tabs. Idempotent.
+    pub fn laser_hold_cancel(&mut self) {
+        if let Some(active) = self.laser_hold.take() {
+            let _ = self.laser_backend.jog_axis(
+                active.axis,
+                active.dir,
+                studio_core::JogMotion::HoldStop,
+                self.jog_speed_for(active.axis),
+            );
+        }
+        self.laser_hold_seen = None;
+    }
+
     pub fn laser_home(&mut self) {
         if let Err(error) = self.laser_backend.home(self.laser.jog_speed) {
             self.app_error = Some(error);
@@ -298,12 +403,18 @@ impl App {
                     match read.status {
                         Ok(status) => {
                             self.laser_live.head = Some((status.pos_x_mm, status.pos_y_mm));
+                            self.laser_live.pos_z = status.pos_z_mm;
+                            self.laser_live.pos_u = status.pos_u_mm;
+                            self.laser_live.rotary_on_y = status.rotary_on_y;
                             self.laser_live.head_note = None;
                             self.laser_live.is_running = status.is_running;
                             self.laser_live.error_backoff = false;
                         }
                         Err(error) => {
                             self.laser_live.head = None;
+                            self.laser_live.pos_z = None;
+                            self.laser_live.pos_u = None;
+                            self.laser_live.rotary_on_y = false;
                             self.laser_live.head_note = Some(error.message().to_owned());
                             self.laser_live.error_backoff = true;
                         }

@@ -54,49 +54,52 @@ Richtungsmodell; „Tippen" und „Halten" sind nur zwei Auslöse-Arten desselbe
 Achsen-Jog. (C) Achsen-Inversion ist pro Achse im Laserprofil konfigurierbar.
 (D) Rotary über Y wird als eigener Betriebsmodus des Profils unterstützt.**
 
-### (A) Achsen-Verfügbarkeit aus den Vendor-Settings
+### (A) Achsen-Verfügbarkeit: Z/U aus dem Profil, Y-Rotary aus dem Controller
 
-Studio leitet die vorhandenen Zusatzachsen aus dem Controller ab, nicht aus
-manueller Eingabe. **Wichtig — zwei getrennte Rotary-Mechanismen** (recherchiert,
-LightBurn-/RDWorks-Doku und -Foren):
+**Wichtige, an Hardware verifizierte Korrektur** (Mitschnitt 2026-07-20): Ob
+eine Z- bzw. U-Achse vorhanden ist, steht **NICHT** im Controller. Die
+Achsen-Aktivierung („Z-Achse aktivieren", „U-Achse aktivieren") ist in der
+Fremdsoftware eine **reine App-Einstellung** — beim Umschalten und Speichern
+wurde nachweislich **kein einziges Register** in den Controller geschrieben
+(nur Lese-/Status-Polls). Es gibt also kein Enable-Register für Z/U, das Studio
+lesen könnte. (Die früher als Kandidaten genannten `0x0040`/`0x0050` scheiden
+damit als Verfügbarkeitsquelle aus.)
 
-- **Rotary über Y** (klassisch): Der vorhandene Settings-Block (`settings.rs`,
-  Gruppe „Rotary") liest bereits `0x0226` **rotary_enable** (`bit_mask:
-  Some(1)`), `0x021F` **pulses_per_rot** („circle pulse", Mikroschritte pro
-  Umdrehung) und `0x0221` **rotary_diameter**. `rotary_enable` schaltet den
-  Controller in den Y-Rotary-Modus: die **Y-Bewegung wird zur Drehung** (der
-  Y-Motor ist dann typischerweise abgeklemmt und die Rotary an den Y-Ausgang
-  gesteckt). Diese Register betreffen **nicht** die U-Achse.
+Daraus folgt die Trennung:
 
-- **Rotary über U** (Firmware-Patch): Eine eigenständige 4. Achse mit eigenen
-  Move-Kommandos (`D9 03 …`, Positionsregister `0x0451`) — das, was auf dem
-  Branch gejoggt wurde. `0x0226` sagt darüber nichts aus.
+- **Z-Achse / U-Achse vorhanden** → **Profil-Einstellung** in Studio (wie die
+  Fremdsoftware es hält). In der Laser-Verwaltung je eine Checkbox „Z-Achse
+  (Fokus)" / „U-Achse (Rotary)". Der Nutzer setzt sie beim Einrichten; sie wird
+  im `LaserProfile` persistiert (offline, kein Gerät nötig).
 
-Daraus folgt für die Verfügbarkeit:
+- **Rotary über Y** dagegen IST ein Controller-Zustand: `0x0226`
+  **rotary_enable** (`bit_mask: Some(1)`, schon im Settings-Block) schaltet den
+  Controller in den Y-Rotary-Modus (Y-Bewegung wird zur Drehung). Zusammen mit
+  `0x021F` **pulses_per_rot** und `0x0221` **rotary_diameter**. Diese sind aus
+  dem Controller lesbar und für die spätere Y-Rotary-**Gravur** die Grundlage —
+  sie müssen dort nicht neu erfunden werden.
 
-- **Y-Rotary** ist über `0x0226 rotary_enable` sicher erkennbar (Bit bekannt).
-- **U-Achse** hat noch **keine** sicher identifizierte Enable-Quelle. Kandidat
-  ist das Achs-Control-Register `0x0050` (U); sein Enable-Bit ist noch zu
-  dekodieren. Bis dahin liefert der Treiber `has_u_axis` konservativ (`false`).
-- **Z-Achse**: analog, Kandidat `0x0040`, Enable-Bit noch zu dekodieren →
-  `has_z_axis` konservativ `false`.
-
-Der Ruida-Treiber meldet die Verfügbarkeit geräteneutral über die
-`DriverCapabilities`:
+Modellierung:
 
 ```
+// LaserProfile (persistente Profil-Einstellung, serde(default)):
+pub struct AxisConfig {
+    pub has_z_axis: bool,   // vom Nutzer gesetzt (kein Controller-Register)
+    pub has_u_axis: bool,
+    pub invert_z: bool,     // Richtungs-Inversion, siehe (C)
+    pub invert_u: bool,
+}
+
+// DriverCapabilities (nur das, was der Treiber wirklich aus dem Gerät weiß):
 pub struct DriverCapabilities {
     …
-    pub has_z_axis: bool,      // aus 0x0040 (Enable-Bit noch zu dekodieren)
-    pub has_u_axis: bool,      // aus 0x0050 (Enable-Bit noch zu dekodieren)
-    pub rotary_on_y: bool,     // aus 0x0226 rotary_enable (bekannt)
+    pub rotary_on_y: bool,  // aus 0x0226 rotary_enable (bekannt)
 }
 ```
 
-Die Pulse/Umdrehung und der Durchmesser (`0x021F`/`0x0221`) sind für den Jog
-irrelevant, aber die Grundlage der späteren Rotary-**Gravur** über Y (siehe (D)
-und das Gravur-ADR) — sie müssen dort **nicht neu erfunden** werden, der
-Controller hält sie bereits.
+Der Z-Achsen-Positionswert (`0x0441`) und der U-Wert (`0x0451`) bleiben zur
+Anzeige lesbar; sie sagen aber nichts über *Vorhandensein* aus (ein Register
+kann einen Wert liefern, ohne dass eine Achse angeschlossen ist).
 
 Solange nicht verbunden, sind Zusatzachsen gesperrt (wie schon Jog/Home). Die
 UI (Jog-Kreuz-Ecken für Z/U) ist genau dann klickbar, wenn verbunden **und**
@@ -185,22 +188,20 @@ Y-Fall wird hier nicht verbaut, und die Controller-Register (`0x0226`/`0x021F`/
 
 **Aufwand / Risiko**
 
-- Y-Rotary-Verfügbarkeit ist bereits abgedeckt (`0x0226 rotary_enable`, Bit
-  bekannt). Die **U**- und **Z**-Enable-Bits (`0x0050`/`0x0040`) müssen noch an
-  Hardware dekodiert werden (Register mit/ohne angeschlossener Achse
-  vergleichen); bis dahin `has_u_axis`/`has_z_axis` konservativ gesperrt.
-- `LaserProfile` und `DriverCapabilities` wachsen um Felder; die Serialisierung
-  bleibt über `serde(default)` rückwärtskompatibel (bestehende Profile laden
-  weiter, Zusatzachsen zunächst aus/gesperrt).
+- Z/U-Verfügbarkeit ist eine **Profil-Einstellung** (an HW verifiziert: kein
+  Controller-Register). Y-Rotary bleibt aus `0x0226 rotary_enable` lesbar.
+- `LaserProfile` (AxisConfig) und `DriverCapabilities` wachsen um Felder; die
+  Serialisierung bleibt über `serde(default)` rückwärtskompatibel (bestehende
+  Profile laden weiter, Zusatzachsen zunächst aus/gesperrt).
 - Das Trait `MachineDriver` wird auf das einheitliche `jog(axis, dir, motion,
   speed)` umgestellt; die Prototyp-Methoden (`jog_axis`, `hold_axis_start/stop`)
   werden dabei zusammengeführt.
 
 ## Umsetzungsreihenfolge (nach Annahme des ADR)
 
-1. `DriverCapabilities` um `has_z_axis`/`has_u_axis`/`rotary_on_y`; Ruida liest
-   `0x0226` (Y-Rotary, bekannt) und — sobald dekodiert — `0x0050` (U) / `0x0040`
-   (Z); UI sperrt Z/U-Ecken entsprechend.
+1. `AxisConfig` (has_z_axis/has_u_axis) ins `LaserProfile` + Checkboxen in der
+   Laser-Verwaltung; `DriverCapabilities.rotary_on_y` aus `0x0226`. UI sperrt
+   Z/U-Ecken anhand der Profil-Einstellung.
 2. Trait auf `jog(axis, dir, motion, speed)` vereinheitlichen; Inversion +
    Kommando-Auswahl in den Treiber ziehen; `hold_dir`/`step_dir` entfernen.
 3. `AxisConfig` (Inversion) ins `LaserProfile` + Bedienung in der
