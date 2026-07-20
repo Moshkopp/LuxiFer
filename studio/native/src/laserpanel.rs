@@ -51,8 +51,6 @@ pub struct LaserView {
     pub has_u_axis: bool,
     /// Rotary am U-Ausgang aktiv (ADR 0022/0023). Zeigt den Zustand im Kopf.
     pub rotary_active: bool,
-    /// Live-Achsenpositionen (mm) für die Anzeige; `None` = unbekannt/„—".
-    pub pos: AxisPositions,
     /// Läuft gerade ein Achsen-Dauerlauf? Steuert das kontinuierliche Repaint,
     /// damit der Watchdog die Karenzzeit auslaufen lassen und stoppen kann.
     pub hold_active: bool,
@@ -386,7 +384,13 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
         crate::tools::Z_JOG_SPEED_MAX,
     );
 
-    // Live-Positionsanzeige aller vier Achsen (rein informativ).
+    actions
+}
+
+/// Live-Positionsanzeige aller vier Achsen (rein informativ). Sitzt im linken
+/// Panel unter der Positionsfreigabe, nicht beim Jog — dort konkurriert sie
+/// sonst mit den Bedienelementen um die knappe Höhe.
+pub fn axis_positions(ui: &mut egui::Ui, pos: &AxisPositions) {
     ui.add_space(8.0);
     ui.separator();
     ui.label(RichText::new("POSITION").small().weak());
@@ -395,12 +399,7 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
         .num_columns(2)
         .spacing([10.0, 3.0])
         .show(ui, |ui| {
-            for (label, value) in [
-                ("X", view.pos.x),
-                ("Y", view.pos.y),
-                ("Z", view.pos.z),
-                ("U", view.pos.u),
-            ] {
+            for (label, value) in [("X", pos.x), ("Y", pos.y), ("Z", pos.z), ("U", pos.u)] {
                 ui.label(RichText::new(label).weak());
                 let text = match value {
                     Some(mm) => format!("{mm:.3} mm"),
@@ -410,8 +409,6 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
                 ui.end_row();
             }
         });
-
-    actions
 }
 
 /// Zeichnet eine Ampel-Kachel; gibt `true` bei Klick zurück.
@@ -754,7 +751,6 @@ mod tests {
             has_z_axis: false,
             has_u_axis: false,
             rotary_active: false,
-            pos: AxisPositions::default(),
             hold_active: false,
         }
     }

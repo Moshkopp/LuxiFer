@@ -210,6 +210,12 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
                 // Links: Ebenenliste + Positionsfreigabe in eigenem Panel —
                 // bei vielen Ebenen teilt sie sich sonst gequetscht die rechte
                 // Spalte mit dem Laser-Bedienpanel.
+                let axis_pos = laserpanel::AxisPositions {
+                    x: app.laser_live.head.map(|(x, _)| x),
+                    y: app.laser_live.head.map(|(_, y)| y),
+                    z: app.laser_live.pos_z,
+                    u: app.laser_live.pos_u,
+                };
                 let left = egui::Panel::left("laser_layers")
                     .default_size(300.0)
                     .size_range(260.0..=420.0)
@@ -225,6 +231,7 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
                                     &layer_rows,
                                     &laser_editable,
                                 ));
+                                laserpanel::axis_positions(ui, &axis_pos);
                                 actions
                             })
                             .inner
@@ -964,13 +971,6 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         .active_profile()
         .map(|profile| profile.axes)
         .unwrap_or_default();
-    let live = &app.laser_live;
-    let pos = laserpanel::AxisPositions {
-        x: live.head.map(|(x, _)| x),
-        y: live.head.map(|(_, y)| y),
-        z: live.pos_z,
-        u: live.pos_u,
-    };
     laserpanel::LaserView {
         profiles,
         active_id,
@@ -988,7 +988,6 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
             .active_profile()
             .and_then(|profile| profile.rotary)
             .is_some_and(|rotary| rotary.active),
-        pos,
         hold_active: app.laser_hold.is_some(),
     }
 }
