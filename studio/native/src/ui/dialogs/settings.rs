@@ -444,9 +444,16 @@ fn window_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
         });
 }
 
+/// Feste Anzahl Belegungs-Slots pro Aktion. Zwei genügen (kein Standard hat
+/// mehr), und die feste Zahl trägt die saubere Tabellenspalten-Optik.
+const SHORTCUT_SLOTS: usize = 2;
+
+/// Breite einer Slot-Spalte (Pill). Zwei Slots + Optionen ergeben die Tabelle.
+const SLOT_WIDTH: f32 = 130.0;
+
 fn shortcuts_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
-    ui.label("Belegungen anklicken, um sie zu ändern.");
-    ui.weak("× entfernt eine Belegung. Escape bricht eine laufende Aufnahme ab.");
+    ui.label("Belegung anklicken, um sie neu aufzunehmen. Leerer Slot nimmt eine neue auf.");
+    ui.weak("× an der Pille entfernt sie. Escape bricht eine laufende Aufnahme ab.");
     ui.add_space(12.0);
     if let Some(message) = &st.shortcut_error {
         ui.colored_label(ui.visuals().error_fg_color, message);
@@ -455,105 +462,143 @@ fn shortcuts_section(ui: &mut egui::Ui, st: &mut SettingsDialogState) {
 
     let modifiers = ui.input(|input| input.modifiers);
     for category in ["Allgemein", "Bearbeiten", "Werkzeuge", "Ansichten"] {
+        ui.add_space(2.0);
         ui.strong(category);
-        ui.add_space(3.0);
+        ui.add_space(4.0);
         egui::Grid::new(("shortcut_table", category))
-            .num_columns(3)
+            .num_columns(4)
             .striped(true)
-            .min_row_height(30.0)
-            .spacing([12.0, 4.0])
+            .min_row_height(32.0)
+            .spacing([10.0, 4.0])
             .show(ui, |ui| {
-                ui.weak("Aktion");
-                ui.weak("Belegung");
-                ui.weak("Ändern");
-                ui.end_row();
-
                 for action in studio_core::ShortcutAction::ALL
                     .into_iter()
                     .filter(|action| action.category() == category)
                 {
-                    ui.label(action.label());
-                    let triggers = st.draft.shortcut_bindings.triggers(action).to_vec();
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(210.0, 26.0),
-                        egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
-                        |ui| {
-                            if triggers.is_empty() {
-                                ui.weak("Nicht belegt");
-                            }
-                            for trigger in triggers {
-                                let recording_this =
-                                    st.shortcut_recording.is_some_and(|recording| {
-                                        recording.action == action
-                                            && recording.replace == Some(trigger)
-                                    });
-                                let label = if recording_this {
-                                    recording_label(modifiers)
-                                } else {
-                                    trigger.label()
-                                };
-                                if ui
-                                    .add(egui::Button::new(label).selected(recording_this))
-                                    .on_hover_text("Diese Belegung ersetzen")
-                                    .clicked()
-                                {
-                                    st.shortcut_recording =
-                                        Some(crate::ui::state::ShortcutRecording {
-                                            action,
-                                            replace: Some(trigger),
-                                        });
-                                    st.shortcut_error = None;
-                                }
-                                if ui
-                                    .small_button("×")
-                                    .on_hover_text("Diese Belegung entfernen")
-                                    .clicked()
-                                {
-                                    st.draft.shortcut_bindings.remove(action, trigger);
-                                    st.shortcut_recording = None;
-                                    st.shortcut_error = None;
-                                }
-                            }
-                        },
+                    ui.add_sized(
+                        [150.0, 24.0],
+                        egui::Label::new(action.label()).halign(egui::Align::LEFT),
                     );
-                    ui.horizontal(|ui| {
-                        let adding = st.shortcut_recording.is_some_and(|recording| {
-                            recording.action == action && recording.replace.is_none()
-                        });
-                        if ui
-                            .button(if adding {
-                                recording_label(modifiers)
-                            } else {
-                                "+ Hinzufügen".into()
-                            })
-                            .clicked()
-                        {
-                            st.shortcut_recording = Some(crate::ui::state::ShortcutRecording {
-                                action,
-                                replace: None,
-                            });
-                            st.shortcut_error = None;
-                        }
-                        if ui
-                            .button("↶ Standard")
-                            .on_hover_text("Diese Aktion auf Standard zurücksetzen")
-                            .clicked()
-                        {
-                            st.draft.shortcut_bindings.reset_action(action);
-                            st.shortcut_recording = None;
-                            st.shortcut_error = None;
-                        }
-                    });
+                    let triggers = st.draft.shortcut_bindings.triggers(action).to_vec();
+                    for slot in 0..SHORTCUT_SLOTS {
+                        shortcut_slot(ui, st, action, triggers.get(slot).copied(), modifiers);
+                    }
+                    // Optionen: nur ein dezenter Reset (das Löschen sitzt jetzt
+                    // an der Pill selbst).
+                    let differs = st.draft.shortcut_bindings.triggers(action)
+                        != studio_core::ShortcutBindings::default().triggers(action);
+                    if ui
+                        .add_enabled(
+                            differs,
+                            egui::Button::new(
+                                RichText::new("Standard").color(ui.visuals().weak_text_color()),
+                            )
+                            .small(),
+                        )
+                        .on_hover_text("Diese Aktion auf ihre Standardbelegung zurücksetzen")
+                        .clicked()
+                    {
+                        st.draft.shortcut_bindings.reset_action(action);
+                        st.shortcut_recording = None;
+                        st.shortcut_error = None;
+                    }
                     ui.end_row();
                 }
             });
         ui.add_space(14.0);
     }
-    if ui.button("Standards wiederherstellen").clicked() {
+    if ui.button("Alle Standards wiederherstellen").clicked() {
         st.confirm_shortcut_defaults = true;
         st.shortcut_recording = None;
         st.shortcut_error = None;
     }
+}
+
+/// Ein Belegungs-Slot als Pill. Belegt: klickbare Badge mit Label, beim
+/// Überfahren ein × zum Entfernen. Leer: dezente „+ Belegen"-Pille, die eine
+/// neue Aufnahme in genau diesen Slot startet. Während der Aufnahme zeigt die
+/// Pille live die gedrückten Modifier.
+fn shortcut_slot(
+    ui: &mut egui::Ui,
+    st: &mut SettingsDialogState,
+    action: studio_core::ShortcutAction,
+    trigger: Option<studio_core::ShortcutTrigger>,
+    modifiers: egui::Modifiers,
+) {
+    let recording_this = st
+        .shortcut_recording
+        .is_some_and(|recording| recording.action == action && recording.replace == trigger);
+
+    ui.allocate_ui_with_layout(
+        egui::vec2(SLOT_WIDTH, 26.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            if recording_this {
+                // Aktive Aufnahme: hervorgehobene Pille mit Live-Modifiern.
+                let accent = ui.visuals().selection.stroke.color;
+                ui.add(
+                    egui::Button::new(RichText::new(recording_label(modifiers)).strong())
+                        .fill(accent.gamma_multiply(0.85))
+                        .corner_radius(egui::CornerRadius::same(11)),
+                );
+                return;
+            }
+            match trigger {
+                Some(trigger) => {
+                    let pill = ui
+                        .add(
+                            egui::Button::new(RichText::new(trigger.label()).strong())
+                                .fill(ui.visuals().widgets.inactive.bg_fill)
+                                .corner_radius(egui::CornerRadius::same(11)),
+                        )
+                        .on_hover_text("Klicken, um diese Belegung neu aufzunehmen");
+                    if pill.clicked() {
+                        st.shortcut_recording = Some(crate::ui::state::ShortcutRecording {
+                            action,
+                            replace: Some(trigger),
+                        });
+                        st.shortcut_error = None;
+                    }
+                    // × immer im Slot vorhanden (kein Layout-Zappeln), aber nur
+                    // beim Überfahren deutlich sichtbar.
+                    let over = pill.hovered() || ui.rect_contains_pointer(ui.min_rect());
+                    let x_color = if over {
+                        ui.visuals().text_color()
+                    } else {
+                        ui.visuals().weak_text_color().gamma_multiply(0.5)
+                    };
+                    if ui
+                        .add(egui::Button::new(RichText::new("x").color(x_color)).frame(false))
+                        .on_hover_text("Diese Belegung entfernen")
+                        .clicked()
+                    {
+                        st.draft.shortcut_bindings.remove(action, trigger);
+                        st.shortcut_recording = None;
+                        st.shortcut_error = None;
+                    }
+                }
+                None => {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("+ Belegen").color(ui.visuals().weak_text_color()),
+                            )
+                            .fill(ui.visuals().faint_bg_color)
+                            .corner_radius(egui::CornerRadius::same(11)),
+                        )
+                        .on_hover_text("Neue Belegung für diese Aktion aufnehmen")
+                        .clicked()
+                    {
+                        st.shortcut_recording = Some(crate::ui::state::ShortcutRecording {
+                            action,
+                            replace: None,
+                        });
+                        st.shortcut_error = None;
+                    }
+                }
+            }
+        },
+    );
 }
 
 fn recording_label(modifiers: egui::Modifiers) -> String {
@@ -848,5 +893,164 @@ fn format_backup_age(saved_at_unix: u64) -> String {
         60..=3_599 => format!("vor {} min", age / 60),
         3_600..=86_399 => format!("vor {} h", age / 3_600),
         _ => format!("vor {} Tagen", age / 86_400),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::state::SettingsSection;
+
+    fn dialog_state() -> SettingsDialogState {
+        SettingsDialogState {
+            draft: studio_core::UiSettings::default(),
+            section: SettingsSection::Tastaturkuerzel,
+            hub_status: HubTestStatus::Idle,
+            hub_sync_error: None,
+            hub_backups: Vec::new(),
+            backup_restore_confirm: None,
+            shortcut_recording: None,
+            shortcut_conflict: None,
+            shortcut_error: None,
+            confirm_shortcut_defaults: false,
+        }
+    }
+
+    /// Alle Texte eines Frames rekursiv einsammeln.
+    fn frame_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+        fn walk(shape: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::epaint::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for c in shapes {
+            walk(&c.shape, &mut out);
+        }
+        out
+    }
+
+    fn render(st: &mut SettingsDialogState) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let style = crate::ui::theme_style(&studio_core::Theme::default());
+        ctx.all_styles_mut(|s| *s = style.clone());
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(760.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                shortcuts_section(ui, st);
+            });
+        });
+        frame_texts(&out.shapes)
+    }
+
+    /// Die Standardbelegungen erscheinen als Pills, die leeren zweiten Slots
+    /// als „+ Belegen", und pro Aktion gibt es einen „Standard"-Reset. Sichert
+    /// zugleich, dass keine der Beschriftungen leer ist (kaputte Glyphe).
+    #[test]
+    fn tastenkuerzel_zeigt_pills_und_leere_slots() {
+        let mut st = dialog_state();
+        let texts = render(&mut st);
+
+        // Aktionslabels und Standardbelegungen sind sichtbar.
+        assert!(texts.iter().any(|t| t == "Rückgängig"));
+        assert!(texts.iter().any(|t| t == "Ctrl+Z"));
+        assert!(texts.iter().any(|t| t == "Ctrl+Shift+Z"));
+        assert!(texts.iter().any(|t| t == "Ctrl+Y"));
+
+        // Aktionen mit nur einer Belegung zeigen im zweiten Slot „+ Belegen".
+        assert!(texts.iter().any(|t| t == "+ Belegen"));
+
+        // Reset-Option je Zeile.
+        assert!(texts.iter().any(|t| t == "Standard"));
+
+        // Keine leeren Beschriftungen (Indikator für nicht renderbare Glyphen).
+        assert!(texts.iter().all(|t| !t.is_empty()));
+    }
+
+    /// Ein Klick auf einen leeren Slot startet die Aufnahme genau für diesen
+    /// Slot (replace = None), damit der nächste Tastendruck dort landet.
+    #[test]
+    fn klick_auf_leeren_slot_startet_aufnahme() {
+        let mut st = dialog_state();
+        // „Gruppieren" hat nur eine Belegung (G) → zweiter Slot ist „+ Belegen".
+        let ctx = egui::Context::default();
+        let style = crate::ui::theme_style(&studio_core::Theme::default());
+        ctx.all_styles_mut(|s| *s = style.clone());
+
+        // Position des ersten „+ Belegen" bestimmen.
+        let find_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(760.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(find_input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                shortcuts_section(ui, &mut st);
+            });
+        });
+        let pos = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::epaint::Shape::Text(t) if t.galley.job.text == "+ Belegen" => Some(t.pos),
+                egui::epaint::Shape::Vec(v) => v.iter().find_map(|s| match s {
+                    egui::epaint::Shape::Text(t) if t.galley.job.text == "+ Belegen" => Some(t.pos),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .expect("+ Belegen nicht gefunden");
+
+        let click = |ctx: &egui::Context, st: &mut SettingsDialogState, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(760.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    shortcuts_section(ui, st);
+                });
+            });
+        };
+        let at = pos + egui::vec2(4.0, 4.0);
+        click(
+            &ctx,
+            &mut st,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: Default::default(),
+                },
+            ],
+        );
+
+        let recording = st.shortcut_recording.expect("Aufnahme nicht gestartet");
+        assert_eq!(
+            recording.replace, None,
+            "leerer Slot fügt hinzu, ersetzt nicht"
+        );
     }
 }
