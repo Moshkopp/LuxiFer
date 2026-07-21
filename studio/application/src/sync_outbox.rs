@@ -108,7 +108,7 @@ pub fn list_outbox() -> Result<Vec<OutboxEntry>, AppError> {
 /// unveränderlichen Outbox-Snapshot besitzt. Das ermöglicht den vollständigen
 /// Wiederaufbau eines leeren Hub, ohne das Projekt erneut zu speichern.
 pub(crate) fn seed_saved_projects(workplace_id: &str) -> Result<(), AppError> {
-    let projects_dir = studio_core::projects_dir();
+    let projects_dir = crate::project::projects_path();
     let mut known = list_outbox()?
         .into_iter()
         .map(|entry| {
@@ -119,14 +119,13 @@ pub(crate) fn seed_saved_projects(workplace_id: &str) -> Result<(), AppError> {
             )
         })
         .collect::<Vec<_>>();
-    for info in studio_core::list_projects(&projects_dir) {
-        let project = ProjectFile::load_by_name(&projects_dir, &info.name).map_err(|error| {
-            AppError::wrap(
-                "project_inventory_read",
-                format!("Projekt {} konnte nicht abgeglichen werden.", info.name),
-                error,
-            )
-        })?;
+    for project in crate::project::list_project_files().map_err(|error| {
+        AppError::wrap(
+            "project_inventory_read",
+            "Projekte konnten nicht abgeglichen werden.",
+            error,
+        )
+    })? {
         for version in &project.versions {
             let snapshot = projects_dir
                 .join(&project.name)

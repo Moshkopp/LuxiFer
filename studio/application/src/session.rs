@@ -7,7 +7,7 @@ mod selection;
 
 pub use layers::LayerParams;
 
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use studio_core::AppState;
 
@@ -57,6 +57,11 @@ impl EditorSession {
         &self.state
     }
 
+    /// Explizite Migrationsbruecke fuer bestehende Tests und Datenmigrationen.
+    /// Produktive GUI-Ablaufe duerfen ausschliesslich benannte Session-Methoden
+    /// verwenden. Im Gegensatz zum frueheren `DerefMut` ist jeder Restzugriff
+    /// auffindbar und kann schrittweise entfernt werden.
+    #[doc(hidden)]
     pub fn state_mut_for_migration(&mut self) -> &mut AppState {
         &mut self.state
     }
@@ -105,6 +110,35 @@ impl EditorSession {
     pub fn redo(&mut self) -> bool {
         self.state.redo()
     }
+
+    /// Aktualisiert die Arbeitsflaeche aus einem Maschinenprofil. Die GUI kennt
+    /// dadurch weder den mutierbaren Core-Zustand noch dessen interne Felder.
+    pub fn set_bed_size(&mut self, width_mm: f64, height_mm: f64) {
+        self.state.bed_w_mm = width_mm;
+        self.state.bed_h_mm = height_mm;
+    }
+
+    /// Interner Anwendungsfall fuer den Fill-Diagnosemodus der nativen Ansicht.
+    pub fn toggle_vector_fill_modes(&mut self) {
+        let any_cut = self
+            .state
+            .layers
+            .iter()
+            .any(|layer| layer.mode == studio_core::LayerMode::Cut);
+        let target = if any_cut {
+            studio_core::LayerMode::Fill
+        } else {
+            studio_core::LayerMode::Cut
+        };
+        for layer in &mut self.state.layers {
+            if matches!(
+                layer.mode,
+                studio_core::LayerMode::Cut | studio_core::LayerMode::Fill
+            ) {
+                layer.mode = target;
+            }
+        }
+    }
 }
 
 impl Deref for EditorSession {
@@ -112,12 +146,6 @@ impl Deref for EditorSession {
 
     fn deref(&self) -> &Self::Target {
         &self.state
-    }
-}
-
-impl DerefMut for EditorSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
     }
 }
 

@@ -64,10 +64,7 @@ pub use laser::{
 };
 pub use materials::{MaterialLibrary, MaterialProcess, MaterialProcessDefaults, MaterialProfile};
 pub use model::{Layer, LayerMode, Shape, TextMeta, SWATCH_COLORS};
-pub use project::{
-    data_root, delete_project, list_projects, projects_dir, rename_project, version_thumb_path,
-    ProjectFile, ProjectInfo, VersionInfo,
-};
+pub use project::{data_root, projects_dir, ProjectFile, ProjectInfo, VersionInfo};
 pub use raster::{raster_rows, raster_texture, Placement, RasterImage, RasterRow, RasterTexture};
 pub use rotary::{
     calibrated_pulses_per_rev, calibrated_step_length, CalibrationError, Rotary, RotaryKind,

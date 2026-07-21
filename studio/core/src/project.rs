@@ -7,7 +7,9 @@
 //! Da `Layer`, `Shape` und `Geo` bereits `Serialize`/`Deserialize` sind, ist das
 //! Format eine schlanke, versionierte Hülle um den `AppState`.
 
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -209,10 +211,13 @@ impl ProjectFile {
 
     /// Aus JSON-Text.
     pub fn from_json(json: &str) -> Result<Self, String> {
-        serde_json::from_str(json).map_err(|e| e.to_string())
+        let mut project: Self = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        project.migrate();
+        Ok(project)
     }
 
     /// Schreibt die Projektdatei nach `<dir>/<name>/projekt.laserproj`.
+    #[cfg(test)]
     pub fn save_to_dir(&self, projects_dir: &Path) -> Result<PathBuf, String> {
         let proj_dir = projects_dir.join(&self.name);
         std::fs::create_dir_all(&proj_dir).map_err(|e| e.to_string())?;
@@ -227,11 +232,10 @@ impl ProjectFile {
     /// Zeiger) bekommen aus ihrem vorhandenen Stand automatisch eine aktuelle
     /// Version. Die Migration wirkt nur im Speicher; geschrieben wird sie erst beim
     /// nächsten regulären Speichern.
+    #[cfg(test)]
     pub fn load(path: &Path) -> Result<Self, String> {
         let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let mut pf = Self::from_json(&json)?;
-        pf.migrate();
-        Ok(pf)
+        Self::from_json(&json)
     }
 
     /// Bringt eine geladene Datei ins neue Modell, falls sie aus der Zeit davor
@@ -265,6 +269,7 @@ impl ProjectFile {
     }
 
     /// Lädt ein Projekt über seinen Ordnernamen aus `projects_dir`.
+    #[cfg(test)]
     pub fn load_by_name(projects_dir: &Path, name: &str) -> Result<Self, String> {
         Self::load(&projects_dir.join(name).join(PROJECT_FILE))
     }
@@ -272,6 +277,7 @@ impl ProjectFile {
     /// Schreibt den Geometrie-Snapshot **einer** Version auf die Platte
     /// (`versions/<id>.laserproj` + optional `versions/<id>.png`). Interner Helfer;
     /// der Snapshot enthält nur die Geometrie dieser Version, keine Historie.
+    #[cfg(test)]
     fn write_version_snapshot(
         &self,
         projects_dir: &Path,
@@ -299,6 +305,67 @@ impl ProjectFile {
             .unwrap_or(true)
     }
 
+    /// Bereitet das normale Speichern rein im Modell vor. Ist eine alte Version
+    /// geladen, wird fachlich eine neue Verzweigung angelegt; andernfalls bleibt
+    /// die aktuelle Version bestehen. Dateisystemzugriffe erfolgen danach in
+    /// der Application-Schicht.
+    pub fn prepare_save_current(&mut self) -> Result<VersionInfo, String> {
+        if !self.current_is_last() {
+            return Ok(self.add_version_metadata(String::new()));
+        }
+        self.modified_at = now_iso8601();
+        self.current()
+            .cloned()
+            .ok_or_else(|| "Aktuelle Version fehlt.".into())
+    }
+
+    /// Legt eine neue Version ausschliesslich im Fachmodell an.
+    pub fn add_version_metadata(&mut self, note: impl Into<String>) -> VersionInfo {
+        let info = VersionInfo {
+            id: gen_id(),
+            label: self.next_label(),
+            created_at: now_iso8601(),
+            note: note.into(),
+        };
+        self.versions.push(info.clone());
+        self.current_version = info.id.clone();
+        self.modified_at = now_iso8601();
+        info
+    }
+
+    /// Entfernt eine Version rein im Modell. Wird die aktuelle Version entfernt,
+    /// liefert die Methode die ID der zu befoerdernden vorherigen Version. Deren
+    /// Geometrie laedt und uebernimmt anschliessend die Application-Schicht.
+    pub fn remove_version_metadata(&mut self, version_id: &str) -> Result<Option<String>, String> {
+        if self.versions.len() <= 1 {
+            return Err("Die letzte Version kann nicht gelöscht werden.".into());
+        }
+        let index = self
+            .versions
+            .iter()
+            .position(|version| version.id == version_id)
+            .ok_or("Version nicht gefunden.")?;
+        let was_current = self.current_version == version_id;
+        self.versions.remove(index);
+        self.modified_at = now_iso8601();
+        if !was_current {
+            return Ok(None);
+        }
+        let promoted_index = index.saturating_sub(1).min(self.versions.len() - 1);
+        let promoted_id = self.versions[promoted_index].id.clone();
+        self.current_version = promoted_id.clone();
+        Ok(Some(promoted_id))
+    }
+
+    /// Uebernimmt nur die versionsgebundene Canvas-Geometrie eines Snapshots.
+    pub fn apply_version_geometry(&mut self, snapshot: &Self) {
+        self.bed_w_mm = snapshot.bed_w_mm;
+        self.bed_h_mm = snapshot.bed_h_mm;
+        self.layers = snapshot.layers.clone();
+        self.shapes = snapshot.shapes.clone();
+        self.sync_asset_refs();
+    }
+
     /// **Strg+S** — normales Speichern. Der Core entscheidet selbst nach dem
     /// Modell (ADR 0003):
     /// - aktuelle Version ist die **letzte** → **in-place** aktualisieren;
@@ -310,6 +377,7 @@ impl ProjectFile {
     /// (kein Drift: genau ein Thumbnail pro Version). `thumb_png` sind fertige
     /// PNG-Bytes aus dem Frontend. Gibt die aktuelle [`VersionInfo`] zurück
     /// (bei Verzweigung die neu angelegte).
+    #[cfg(test)]
     pub fn save_current(
         &mut self,
         projects_dir: &Path,
@@ -331,6 +399,7 @@ impl ProjectFile {
     /// **Shift+Strg+S** — nächste Version anlegen: friert den jetzigen Stand als
     /// neue Version (V2, V3, …) ein und macht sie zur aktuellen. Der Canvas
     /// arbeitet danach auf ihr weiter. `note` ist eine optionale Kurznotiz.
+    #[cfg(test)]
     pub fn add_version(
         &mut self,
         projects_dir: &Path,
@@ -356,6 +425,7 @@ impl ProjectFile {
     /// überschreiben) und macht sie zur aktuellen. Verhält sich wie
     /// [`add_version`], ist aber semantisch das erste Speichern nach dem Laden
     /// einer nicht-aktuellen Version. Danach greift wieder [`save_current`].
+    #[cfg(test)]
     pub fn branch_from_current(
         &mut self,
         projects_dir: &Path,
@@ -369,6 +439,7 @@ impl ProjectFile {
     /// War es die aktuelle Version, wird die vorherige (in Listenreihenfolge)
     /// zur neuen aktuellen; ihr Snapshot wird in `projekt.laserproj` geladen und
     /// zurückgegeben, damit der Aufrufer den Canvas darauf setzen kann.
+    #[cfg(test)]
     pub fn delete_version(
         &mut self,
         projects_dir: &Path,
@@ -411,6 +482,7 @@ impl ProjectFile {
     }
 
     /// Lädt den Geometrie-Snapshot einer Version.
+    #[cfg(test)]
     pub fn load_version(projects_dir: &Path, name: &str, version_id: &str) -> Result<Self, String> {
         let path = projects_dir
             .join(name)
@@ -422,6 +494,7 @@ impl ProjectFile {
 
 /// Pfad zum Thumbnail einer Version (`versions/<id>.png`) oder `None`, wenn es
 /// keins gibt. Für die Anzeige der Versionsliste im Frontend.
+#[cfg(test)]
 pub fn version_thumb_path(projects_dir: &Path, name: &str, version_id: &str) -> Option<PathBuf> {
     let p = projects_dir
         .join(name)
@@ -433,6 +506,7 @@ pub fn version_thumb_path(projects_dir: &Path, name: &str, version_id: &str) -> 
 /// Benennt einen Projektordner um. Die Projekt-`id` bleibt unberührt (Identität
 /// hängt an der ID, nicht am Namen — ADR 0003 Invariante 1). Aktualisiert das
 /// `name`-Feld in der Projektdatei mit.
+#[cfg(test)]
 pub fn rename_project(projects_dir: &Path, old_name: &str, new_name: &str) -> Result<(), String> {
     if new_name.trim().is_empty() {
         return Err("Neuer Name darf nicht leer sein.".into());
@@ -452,6 +526,7 @@ pub fn rename_project(projects_dir: &Path, old_name: &str, new_name: &str) -> Re
 }
 
 /// Löscht einen Projektordner samt Versionen.
+#[cfg(test)]
 pub fn delete_project(projects_dir: &Path, name: &str) -> Result<(), String> {
     let dir = projects_dir.join(name);
     std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
@@ -499,6 +574,7 @@ pub struct ProjectInfo {
 
 /// Listet alle Projekte unter `projects_dir()`. Sortiert nach zuletzt geändert
 /// (neueste zuerst), damit das aktivste Projekt oben steht.
+#[cfg(test)]
 pub fn list_projects(projects_dir: &Path) -> Vec<ProjectInfo> {
     let Ok(entries) = std::fs::read_dir(projects_dir) else {
         return vec![];

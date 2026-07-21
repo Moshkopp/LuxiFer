@@ -246,7 +246,7 @@ impl App {
                     meta.width as f64 / 10.0,
                     meta.height as f64 / 10.0,
                 );
-                self.session.selected = vec![index];
+                self.session.set_selection(vec![index]);
                 self.image_dirty = true;
                 self.fit_all();
             }

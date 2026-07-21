@@ -3,11 +3,7 @@
 //! Das Panel-Layout ist statisch im Frontend verdrahtet. Persistiert werden nur
 //! die Arbeitsplatzdaten, Theme-Farben und der zuletzt verwendete Projektname.
 
-use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
-
-use crate::project::data_root;
 
 /// Dateiname der GUI-Settings im Datenverzeichnis.
 pub const UI_SETTINGS_FILE: &str = "gui-settings.json";
@@ -294,53 +290,6 @@ impl UiSettings {
         s.shortcut_bindings.validate()?;
         Ok(s)
     }
-
-    /// Speichert nach `<data_root>/gui-settings.json`.
-    pub fn save(&self) -> Result<PathBuf, String> {
-        self.save_to(&data_root())
-    }
-
-    /// Speichert in ein beliebiges Verzeichnis (für Tests).
-    pub fn save_to(&self, dir: &Path) -> Result<PathBuf, String> {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        let path = dir.join(UI_SETTINGS_FILE);
-        std::fs::write(&path, self.to_json()?).map_err(|e| e.to_string())?;
-        Ok(path)
-    }
-
-    /// Lädt aus dem Datenverzeichnis; fehlt die Datei, gilt der Default.
-    pub fn load() -> Self {
-        Self::load_from(&data_root())
-    }
-
-    /// Lädt aus einem Verzeichnis; fehlt/kaputt → Default (nie ein Fehler nach
-    /// außen, die GUI soll immer starten).
-    pub fn load_from(dir: &Path) -> Self {
-        let path = dir.join(UI_SETTINGS_FILE);
-        match std::fs::read_to_string(&path) {
-            Ok(json) => {
-                let had_workplace_id = serde_json::from_str::<serde_json::Value>(&json)
-                    .ok()
-                    .and_then(|value| value.get("workplace_id").cloned())
-                    .is_some();
-                let needs_format_upgrade = serde_json::from_str::<serde_json::Value>(&json)
-                    .ok()
-                    .and_then(|value| value.get("version").and_then(|v| v.as_u64()))
-                    .is_none_or(|version| version < UI_FORMAT_VERSION as u64);
-                let settings = Self::from_json(&json).unwrap_or_default();
-                if !had_workplace_id || needs_format_upgrade {
-                    let _ = settings.save_to(dir);
-                }
-                settings
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let settings = Self::default();
-                let _ = settings.save_to(dir);
-                settings
-            }
-            Err(_) => Self::default(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -487,37 +436,5 @@ mod tests {
         };
         s.sanitize();
         assert_eq!(s.grid_size_mm, default_grid_size());
-    }
-
-    #[test]
-    fn save_und_load_ueber_tempdir() {
-        let dir = std::env::temp_dir().join(format!("studio_ui_test_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-
-        let s = UiSettings {
-            workplace: "Werkstatt-PC".into(),
-            ..UiSettings::default()
-        };
-        let path = s.save_to(&dir).unwrap();
-        assert!(path.exists());
-
-        let loaded = UiSettings::load_from(&dir);
-        assert_eq!(loaded.workplace, "Werkstatt-PC");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn fehlende_datei_gibt_default() {
-        let dir = std::env::temp_dir().join(format!("studio_ui_none_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let loaded = UiSettings::load_from(&dir);
-        assert_eq!(loaded.workplace, "Arbeitsplatz");
-        assert!(!loaded.workplace_id.is_empty());
-        assert_eq!(
-            UiSettings::load_from(&dir).workplace_id,
-            loaded.workplace_id
-        );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

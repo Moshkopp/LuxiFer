@@ -1,6 +1,6 @@
 //! Bild-Rendering im Canvas: importierte Assets (Graustufe) als GPU-Texturen an
 //! ihrer mm-Box. Eigene Pipeline (texturiertes Quad), dieselben Kamera-Uniforms
-//! wie der Linien-Renderer. Der Core liefert die Pixel (`load_asset_luma`).
+//! wie der Linien-Renderer. Die Application liefert die dekodierten Pixel.
 
 use std::collections::HashMap;
 
@@ -209,16 +209,16 @@ impl ImageStore {
         sample_count: u32,
         state: &AppState,
     ) {
-        let dir = studio_core::assets_dir();
         for s in &state.shapes {
             if let studio_core::Geo::Image { asset, .. } = &s.geo {
                 if self.textures.contains_key(asset) {
                     continue;
                 }
                 self.ensure_pipeline(device, format, sample_count);
-                match studio_core::load_asset_rgba(&dir, asset) {
-                    Ok((rgba, w, h)) => {
-                        let tex = self.upload_rgba(device, queue, &rgba, w, h);
+                match studio_application::AssetService::load_rgba(asset) {
+                    Ok(image) => {
+                        let tex =
+                            self.upload_rgba(device, queue, &image.rgba, image.width, image.height);
                         self.textures.insert(asset.clone(), tex);
                     }
                     Err(e) => log::error!("Asset {asset} laden: {e}"),

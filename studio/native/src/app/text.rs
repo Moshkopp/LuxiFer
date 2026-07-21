@@ -221,7 +221,8 @@ impl App {
                     // Neuer Text landet mittig in der aktuellen Ansicht —
                     // ohne fit_all, damit Zoom und Ausschnitt stehen bleiben.
                     let contours = center_contours_at(contours, self.canvas.cam.center);
-                    self.session.selected = self.session.add_text_block(contours, meta);
+                    let selection = self.session.add_text_block(contours, meta);
+                    self.session.set_selection(selection);
                 }
                 self.refresh_accent();
                 true

@@ -264,6 +264,37 @@ const RAW: &[u16] = &[
 const PROTECTED: &[u16] = &[0x0207, 0x020B, 0x0400, 0x057E, 0x0004, 0x0005];
 
 impl RuidaDriver {
+    /// Uebersetzt das geraeteneutrale Rotary-Modell in die HW-verifizierten
+    /// Ruida-Register. Geteilte Register werden vor dem Schreiben gelesen,
+    /// damit fremde Bits unveraendert bleiben.
+    pub fn configure_rotary(&self, rotary: &studio_core::Rotary) -> Result<(), DriverError> {
+        let settings = self.read_machine_settings()?;
+        let by_key = |key: &str| {
+            settings
+                .iter()
+                .find(|setting| setting.key == key)
+                .ok_or_else(|| DriverError::Transport(format!("Ruida-Register {key} fehlt.")))
+        };
+        let raw_for = |key: &str, value: f64| -> Result<(u16, i64), DriverError> {
+            let setting = by_key(key)?;
+            Ok((
+                setting.address,
+                (value * setting.unit.factor()).round() as i64,
+            ))
+        };
+
+        let enable = by_key("rotary_enable")?;
+        let mask = enable.bit_mask.unwrap_or(i64::MAX);
+        let current = enable.raw.unwrap_or_default();
+        let bits = if rotary.active { mask } else { 0 };
+        let changes = vec![
+            (enable.address, (current & !mask) | bits),
+            raw_for("pulses_per_rot", rotary.steps_per_rev)?,
+            raw_for("rotary_diameter", rotary.kind.driving_diameter_mm())?,
+        ];
+        self.write_machine_settings(&changes)
+    }
+
     pub fn read_machine_settings(&self) -> Result<Vec<MachineSetting>, DriverError> {
         let t = self.transport()?;
         let mut out = Vec::new();

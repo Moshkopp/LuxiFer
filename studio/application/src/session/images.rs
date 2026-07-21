@@ -119,14 +119,16 @@ impl EditorSession {
         };
         let (asset, bx, by, bw, bh) = (asset.clone(), *x, *y, *w, *h);
 
-        let (px, pw, ph) = studio_core::load_asset_luma(&studio_core::assets_dir(), &asset)
-            .map_err(|e| {
-                AppError::wrap(
-                    "asset_read",
-                    "Bild-Asset konnte nicht geladen werden.",
-                    e.to_string(),
-                )
-            })?;
+        let (px, pw, ph) = crate::AssetService::load_luma(&asset).map_err(|error| {
+            AppError::wrap(
+                "asset_read",
+                "Bild-Asset konnte nicht geladen werden.",
+                error
+                    .details()
+                    .unwrap_or_else(|| error.message())
+                    .to_owned(),
+            )
+        })?;
         // Nur die Tonwert-LUT anwenden (kein Dithering), dann tracen.
         let lut = ImageParams {
             mode: ImageMode::Grayscale,

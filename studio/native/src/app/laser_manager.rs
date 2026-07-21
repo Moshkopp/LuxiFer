@@ -351,14 +351,7 @@ impl App {
     /// setzt deshalb nur diese drei Register und rechnet die Bewegung NICHT
     /// zusätzlich um.
     pub fn rotary_write_controller(&mut self, rotary: studio_core::Rotary) {
-        let Some(settings) = self.rotary_register_writes(rotary) else {
-            self.app_error = Some(studio_application::AppError::new(
-                "rotary_registers_unknown",
-                "Erst aus dem Gerät lesen — ohne die Registeradressen kann nicht geschrieben werden.",
-            ));
-            return;
-        };
-        match self.laser_backend.write_machine_settings_async(settings) {
+        match self.laser_backend.configure_rotary_async(rotary) {
             Ok(receiver) => {
                 self.rotary_read_rx = Some(receiver);
                 self.rotary_wrote = Some(());
@@ -368,42 +361,6 @@ impl App {
             }
             Err(error) => self.app_error = Some(error),
         }
-    }
-
-    /// Baut die Registerschreibungen aus der Bauart. Braucht einen zuvor
-    /// gelesenen Parametersatz, weil nur dort Adresse und Einheit je Parameter
-    /// stehen — geraten wird nichts.
-    fn rotary_register_writes(&self, rotary: studio_core::Rotary) -> Option<Vec<(u16, i64)>> {
-        let settings = &self.rotary_dialog.as_ref()?.machine_settings;
-        if settings.is_empty() {
-            return None;
-        }
-        let raw_for = |key: &str, value: f64| -> Option<(u16, i64)> {
-            let setting = settings.iter().find(|setting| setting.key == key)?;
-            Some((
-                setting.address,
-                (value * setting.unit.factor()).round() as i64,
-            ))
-        };
-        let mut writes = Vec::new();
-
-        // rotary_enable ist ein einzelnes Bit in einem geteilten Register: nur
-        // dieses Bit setzen und die übrigen Schalter unverändert
-        // zurückschreiben, sonst würden fremde Einstellungen gelöscht.
-        let enable = settings
-            .iter()
-            .find(|setting| setting.key == "rotary_enable")?;
-        let mask = enable.bit_mask.unwrap_or(i64::MAX);
-        let current = enable.raw.unwrap_or_default();
-        let bits = if rotary.active { mask } else { 0 };
-        writes.push((enable.address, (current & !mask) | bits));
-
-        writes.push(raw_for("pulses_per_rot", rotary.steps_per_rev)?);
-        writes.push(raw_for(
-            "rotary_diameter",
-            rotary.kind.driving_diameter_mm(),
-        )?);
-        Some(writes)
     }
 
     /// Liest die Rotary-Register frisch aus dem Controller (nur zur Anzeige).

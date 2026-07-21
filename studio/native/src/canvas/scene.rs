@@ -264,8 +264,7 @@ mod tests {
     #[test]
     fn preview_spiegelt_maschinenkoordinaten_zurueck_in_den_canvas() {
         let mut session = EditorSession::default();
-        session.bed_w_mm = 200.0;
-        session.bed_h_mm = 100.0;
+        session.set_bed_size(200.0, 100.0);
         let mut builder = studio_core::TraceBuilder::new(false);
         builder.set_head((190.0, 90.0));
         builder.work(
@@ -307,7 +306,7 @@ mod tests {
             });
             state.layers[0].mode = studio_core::LayerMode::Fill;
         }
-        session.selected = vec![0];
+        session.set_selection(vec![0]);
         let rev_before = session.render_rev();
         let before = base_vertices_profiled(&session, Default::default()).0;
 
@@ -403,7 +402,7 @@ mod tests {
         session
             .state_mut_for_migration()
             .add_image("asset".into(), 0.0, 0.0, 20.0, 10.0);
-        session.selected.clear();
+        session.clear_selection();
 
         let geometry = base_vertices_profiled(&session, Default::default()).0;
 

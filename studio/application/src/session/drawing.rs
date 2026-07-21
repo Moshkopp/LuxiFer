@@ -1,6 +1,41 @@
 use super::{BoxShape, EditorSession, PointPath};
 
 impl EditorSession {
+    pub fn add_image(&mut self, asset: String, x: f64, y: f64, width: f64, height: f64) -> usize {
+        self.state.add_image(asset, x, y, width, height)
+    }
+
+    pub fn add_compound_polylines(
+        &mut self,
+        compounds: Vec<Vec<(Vec<studio_core::Pt>, bool)>>,
+    ) -> Vec<usize> {
+        self.state.add_compound_polylines(compounds)
+    }
+
+    pub fn add_text_block(
+        &mut self,
+        contours: Vec<(Vec<studio_core::Pt>, bool)>,
+        meta: studio_core::TextMeta,
+    ) -> Vec<usize> {
+        self.state.add_text_block(contours, meta)
+    }
+
+    pub fn split_node_segment(&mut self, shape: usize, segment: usize, t: f64) {
+        debug_assert!(self.edit_active(), "split_node_segment ohne begin_edit");
+        self.state.split_node_segment(shape, segment, t);
+    }
+
+    pub fn drag_node(
+        &mut self,
+        shape: usize,
+        node: usize,
+        part: studio_core::bezier::NodePart,
+        position: studio_core::Pt,
+    ) {
+        debug_assert!(self.edit_active(), "drag_node ohne begin_edit");
+        self.state.drag_node(shape, node, part, position);
+    }
+
     pub fn replace_text_block(
         &mut self,
         index: usize,

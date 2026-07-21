@@ -201,7 +201,7 @@ impl App {
         cam.viewport = viewport;
         cam.fit_bbox([0.0, 0.0, state.bed_w_mm, state.bed_h_mm], 0.85);
 
-        let ui_settings = studio_core::UiSettings::load();
+        let ui_settings = studio_application::load_ui_settings();
         // UI-Skalierung des Arbeitsplatzes, zusätzlich zum Monitor-DPI
         // (Full HD will typischerweise weniger als WQHD; einstellbar in den
         // Einstellungen, Default die bisherige moderate Vergrößerung).
@@ -702,18 +702,7 @@ impl App {
     /// Schaltet den Modus aller Layer zwischen Cut (nur Kontur) und Fill (Fläche).
     /// Für den Fill-Stresstest an importierter Geometrie.
     pub fn toggle_fill(&mut self) {
-        use studio_core::model::LayerMode;
-        let any_cut = self.session.layers.iter().any(|l| l.mode == LayerMode::Cut);
-        let target = if any_cut {
-            LayerMode::Fill
-        } else {
-            LayerMode::Cut
-        };
-        for l in &mut self.session.layers {
-            if l.mode == LayerMode::Cut || l.mode == LayerMode::Fill {
-                l.mode = target;
-            }
-        }
+        self.session.toggle_vector_fill_modes();
     }
 
     fn refresh_accent(&mut self) {
@@ -1015,8 +1004,7 @@ mod tests {
         assert!(!idxs.is_empty(), "Text-Block sollte Shapes anlegen");
     }
 
-    /// Projekt-Round-Trip: from_state → save_to_dir → load_by_name → into_state.
-    /// Deckt die Kette ab, die ProjectBackend nutzt.
+    /// Projektformat-Round-Trip ohne Dateisystem; die I/O-Kette testet Application.
     #[test]
     fn projekt_speichern_und_laden() {
         use studio_core::{project::ProjectFile, AppState, Geo};
@@ -1029,17 +1017,11 @@ mod tests {
         });
         let n_shapes = s.shapes.len();
 
-        let dir = std::env::temp_dir().join("studio_proj_test");
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut pf = ProjectFile::from_state(&s, "TestProj", Vec::new());
-        pf.save_to_dir(&dir).expect("save_to_dir");
-        pf.save_current(&dir, &[]).expect("save_current");
-
-        let loaded = ProjectFile::load_by_name(&dir, "TestProj").expect("load_by_name");
+        let pf = ProjectFile::from_state(&s, "TestProj", Vec::new());
+        let loaded = ProjectFile::from_json(&pf.to_json().expect("to_json")).expect("from_json");
         assert_eq!(loaded.name, "TestProj");
         let restored = loaded.into_state();
         assert_eq!(restored.shapes.len(), n_shapes);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Reproduziert den Resize-Aufschaukel-Bug und beweist den Snapshot-Fix:

@@ -7,7 +7,6 @@
 //! die Byte-/Transport-Details kennen allein die Treiber-Crates.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 
 /// Dateiname der app-globalen Laser-Registry.
 pub const LASER_FILE: &str = "laser-profile.json";
@@ -308,46 +307,6 @@ impl LaserRegistry {
             false
         }
     }
-
-    // --- Persistenz (app-global, eigene Datei; ADR 0007) --------------------
-
-    /// Lädt die Registry aus dem Datenverzeichnis; fehlt/kaputt → leer (die GUI
-    /// startet immer).
-    pub fn load() -> Self {
-        Self::load_from(&crate::project::data_root())
-    }
-
-    /// Lädt aus einem Verzeichnis (für Tests). Ungültige Nullpunktdaten
-    /// (doppelte IDs, nicht endliche Koordinaten) gelten als beschädigte
-    /// Profildatei und werden abgelehnt — nicht still umgedeutet (ADR 0020).
-    pub fn load_from(dir: &Path) -> Self {
-        let registry: Self = match std::fs::read_to_string(dir.join(LASER_FILE)) {
-            Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
-            Err(_) => Self::default(),
-        };
-        if registry
-            .profiles
-            .iter()
-            .any(|profile| profile.validate_saved_origins().is_err())
-        {
-            return Self::default();
-        }
-        registry
-    }
-
-    /// Speichert nach `<data_root>/laser-profile.json`.
-    pub fn save(&self) -> Result<PathBuf, String> {
-        self.save_to(&crate::project::data_root())
-    }
-
-    /// Speichert in ein beliebiges Verzeichnis (für Tests).
-    pub fn save_to(&self, dir: &Path) -> Result<PathBuf, String> {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        let path = dir.join(LASER_FILE);
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())?;
-        Ok(path)
-    }
 }
 
 /// Eine Job-Aktion, die ein Treiber im Laserpanel anbietet (ADR 0007). Das Panel
@@ -515,32 +474,6 @@ mod tests {
     }
 
     #[test]
-    fn registry_mit_beschaedigten_nullpunkten_wird_abgelehnt() {
-        let dir = std::env::temp_dir().join(format!(
-            "studio-laser-invalid-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        let mut registry = LaserRegistry::default();
-        let mut profile = profil("a");
-        profile.saved_origins = vec![
-            origin("o", "Posi", 1.0, 1.0),
-            origin("o", "Posi 2", 2.0, 2.0),
-        ];
-        registry.add(profile);
-        // Direkt schreiben (ohne Validierung), um eine beschädigte Datei zu
-        // simulieren.
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(LASER_FILE),
-            serde_json::to_string_pretty(&registry).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(LaserRegistry::load_from(&dir), LaserRegistry::default());
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
     fn nullpunkt_spiegelt_punkt_und_jobanker() {
         assert_eq!(
             BedOrigin::BottomRight.transform(25.0, 40.0, (300.0, 200.0)),
@@ -560,24 +493,5 @@ mod tests {
         p.name = "Umbenannt".into();
         assert!(r.update(p));
         assert_eq!(r.active().unwrap().name, "Umbenannt");
-    }
-
-    #[test]
-    fn save_und_load_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("studio-laser-test-{}", std::process::id()));
-        let mut r = LaserRegistry::default();
-        let mut p = profil("a");
-        p.scan_offset = ScanOffsetCal {
-            enabled: true,
-            points: vec![ScanOffsetPoint {
-                speed_mm_s: 100.0,
-                offset_mm: 0.1,
-            }],
-        };
-        r.add(p);
-        r.save_to(&dir).unwrap();
-        let loaded = LaserRegistry::load_from(&dir);
-        assert_eq!(loaded, r);
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

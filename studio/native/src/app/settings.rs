@@ -49,7 +49,7 @@ impl App {
                     if settings.grid_size_mm != self.ui_settings.grid_size_mm {
                         self.renderer.invalidate_scene();
                     }
-                    settings.save()?;
+                    studio_application::save_ui_settings(&settings)?;
                     self.canvas.invert_marquee_direction = settings.invert_marquee_direction;
                     self.ui_settings = settings.clone();
                     if let Some(dialog) = self.settings_dialog.as_mut() {
@@ -179,7 +179,7 @@ impl App {
             self.app_error = Some(AppError::new("shortcut_conflict", message));
             return false;
         }
-        if let Err(error) = draft.save() {
+        if let Err(error) = studio_application::save_ui_settings(&draft) {
             self.app_error = Some(AppError::new(
                 "settings_write",
                 format!("Einstellungen speichern fehlgeschlagen: {error}"),

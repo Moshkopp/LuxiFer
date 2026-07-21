@@ -376,6 +376,10 @@ impl MachineDriver for RuidaDriver {
         "Ruida"
     }
 
+    fn export_extension(&self) -> &'static str {
+        "rd"
+    }
+
     fn capabilities(&self) -> DriverCapabilities {
         DriverCapabilities {
             machine_settings: true,
@@ -394,6 +398,10 @@ impl MachineDriver for RuidaDriver {
 
     fn write_machine_settings(&self, changes: &[(u16, i64)]) -> Result<(), DriverError> {
         RuidaDriver::write_machine_settings(self, changes)
+    }
+
+    fn configure_rotary(&self, rotary: &studio_core::Rotary) -> Result<(), DriverError> {
+        RuidaDriver::configure_rotary(self, rotary)
     }
 
     fn execution_trace(

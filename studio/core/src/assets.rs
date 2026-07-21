@@ -131,6 +131,85 @@ pub fn to_grayscale_png(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32, String), Ass
     Ok((out, w, h, source_format))
 }
 
+/// Bereitet ein Bild fachlich fuer den content-adressierten Store vor, ohne
+/// selbst auf das Dateisystem zuzugreifen.
+pub fn prepare_image(
+    source_bytes: &[u8],
+    original_name: &str,
+) -> Result<(AssetMeta, Vec<u8>), AssetError> {
+    let (png, width, height, source_format) = to_grayscale_png(source_bytes)?;
+    let meta = AssetMeta {
+        id: content_hash(&png),
+        ext: "png".into(),
+        kind: AssetKind::Image,
+        original_name: original_name.to_string(),
+        source_format,
+        width,
+        height,
+        import_at: now_iso8601(),
+        tags: derive_tags([original_name]),
+        derived: false,
+    };
+    Ok((meta, png))
+}
+
+/// Bereitet ein abgeleitetes Bild unter Erhalt des Alpha-Kanals vor.
+pub fn prepare_image_preserve_alpha(
+    source_bytes: &[u8],
+    original_name: &str,
+) -> Result<(AssetMeta, Vec<u8>), AssetError> {
+    let image = image::load_from_memory(source_bytes).map_err(|e| AssetError(e.to_string()))?;
+    let luma_alpha = image.to_luma_alpha8();
+    let (width, height) = luma_alpha.dimensions();
+    let mut png = Vec::new();
+    image::DynamicImage::ImageLumaA8(luma_alpha)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|e| AssetError(e.to_string()))?;
+    let meta = AssetMeta {
+        id: content_hash(&png),
+        ext: "png".into(),
+        kind: AssetKind::Image,
+        original_name: original_name.into(),
+        source_format: "png".into(),
+        width,
+        height,
+        import_at: now_iso8601(),
+        tags: derive_tags([original_name]),
+        derived: true,
+    };
+    Ok((meta, png))
+}
+
+/// Beschreibt eine unveraenderte Quelldatei fuer den Store, ohne sie abzulegen.
+pub fn prepare_source(
+    source_bytes: &[u8],
+    original_name: &str,
+    ext: &str,
+    kind: AssetKind,
+) -> Result<AssetMeta, AssetError> {
+    if kind == AssetKind::Image {
+        return Err(AssetError(
+            "Bildquellen müssen über prepare_image laufen".into(),
+        ));
+    }
+    let ext = ext.trim_start_matches('.').to_ascii_lowercase();
+    if ext.is_empty() || !ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(AssetError("Ungültige Asset-Dateiendung".into()));
+    }
+    Ok(AssetMeta {
+        id: content_hash(source_bytes),
+        ext,
+        kind,
+        original_name: original_name.into(),
+        source_format: String::new(),
+        width: 0,
+        height: 0,
+        import_at: now_iso8601(),
+        tags: derive_tags([original_name]),
+        derived: false,
+    })
+}
+
 /// Importiert eine Bilddatei in den Store: liest die Quelle, konvertiert zu
 /// Graustufe (PNG), legt Bytes + Metadaten unter dem Content-Hash ab und gibt die
 /// Metadaten zurück. Idempotent: existiert der Hash schon, wird nichts neu
@@ -144,8 +223,8 @@ pub fn import_image(
     source_bytes: &[u8],
     original_name: &str,
 ) -> Result<AssetMeta, AssetError> {
-    let (png, width, height, source_format) = to_grayscale_png(source_bytes)?;
-    let id = content_hash(&png);
+    let (meta, png) = prepare_image(source_bytes, original_name)?;
+    let id = meta.id.clone();
     std::fs::create_dir_all(store_dir)?;
     let _ = std::fs::remove_file(hidden_path(store_dir, &id));
 
@@ -155,18 +234,6 @@ pub fn import_image(
         std::fs::write(&bytes_path, &png)?;
     }
 
-    let meta = AssetMeta {
-        id: id.clone(),
-        ext: "png".into(),
-        kind: AssetKind::Image,
-        original_name: original_name.to_string(),
-        source_format,
-        width,
-        height,
-        import_at: now_iso8601(),
-        tags: derive_tags([original_name]),
-        derived: false,
-    };
     let meta_path = store_dir.join(format!("{id}.meta.json"));
     if !meta_path.exists() {
         let json = serde_json::to_string_pretty(&meta).map_err(|e| AssetError(e.to_string()))?;
@@ -183,28 +250,10 @@ pub fn import_image_preserve_alpha(
     source_bytes: &[u8],
     original_name: &str,
 ) -> Result<AssetMeta, AssetError> {
-    let image = image::load_from_memory(source_bytes).map_err(|e| AssetError(e.to_string()))?;
-    let luma_alpha = image.to_luma_alpha8();
-    let (width, height) = luma_alpha.dimensions();
-    let mut png = Vec::new();
-    image::DynamicImage::ImageLumaA8(luma_alpha)
-        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|e| AssetError(e.to_string()))?;
-    let id = content_hash(&png);
+    let (meta, png) = prepare_image_preserve_alpha(source_bytes, original_name)?;
+    let id = meta.id.clone();
     std::fs::create_dir_all(store_dir)?;
     std::fs::write(store_dir.join(format!("{id}.png")), &png)?;
-    let meta = AssetMeta {
-        id: id.clone(),
-        ext: "png".into(),
-        kind: AssetKind::Image,
-        original_name: original_name.into(),
-        source_format: "png".into(),
-        width,
-        height,
-        import_at: now_iso8601(),
-        tags: derive_tags([original_name]),
-        derived: true,
-    };
     std::fs::write(
         store_dir.join(format!("{id}.meta.json")),
         serde_json::to_vec_pretty(&meta).map_err(|e| AssetError(e.to_string()))?,
@@ -220,34 +269,15 @@ pub fn import_source(
     ext: &str,
     kind: AssetKind,
 ) -> Result<AssetMeta, AssetError> {
-    if kind == AssetKind::Image {
-        return Err(AssetError(
-            "Bildquellen müssen über import_image laufen".into(),
-        ));
-    }
-    let ext = ext.trim_start_matches('.').to_ascii_lowercase();
-    if ext.is_empty() || !ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
-        return Err(AssetError("Ungültige Asset-Dateiendung".into()));
-    }
-    let id = content_hash(source_bytes);
+    let meta = prepare_source(source_bytes, original_name, ext, kind)?;
+    let id = meta.id.clone();
+    let ext = meta.ext.clone();
     std::fs::create_dir_all(store_dir)?;
     let _ = std::fs::remove_file(hidden_path(store_dir, &id));
     let bytes_path = store_dir.join(format!("{id}.{ext}"));
     if !bytes_path.exists() {
         std::fs::write(&bytes_path, source_bytes)?;
     }
-    let meta = AssetMeta {
-        id: id.clone(),
-        ext,
-        kind,
-        original_name: original_name.into(),
-        source_format: String::new(),
-        width: 0,
-        height: 0,
-        import_at: now_iso8601(),
-        tags: derive_tags([original_name]),
-        derived: false,
-    };
     let meta_path = store_dir.join(format!("{id}.meta.json"));
     if !meta_path.exists() {
         let json = serde_json::to_vec_pretty(&meta).map_err(|e| AssetError(e.to_string()))?;
@@ -408,6 +438,13 @@ fn is_stopword(word: &str) -> bool {
     )
 }
 
+/// Bereinigt persistierte Suchbegriffe nach den aktuellen Fachregeln.
+pub fn sanitize_asset_tags(meta: &mut AssetMeta) {
+    meta.tags.retain(|tag| !is_stopword(tag));
+    meta.tags.sort();
+    meta.tags.dedup();
+}
+
 fn hidden_path(store_dir: &Path, id: &AssetId) -> std::path::PathBuf {
     store_dir.join(format!("{id}.hidden"))
 }
@@ -450,21 +487,27 @@ pub fn asset_thumbnail(store_dir: &Path, id: &AssetId) -> Result<Vec<u8>, AssetE
     }
     let meta = asset_meta(store_dir, id)?;
     let bytes = load_asset(store_dir, id)?;
+    let png = create_thumbnail(&meta, &bytes)?;
+    let temp = store_dir.join(format!(".{id}.thumb.tmp"));
+    std::fs::write(&temp, &png)?;
+    std::fs::rename(temp, cache)?;
+    Ok(png)
+}
+
+/// Erzeugt Thumbnail-Bytes ohne Kenntnis des Asset-Speichers.
+pub fn create_thumbnail(meta: &AssetMeta, bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
     let image = match meta.kind {
-        AssetKind::Image => image::load_from_memory(&bytes)
+        AssetKind::Image => image::load_from_memory(bytes)
             .map_err(|error| AssetError(error.to_string()))?
             .resize(160, 120, image::imageops::FilterType::Triangle)
             .to_luma8(),
-        AssetKind::SvgSource | AssetKind::DxfSource => vector_thumbnail(&bytes, &meta.ext)?,
+        AssetKind::SvgSource | AssetKind::DxfSource => vector_thumbnail(bytes, &meta.ext)?,
         AssetKind::Font => return Err(AssetError("Fonts haben kein Katalog-Thumbnail".into())),
     };
     let mut png = Vec::new();
     image::DynamicImage::ImageLuma8(image)
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|error| AssetError(error.to_string()))?;
-    let temp = store_dir.join(format!(".{id}.thumb.tmp"));
-    std::fs::write(&temp, &png)?;
-    std::fs::rename(temp, cache)?;
     Ok(png)
 }
 
@@ -563,7 +606,12 @@ pub fn load_asset_luma_alpha(
     id: &AssetId,
 ) -> Result<(Vec<u8>, Vec<u8>, u32, u32), AssetError> {
     let bytes = load_asset(store_dir, id)?;
-    let image = image::load_from_memory(&bytes).map_err(|e| AssetError(e.to_string()))?;
+    decode_luma_alpha(&bytes)
+}
+
+/// Dekodiert Bildbytes zu getrennten Graustufen- und Alpha-Kanaelen.
+pub fn decode_luma_alpha(bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>, u32, u32), AssetError> {
+    let image = image::load_from_memory(bytes).map_err(|e| AssetError(e.to_string()))?;
     let pixels = image.to_luma_alpha8();
     let (w, h) = pixels.dimensions();
     let mut luma = Vec::with_capacity((w * h) as usize);
@@ -629,7 +677,16 @@ pub fn rendered_png(
     invert: bool,
 ) -> Result<Vec<u8>, AssetError> {
     let bytes = load_asset(store_dir, id)?;
-    let decoded = image::load_from_memory(&bytes).map_err(|e| AssetError(e.to_string()))?;
+    rendered_png_from_bytes(&bytes, p, invert)
+}
+
+/// Wendet die Editor-Bildverarbeitung auf bereits geladene Bytes an.
+pub fn rendered_png_from_bytes(
+    bytes: &[u8],
+    p: &ImageParams,
+    invert: bool,
+) -> Result<Vec<u8>, AssetError> {
+    let decoded = image::load_from_memory(bytes).map_err(|e| AssetError(e.to_string()))?;
     let alpha = decoded.to_luma_alpha8();
     let luma = decoded.to_luma8();
     let (w, h) = (luma.width(), luma.height());

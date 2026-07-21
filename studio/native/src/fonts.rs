@@ -86,12 +86,12 @@ pub fn list_font_families() -> Vec<FontFamily> {
     ];
 
     let mut paths: Vec<(PathBuf, bool)> = Vec::new();
-    if let Ok(assets) = studio_core::list_assets(&studio_core::assets_dir()) {
+    if let Ok(assets) = studio_application::AssetService::list_all() {
         for meta in assets
             .into_iter()
             .filter(|meta| meta.kind == studio_core::AssetKind::Font)
         {
-            if let Some(path) = studio_core::asset_path(&studio_core::assets_dir(), &meta.id) {
+            if let Some(path) = studio_application::AssetService::path(&meta.id) {
                 paths.push((path, true));
             }
         }

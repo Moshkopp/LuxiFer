@@ -533,14 +533,7 @@ pub fn sync_assets(base_url: &str) -> Result<HubSyncReport, AppError> {
         "",
         UPLOAD_TIMEOUT,
     )?)?;
-    let store = studio_core::assets_dir();
-    let local = studio_core::list_assets(&store).map_err(|error| {
-        AppError::wrap(
-            "asset_list",
-            "Asset-Katalog konnte nicht gelesen werden.",
-            error.to_string(),
-        )
-    })?;
+    let local = crate::AssetService::list_all()?;
     let mut report = HubSyncReport::default();
     for meta in &local {
         if remote
@@ -549,13 +542,7 @@ pub fn sync_assets(base_url: &str) -> Result<HubSyncReport, AppError> {
         {
             continue;
         }
-        let bytes = studio_core::load_asset(&store, &meta.id).map_err(|error| {
-            AppError::wrap(
-                "asset_read",
-                "Asset konnte nicht gelesen werden.",
-                error.to_string(),
-            )
-        })?;
+        let bytes = crate::AssetService::load_bytes(&meta.id)?;
         let body = serde_json::to_string(&AssetTransfer {
             meta: meta.clone(),
             content_hex: hex_encode(&bytes),
@@ -586,7 +573,7 @@ pub fn sync_assets(base_url: &str) -> Result<HubSyncReport, AppError> {
         report.assets_uploaded += 1;
     }
     for meta in remote {
-        if studio_core::asset_hidden(&store, &meta.id) {
+        if crate::AssetService::is_hidden(&meta.id) {
             continue;
         }
         if local
@@ -605,13 +592,7 @@ pub fn sync_assets(base_url: &str) -> Result<HubSyncReport, AppError> {
         let bytes = hex_decode(&transfer.content_hex).ok_or_else(|| {
             AppError::new("asset_encoding", "Hub lieferte ungültige Asset-Daten.")
         })?;
-        studio_core::store_asset(&store, &transfer.meta, &bytes).map_err(|error| {
-            AppError::wrap(
-                "asset_write",
-                "Asset konnte nicht gespeichert werden.",
-                error.to_string(),
-            )
-        })?;
+        crate::AssetService::store_received(&transfer.meta, &bytes)?;
         report.assets_downloaded += 1;
     }
     Ok(report)

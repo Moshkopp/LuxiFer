@@ -160,14 +160,8 @@ pub fn accept_inbox_revision(revision_id: &str) -> Result<String, AppError> {
     let entry = read_entry(&inbox_dir().join(revision_id).join(MANIFEST_FILE))?;
     let mut remote = read_verified_project(&entry)?;
     resolve_project_assets(&mut remote)?;
-    let projects_dir = studio_core::projects_dir();
-    let (local_name, mut local) = studio_core::list_projects(&projects_dir)
-        .into_iter()
-        .map(|info| {
-            studio_core::ProjectFile::load_by_name(&projects_dir, &info.name)
-                .map(|project| (info.name, project))
-        })
-        .collect::<Result<Vec<_>, _>>()
+    let projects_dir = crate::project::projects_path();
+    let (local_name, mut local) = crate::project::list_project_files()
         .map_err(|error| {
             AppError::wrap(
                 "project_read",
@@ -176,6 +170,7 @@ pub fn accept_inbox_revision(revision_id: &str) -> Result<String, AppError> {
             )
         })?
         .into_iter()
+        .map(|project| (project.name.clone(), project))
         .find(|(_, project)| project.id == entry.project_id)
         .ok_or_else(|| {
             AppError::new(
@@ -247,14 +242,7 @@ pub fn accept_inbox_revision(revision_id: &str) -> Result<String, AppError> {
 pub fn compare_inbox_revision(revision_id: &str) -> Result<InboxComparison, AppError> {
     let entry = read_entry(&inbox_dir().join(revision_id).join(MANIFEST_FILE))?;
     let remote = read_verified_project(&entry)?;
-    let projects_dir = studio_core::projects_dir();
-    let local = studio_core::list_projects(&projects_dir)
-        .into_iter()
-        .map(|info| {
-            studio_core::ProjectFile::load_by_name(&projects_dir, &info.name)
-                .map(|project| (info.name, project))
-        })
-        .collect::<Result<Vec<_>, _>>()
+    let local = crate::project::list_project_files()
         .map_err(|error| {
             AppError::wrap(
                 "project_read",
@@ -263,6 +251,7 @@ pub fn compare_inbox_revision(revision_id: &str) -> Result<InboxComparison, AppE
             )
         })?
         .into_iter()
+        .map(|project| (project.name.clone(), project))
         .find(|(_, project)| project.id == entry.project_id);
 
     let (
@@ -321,17 +310,14 @@ pub fn apply_inbox_revision(revision_id: &str) -> Result<String, AppError> {
             "Die empfangene aktuelle Projektversion fehlt.",
         ));
     }
-    let projects_dir = studio_core::projects_dir();
-    for local in studio_core::list_projects(&projects_dir) {
-        let existing = studio_core::ProjectFile::load_by_name(&projects_dir, &local.name).map_err(
-            |error| {
-                AppError::wrap(
-                    "project_read",
-                    "Lokale Projekte konnten nicht geprüft werden.",
-                    error,
-                )
-            },
-        )?;
+    let projects_dir = crate::project::projects_path();
+    for existing in crate::project::list_project_files().map_err(|error| {
+        AppError::wrap(
+            "project_read",
+            "Lokale Projekte konnten nicht geprüft werden.",
+            error,
+        )
+    })? {
         if existing.id == project.id {
             return Err(AppError::new(
                 "inbox_project_conflict",
@@ -398,9 +384,8 @@ fn read_verified_project(entry: &InboxEntry) -> Result<studio_core::ProjectFile,
 }
 
 fn resolve_project_assets(project: &mut studio_core::ProjectFile) -> Result<(), AppError> {
-    let store = studio_core::assets_dir();
     for id in &project.asset_refs {
-        if studio_core::asset_path(&store, id).is_none() {
+        if crate::AssetService::path(id).is_none() {
             eprintln!(
                 "Hub-Projektrevision {} verweist auf das lokal nicht verfügbare Asset {id}",
                 project.current_version
@@ -410,7 +395,7 @@ fn resolve_project_assets(project: &mut studio_core::ProjectFile) -> Result<(), 
     for shape in &mut project.shapes {
         if let Some(text) = shape.text_meta.as_mut() {
             if let Some(id) = text.font_asset.as_ref() {
-                if let Some(path) = studio_core::asset_path(&store, id) {
+                if let Some(path) = crate::AssetService::path(id) {
                     text.font_path = path.to_string_lossy().into_owned();
                 }
             }
@@ -573,9 +558,7 @@ mod tests {
 
         let name = apply_inbox_revision("revision-apply-1").unwrap();
         assert_eq!(name, "Vom Office");
-        let imported =
-            studio_core::ProjectFile::load_by_name(&studio_core::projects_dir(), "Vom Office")
-                .unwrap();
+        let imported = crate::project::load_project("Vom Office").unwrap();
         assert_eq!(imported.id, project.id);
         assert_eq!(list_inbox().unwrap()[0].status, InboxStatus::Applied);
     }
@@ -597,7 +580,7 @@ mod tests {
             tags: Vec::new(),
             derived: false,
         };
-        studio_core::store_asset(&studio_core::assets_dir(), &meta, bytes).unwrap();
+        crate::AssetService::store_received(&meta, bytes).unwrap();
 
         let mut state = studio_core::AppState::new();
         state.add_image(asset_id, 0.0, 0.0, 10.0, 10.0);
@@ -647,9 +630,7 @@ mod tests {
             apply_inbox_revision("revision-missing-asset-1").unwrap(),
             "Asset gelöscht"
         );
-        let imported =
-            studio_core::ProjectFile::load_by_name(&studio_core::projects_dir(), "Asset gelöscht")
-                .unwrap();
+        let imported = crate::project::load_project("Asset gelöscht").unwrap();
         assert_eq!(imported.asset_refs, vec![missing_id]);
         assert_eq!(imported.shapes.len(), 1);
     }
@@ -662,7 +643,7 @@ mod tests {
             "Werkstattname",
             Vec::new(),
         );
-        local.save_to_dir(&studio_core::projects_dir()).unwrap();
+        crate::project::save_project_file(&local).unwrap();
 
         let mut remote_state = studio_core::AppState::new();
         remote_state.add_shape(studio_core::Geo::Rect {
@@ -702,8 +683,7 @@ mod tests {
 
         let name = accept_inbox_revision("revision-compare-1").unwrap();
         assert_eq!(name, "Werkstattname");
-        let accepted =
-            studio_core::ProjectFile::load_by_name(&studio_core::projects_dir(), &name).unwrap();
+        let accepted = crate::project::load_project(&name).unwrap();
         assert_eq!(accepted.versions.len(), 2);
         assert_eq!(accepted.current().unwrap().label, "V2");
         assert_eq!(accepted.shapes.len(), 1);
@@ -735,6 +715,6 @@ mod tests {
         ignore_inbox_revision("revision-ignore-1").unwrap();
 
         assert_eq!(list_inbox().unwrap()[0].status, InboxStatus::Ignored);
-        assert!(studio_core::list_projects(&studio_core::projects_dir()).is_empty());
+        assert!(crate::project::list_project_infos().is_empty());
     }
 }

@@ -9,6 +9,7 @@ mod error;
 mod hub;
 mod laser;
 mod materials;
+mod persistence;
 mod project;
 mod session;
 mod sync_inbox;
@@ -28,6 +29,7 @@ pub use hub::{
 };
 pub use laser::{AxisCalibration, LaserLiveRead, LaserService};
 pub use materials::MaterialService;
+pub use persistence::{load_ui_settings, save_ui_settings};
 pub use project::{ProjectDetail, ProjectService};
 pub use session::{BoxShape, EditorSession, LayerParams, LayerToggle, PointPath};
 pub use studio_core::{MachineSetting, MachineSettingUnit};

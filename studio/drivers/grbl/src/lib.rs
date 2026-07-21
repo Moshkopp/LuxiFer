@@ -188,6 +188,10 @@ impl MachineDriver for GrblDriver {
         "GRBL"
     }
 
+    fn export_extension(&self) -> &'static str {
+        "gcode"
+    }
+
     fn execution_trace(
         &self,
         plan: &JobPlan,

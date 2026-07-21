@@ -72,8 +72,7 @@ impl App {
         if !bed.0.is_finite() || !bed.1.is_finite() || bed.0 <= 0.0 || bed.1 <= 0.0 {
             return;
         }
-        self.session.bed_w_mm = bed.0;
-        self.session.bed_h_mm = bed.1;
+        self.session.set_bed_size(bed.0, bed.1);
         self.canvas.cam.fit_bbox([0.0, 0.0, bed.0, bed.1], 0.85);
         self.renderer.invalidate_scene();
     }
@@ -247,14 +246,7 @@ impl App {
     }
 
     pub fn laser_export(&mut self) {
-        let extension = match self
-            .laser_backend
-            .active_profile()
-            .map(|profile| profile.kind)
-        {
-            Some(studio_core::DriverKind::Ruida) => "rd",
-            _ => "gcode",
-        };
+        let extension = self.laser_backend.export_extension();
         let Some(path) = rfd::FileDialog::new()
             .set_file_name(format!("job.{extension}"))
             .save_file()
@@ -549,7 +541,7 @@ impl App {
             self.ui_settings
                 .laser_start_reference
                 .insert(profile.id.clone(), reference);
-            if let Err(error) = self.ui_settings.save() {
+            if let Err(error) = studio_application::save_ui_settings(&self.ui_settings) {
                 log::error!("GUI-Settings speichern: {error}");
             }
         }

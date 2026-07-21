@@ -11,12 +11,149 @@
 
 use std::path::{Path, PathBuf};
 
-use studio_core::{
-    list_projects, project::ProjectFile, project::VersionInfo, projects_dir, rename_project,
-    state::AppState, ProjectInfo,
-};
+use studio_core::{project::ProjectFile, project::VersionInfo, state::AppState, ProjectInfo};
 
 use crate::AppError;
+
+pub(crate) fn projects_path() -> PathBuf {
+    studio_core::projects_dir()
+}
+
+pub(crate) fn list_project_infos() -> Vec<ProjectInfo> {
+    let Ok(entries) = std::fs::read_dir(projects_path()) else {
+        return Vec::new();
+    };
+    let mut projects = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let project = load_project(&name).ok()?;
+            Some(ProjectInfo {
+                name,
+                tags: project.tags,
+                description: project.description,
+                modified_at: project.modified_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    projects.sort_by(|left, right| {
+        right
+            .modified_at
+            .cmp(&left.modified_at)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    projects
+}
+
+pub(crate) fn load_project(name: &str) -> Result<ProjectFile, String> {
+    let path = projects_path()
+        .join(name)
+        .join(studio_core::project::PROJECT_FILE);
+    let json = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    ProjectFile::from_json(&json)
+}
+
+pub(crate) fn load_project_version(name: &str, version_id: &str) -> Result<ProjectFile, String> {
+    let path = projects_path()
+        .join(name)
+        .join(studio_core::project::VERSIONS_DIR)
+        .join(format!("{version_id}.laserproj"));
+    let json = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    ProjectFile::from_json(&json)
+}
+
+pub(crate) fn list_project_files() -> Result<Vec<ProjectFile>, String> {
+    list_project_infos()
+        .into_iter()
+        .map(|info| load_project(&info.name))
+        .collect()
+}
+
+pub(crate) fn save_project_file(project: &ProjectFile) -> Result<PathBuf, String> {
+    let directory = projects_path().join(&project.name);
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let path = directory.join(studio_core::project::PROJECT_FILE);
+    std::fs::write(&path, project.to_json()?).map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+fn save_current_project(project: &mut ProjectFile) -> Result<VersionInfo, String> {
+    let version = project.prepare_save_current()?;
+    write_version_snapshot(project, &version.id, &[])?;
+    save_project_file(project)?;
+    Ok(version)
+}
+
+fn add_project_version(project: &mut ProjectFile) -> Result<VersionInfo, String> {
+    let version = project.add_version_metadata(String::new());
+    write_version_snapshot(project, &version.id, &[])?;
+    save_project_file(project)?;
+    Ok(version)
+}
+
+fn delete_project_version(
+    project: &mut ProjectFile,
+    version_id: &str,
+) -> Result<Option<ProjectFile>, String> {
+    let promoted_id = project.remove_version_metadata(version_id)?;
+    let versions = projects_path()
+        .join(&project.name)
+        .join(studio_core::project::VERSIONS_DIR);
+    let _ = std::fs::remove_file(versions.join(format!("{version_id}.laserproj")));
+    let _ = std::fs::remove_file(versions.join(format!("{version_id}.png")));
+
+    let promoted = if let Some(promoted_id) = promoted_id {
+        let snapshot = load_project_version(&project.name, &promoted_id)?;
+        project.apply_version_geometry(&snapshot);
+        Some(snapshot)
+    } else {
+        None
+    };
+    save_project_file(project)?;
+    Ok(promoted)
+}
+
+fn write_version_snapshot(
+    project: &ProjectFile,
+    version_id: &str,
+    thumbnail_png: &[u8],
+) -> Result<(), String> {
+    let directory = projects_path()
+        .join(&project.name)
+        .join(studio_core::project::VERSIONS_DIR);
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    std::fs::write(
+        directory.join(format!("{version_id}.laserproj")),
+        project.to_json()?,
+    )
+    .map_err(|error| error.to_string())?;
+    if !thumbnail_png.is_empty() {
+        std::fs::write(directory.join(format!("{version_id}.png")), thumbnail_png)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn rename_project(old_name: &str, new_name: &str) -> Result<(), String> {
+    if new_name.trim().is_empty() {
+        return Err("Neuer Name darf nicht leer sein.".into());
+    }
+    let old_directory = projects_path().join(old_name);
+    let new_directory = projects_path().join(new_name);
+    if new_directory.exists() {
+        return Err(format!("Projekt „{new_name}“ existiert bereits."));
+    }
+    std::fs::rename(old_directory, new_directory).map_err(|error| error.to_string())?;
+    let mut project = load_project(new_name)?;
+    project.name = new_name.to_owned();
+    project.modified_at = studio_core::datetime::now_iso8601();
+    save_project_file(&project)?;
+    Ok(())
+}
+
+fn delete_project(name: &str) -> Result<(), String> {
+    std::fs::remove_dir_all(projects_path().join(name)).map_err(|error| error.to_string())
+}
 
 /// UI-unabhängige Detailsicht eines Projekts für den Browser: Metadaten und
 /// Versionsliste, ohne Geometrie. Kommt für das offene Projekt aus dem
@@ -61,14 +198,14 @@ impl ProjectService {
 
     /// Projektverzeichnis (plattformneutral über den Core bestimmt).
     fn dir() -> PathBuf {
-        projects_dir()
+        projects_path()
     }
 
     // ---- Abfragen -----------------------------------------------------------
 
     /// Alle Projekte, sortiert nach zuletzt geändert (neueste zuerst).
     pub fn list(&self) -> Vec<ProjectInfo> {
-        list_projects(&Self::dir())
+        list_project_infos()
     }
 
     /// Name des offenen Projekts, falls eines offen ist.
@@ -124,7 +261,7 @@ impl ProjectService {
         if let Some(pf) = self.open.as_ref().filter(|p| p.name == name) {
             return Ok(ProjectDetail::from_file(pf));
         }
-        let pf = ProjectFile::load_by_name(&Self::dir(), name).map_err(|e| {
+        let pf = load_project(name).map_err(|e| {
             AppError::wrap(
                 "project_read",
                 format!("Projekt {name} konnte nicht gelesen werden."),
@@ -137,7 +274,7 @@ impl ProjectService {
     /// Zustand eines Projekts nur lesen (z. B. für eine Vorschau im Browser).
     /// Wechselt das offene Projekt **nicht** und mutiert nichts.
     pub fn peek_state(&self, name: &str) -> Result<AppState, AppError> {
-        let pf = ProjectFile::load_by_name(&Self::dir(), name).map_err(|e| {
+        let pf = load_project(name).map_err(|e| {
             AppError::wrap(
                 "project_read",
                 format!("Projekt {name} konnte nicht gelesen werden."),
@@ -166,10 +303,10 @@ impl ProjectService {
         }
         let mut pf = ProjectFile::from_state(state, name, Vec::new());
         pf.description = description.trim().to_string();
-        pf.save_to_dir(&Self::dir()).map_err(|e| {
+        save_project_file(&pf).map_err(|e| {
             AppError::wrap("project_write", "Projekt konnte nicht angelegt werden.", e)
         })?;
-        pf.save_current(&Self::dir(), &[]).map_err(|e| {
+        save_current_project(&mut pf).map_err(|e| {
             AppError::wrap("project_write", "Projekt konnte nicht angelegt werden.", e)
         })?;
         self.open = Some(pf);
@@ -179,7 +316,7 @@ impl ProjectService {
     /// Projekt laden und seinen Zustand zurückgeben (der Aufrufer ersetzt den
     /// Editorzustand damit). Bei Fehler bleibt das bisher offene Projekt erhalten.
     pub fn open(&mut self, name: &str) -> Result<AppState, AppError> {
-        let pf = ProjectFile::load_by_name(&Self::dir(), name).map_err(|e| {
+        let pf = load_project(name).map_err(|e| {
             AppError::wrap(
                 "project_read",
                 format!("Projekt {name} konnte nicht geöffnet werden."),
@@ -195,7 +332,7 @@ impl ProjectService {
     pub fn save(&mut self, state: &AppState) -> Result<VersionInfo, AppError> {
         let pf = self.require_open_mut()?;
         pf.update_from_state(state);
-        pf.save_current(&Self::dir(), &[])
+        save_current_project(pf)
             .map_err(|e| AppError::wrap("project_write", "Speichern fehlgeschlagen.", e))
     }
 
@@ -203,7 +340,7 @@ impl ProjectService {
     pub fn save_version(&mut self, state: &AppState) -> Result<VersionInfo, AppError> {
         let pf = self.require_open_mut()?;
         pf.update_from_state(state);
-        pf.add_version(&Self::dir(), String::new(), &[])
+        add_project_version(pf)
             .map_err(|e| AppError::wrap("project_write", "Neue Version fehlgeschlagen.", e))
     }
 
@@ -211,7 +348,7 @@ impl ProjectService {
     /// kanonischen offenen Zustand.
     pub fn open_version(&mut self, version_id: &str) -> Result<AppState, AppError> {
         let name = self.require_open_ref()?.name.clone();
-        let pf = ProjectFile::load_version(&Self::dir(), &name, version_id).map_err(|e| {
+        let pf = load_project_version(&name, version_id).map_err(|e| {
             AppError::wrap("version_read", "Version konnte nicht geladen werden.", e)
         })?;
         let state = pf.clone().into_state();
@@ -225,7 +362,7 @@ impl ProjectService {
     /// zeigt der Editor stillschweigend veraltete Geometrie.
     pub fn delete_version(&mut self, version_id: &str) -> Result<Option<AppState>, AppError> {
         let pf = self.require_open_mut()?;
-        let promoted = pf.delete_version(&Self::dir(), version_id).map_err(|e| {
+        let promoted = delete_project_version(pf, version_id).map_err(|e| {
             AppError::wrap("version_delete", "Version konnte nicht gelöscht werden.", e)
         })?;
         Ok(promoted.map(|snap| snap.into_state()))
@@ -240,7 +377,7 @@ impl ProjectService {
                 "Bitte einen neuen Projektnamen angeben.",
             ));
         }
-        rename_project(&Self::dir(), old_name, new_name)
+        rename_project(old_name, new_name)
             .map_err(|e| AppError::wrap("project_rename", "Umbenennen fehlgeschlagen.", e))?;
         if let Some(pf) = self.open.as_mut() {
             if pf.name == old_name {
@@ -252,7 +389,7 @@ impl ProjectService {
 
     /// Projekt löschen. Ist es das offene Projekt, wird es geschlossen.
     pub fn delete(&mut self, name: &str) -> Result<(), AppError> {
-        studio_core::delete_project(&Self::dir(), name)
+        delete_project(name)
             .map_err(|e| AppError::wrap("project_delete", "Löschen fehlgeschlagen.", e))?;
         if self.open_name() == Some(name) {
             self.open = None;

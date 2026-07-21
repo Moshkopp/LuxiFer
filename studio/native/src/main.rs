@@ -58,7 +58,7 @@ impl ApplicationHandler for Runner {
         if self.app.is_some() {
             return;
         }
-        let startup_settings = studio_core::UiSettings::load();
+        let startup_settings = studio_application::load_ui_settings();
         let open_maximized = startup_settings.open_maximized;
         let mut attrs = Window::default_attributes()
             .with_title(studio_core::branding::STUDIO_NAME)

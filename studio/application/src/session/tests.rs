@@ -476,7 +476,7 @@ fn parameter_setzen_bei_ungueltigem_index_liefert_fehler() {
 #[test]
 fn image_layer_kann_nicht_zu_vektor_umgewandelt_werden() {
     let mut session = session_with_rect();
-    session.layers[0].mode = studio_core::LayerMode::Image;
+    session.state_mut_for_migration().layers[0].mode = studio_core::LayerMode::Image;
     session.state_mut_for_migration().dirty = false;
     let before = session.layers[0].clone();
     let mut params = valid_params();
@@ -501,7 +501,7 @@ fn vektor_layer_kann_nicht_versehentlich_image_werden() {
 #[test]
 fn image_layer_darf_seine_bildparameter_aendern() {
     let mut session = session_with_rect();
-    session.layers[0].mode = studio_core::LayerMode::Image;
+    session.state_mut_for_migration().layers[0].mode = studio_core::LayerMode::Image;
     let mut params = LayerParams::from_layer(&session.layers[0]);
     params.dpi = 508.0;
     params.bidirectional = false;
@@ -718,7 +718,7 @@ fn job_preview_ueberspringt_fehlende_assets_ohne_panik() {
 #[test]
 fn pattern_fill_fuellt_geschlossene_kontur_auf_eigenem_layer() {
     let mut session = session_with_rect();
-    session.selected = vec![0];
+    session.set_selection(vec![0]);
     let layers_before = session.state().layers.len();
     let shapes_before = session.state().shapes.len();
 
@@ -741,12 +741,12 @@ fn pattern_fill_weist_fehler_stabil_ab() {
 
     // Ohne Auswahl.
     let mut session = session_with_rect();
-    session.selected = vec![];
+    session.set_selection(vec![]);
     let err = session.pattern_fill(&FillParams::default()).unwrap_err();
     assert_eq!(err.code(), "selection_required");
 
     // Ungültiger Abstand.
-    session.selected = vec![0];
+    session.set_selection(vec![0]);
     let err = session
         .pattern_fill(&FillParams {
             gap_y: 0.0,
@@ -768,7 +768,7 @@ fn pattern_fill_weist_fehler_stabil_ab() {
     // Offene Kontur (Linie): nichts zu füllen → Fehler statt stiller No-Op.
     let mut session = EditorSession::default();
     let idx = session.add_line([0.0, 0.0], [50.0, 0.0]).expect("Linie");
-    session.selected = vec![idx];
+    session.set_selection(vec![idx]);
     let shapes_before = session.state().shapes.len();
     let err = session.pattern_fill(&FillParams::default()).unwrap_err();
     assert_eq!(err.code(), "pattern_no_closed");
@@ -914,7 +914,7 @@ fn muster_fuellung_wandert_beim_verschieben_der_quelle_mit() {
     // stehen." Muster-Shapes sind eigenständig; seit dem Fix gruppieren sie
     // sich mit der Quelle, und die Gruppenauswahl nimmt sie beim Move mit.
     let mut session = session_with_rect(); // Rect (0,0)–(10,10)
-    session.selected = vec![0];
+    session.set_selection(vec![0]);
     session
         .pattern_fill(&studio_core::pattern_fill::FillParams::default())
         .expect("Füllung");

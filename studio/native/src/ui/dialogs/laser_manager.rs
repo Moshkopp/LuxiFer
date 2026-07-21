@@ -151,7 +151,9 @@ fn detail(ui: &mut egui::Ui, state: &mut LaserManagerState, outcome: &mut LaserM
             state,
             LaserManagerTab::Controller,
             "Controller",
-            !state.is_new && state.draft.kind == DriverKind::Ruida,
+            !state.is_new
+                && studio_application::LaserService::profile_capabilities(&state.draft)
+                    .machine_settings,
         );
         tab(
             ui,

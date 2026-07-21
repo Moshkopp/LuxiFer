@@ -2,6 +2,26 @@ use super::EditorSession;
 use crate::AppError;
 
 impl EditorSession {
+    pub fn set_selection(&mut self, indices: Vec<usize>) {
+        self.state.selected = indices
+            .into_iter()
+            .filter(|&index| index < self.state.shapes.len())
+            .collect();
+        self.state.expand_selection_to_groups();
+    }
+
+    /// Stellt waehrend einer laufenden direkten Manipulation den geometrischen
+    /// Ausgangszustand wieder her. Undo und Dirty-State bleiben Eigentum der
+    /// Session; die GUI verwaltet lediglich den kurzlebigen Gesten-Snapshot.
+    pub fn restore_shape_snapshot(&mut self, shapes: &[(usize, studio_core::Shape)]) {
+        debug_assert!(self.edit_active(), "restore_shape_snapshot ohne begin_edit");
+        for (index, shape) in shapes {
+            if let Some(target) = self.state.shapes.get_mut(*index) {
+                *target = shape.clone();
+            }
+        }
+    }
+
     pub fn select_at(&mut self, x: f64, y: f64, tolerance: f64, additive: bool) -> Option<usize> {
         let hit = self.state.hit_test(x, y, tolerance);
         match hit {

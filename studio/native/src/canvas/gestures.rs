@@ -207,14 +207,6 @@ impl CanvasState {
     }
 
     /// Stellt die Shapes aus einem Snapshot wieder her (vor jeder Transformation).
-    fn restore_snapshot(session: &mut EditorSession, orig: &[(usize, studio_core::Shape)]) {
-        for (i, s) in orig {
-            if let Some(dst) = session.shapes.get_mut(*i) {
-                *dst = s.clone();
-            }
-        }
-    }
-
     fn selection_can_gpu_transform(session: &EditorSession) -> bool {
         let is_visible_fill = |shape: &studio_core::Shape| {
             shape.geo.outline_points().1
@@ -502,7 +494,7 @@ impl CanvasState {
                     target = studio_core::keep_aspect(start_box, handle, target);
                 }
                 if !gpu_live {
-                    Self::restore_snapshot(session, &orig);
+                    session.restore_shape_snapshot(&orig);
                     session.scale_edit(start_box, target);
                 }
                 self.drag = Drag::Resize {
@@ -524,7 +516,7 @@ impl CanvasState {
                 let a = (w[1] - pivot[1]).atan2(w[0] - pivot[0]);
                 let delta_deg = (a - start_angle).to_degrees();
                 if !gpu_live {
-                    Self::restore_snapshot(session, &orig);
+                    session.restore_shape_snapshot(&orig);
                     session.rotate_edit_around(pivot, delta_deg);
                 }
                 self.drag = Drag::Rotate {
@@ -903,7 +895,7 @@ mod tests {
         let mut session = EditorSession::default();
         session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [40.0, 40.0]);
         session.add_box_shape(BoxShape::Rect, [60.0, 0.0], [100.0, 40.0]);
-        session.layers[0].mode = studio_core::LayerMode::Fill;
+        session.state_mut_for_migration().layers[0].mode = studio_core::LayerMode::Fill;
         session.select_all();
         let rev = session.render_rev();
 
@@ -922,8 +914,8 @@ mod tests {
         let mut session = EditorSession::default();
         session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [40.0, 40.0]);
         session.add_box_shape(BoxShape::Rect, [60.0, 0.0], [100.0, 40.0]);
-        session.layers[0].mode = studio_core::LayerMode::Fill;
-        session.selected = vec![0];
+        session.state_mut_for_migration().layers[0].mode = studio_core::LayerMode::Fill;
+        session.set_selection(vec![0]);
         let rev = session.render_rev();
         assert!(CanvasState::selection_can_gpu_transform(&session));
 
@@ -947,10 +939,10 @@ mod tests {
         let mut session = EditorSession::default();
         session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [40.0, 40.0]);
         session.add_box_shape(BoxShape::Rect, [10.0, 10.0], [30.0, 30.0]);
-        session.layers[0].mode = studio_core::LayerMode::Fill;
-        session.shapes[0].fill_group_id = Some(1);
-        session.shapes[1].fill_group_id = Some(1);
-        session.selected = vec![0];
+        session.state_mut_for_migration().layers[0].mode = studio_core::LayerMode::Fill;
+        session.state_mut_for_migration().shapes[0].fill_group_id = Some(1);
+        session.state_mut_for_migration().shapes[1].fill_group_id = Some(1);
+        session.set_selection(vec![0]);
         let rev = session.render_rev();
 
         canvas.cursor = canvas.cam.world_to_screen([10.0, 0.0]);
@@ -996,7 +988,7 @@ mod tests {
         let mut session = EditorSession::default();
         session.add_box_shape(BoxShape::Rect, [0.0, 0.0], [40.0, 40.0]);
         session.add_box_shape(BoxShape::Rect, [60.0, 0.0], [100.0, 40.0]);
-        session.layers[0].mode = studio_core::LayerMode::Fill;
+        session.state_mut_for_migration().layers[0].mode = studio_core::LayerMode::Fill;
         session.select_all();
         let rev = session.render_rev();
 

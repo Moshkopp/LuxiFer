@@ -707,6 +707,11 @@ pub trait MachineDriver {
     /// Name des Treibers (z. B. "Ruida", "GRBL").
     fn name(&self) -> &str;
 
+    /// Dateiendung fuer einen kompilierten Offline-Export, ohne fuehrenden Punkt.
+    fn export_extension(&self) -> &'static str {
+        "job"
+    }
+
     /// Optionale, geräteunabhängig beschriebene Treiberfähigkeiten.
     fn capabilities(&self) -> DriverCapabilities {
         DriverCapabilities::default()
@@ -719,6 +724,12 @@ pub trait MachineDriver {
 
     /// Maschinenparameter als rohe, treiberspezifische Registerwerte schreiben.
     fn write_machine_settings(&self, _changes: &[(u16, i64)]) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Konfiguriert eine Rundachse aus dem geraeteneutralen Fachmodell. Die
+    /// Uebersetzung in Register oder Protokollbefehle bleibt im Treiber.
+    fn configure_rotary(&self, _rotary: &crate::Rotary) -> Result<(), DriverError> {
         Err(DriverError::NotSupported)
     }
 

@@ -43,39 +43,254 @@ pub enum CropGeometry {
 }
 
 impl AssetService {
-    pub fn list_visible() -> Result<Vec<studio_core::AssetMeta>, AppError> {
-        let store = studio_core::assets_dir();
-        let saved_refs = Self::saved_project_asset_refs();
-        studio_core::list_assets(&store)
-            .map(|assets| {
-                assets
-                    .into_iter()
-                    .filter(|asset| {
-                        !studio_core::asset_hidden(&store, &asset.id)
-                            && (!Self::is_derived(asset) || saved_refs.contains(&asset.id))
-                    })
-                    .collect()
-            })
-            .map_err(|error| {
-                AppError::wrap(
+    fn store_dir() -> PathBuf {
+        studio_core::assets_dir()
+    }
+
+    /// Vollstaendiger Asset-Katalog fuer Infrastruktur- und Plattformadapter.
+    pub fn list_all() -> Result<Vec<studio_core::AssetMeta>, AppError> {
+        let entries = match std::fs::read_dir(Self::store_dir()) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(AppError::wrap(
                     "asset_list",
                     "Asset-Katalog konnte nicht geladen werden.",
                     error.to_string(),
+                ))
+            }
+        };
+        let mut assets = Vec::new();
+        for entry in entries {
+            let path = entry
+                .map_err(|error| {
+                    AppError::wrap(
+                        "asset_list",
+                        "Asset-Katalog ist unlesbar.",
+                        error.to_string(),
+                    )
+                })?
+                .path();
+            if !path.to_string_lossy().ends_with(".meta.json") {
+                continue;
+            }
+            let bytes = std::fs::read(path).map_err(|error| {
+                AppError::wrap(
+                    "asset_list",
+                    "Asset-Metadaten sind unlesbar.",
+                    error.to_string(),
                 )
+            })?;
+            let mut meta: studio_core::AssetMeta =
+                serde_json::from_slice(&bytes).map_err(|error| {
+                    AppError::wrap(
+                        "asset_json",
+                        "Asset-Metadaten sind ungültig.",
+                        error.to_string(),
+                    )
+                })?;
+            studio_core::assets::sanitize_asset_tags(&mut meta);
+            assets.push(meta);
+        }
+        assets.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(assets)
+    }
+
+    /// Aufgeloester lokaler Pfad fuer Plattformadapter wie den Font-Katalog.
+    pub fn path(id: &str) -> Option<PathBuf> {
+        let meta = Self::read_meta(id).ok()?;
+        let path = Self::store_dir().join(format!("{id}.{}", meta.ext));
+        path.exists().then_some(path)
+    }
+
+    pub(crate) fn load_bytes(id: &str) -> Result<Vec<u8>, AppError> {
+        let meta = Self::read_meta(id)?;
+        std::fs::read(Self::store_dir().join(format!("{id}.{}", meta.ext))).map_err(|error| {
+            AppError::wrap(
+                "asset_read",
+                "Asset konnte nicht gelesen werden.",
+                error.to_string(),
+            )
+        })
+    }
+
+    /// Dekodiert ein Bild-Asset fuer einen Darstellungsadapter. Damit kennt
+    /// die GUI weder das Ablageverzeichnis noch das persistierte Dateiformat.
+    pub fn load_rgba(id: &str) -> Result<PreparedImage, AppError> {
+        let bytes = Self::load_bytes(id)?;
+        let image = image::load_from_memory(&bytes).map_err(|error| {
+            AppError::wrap(
+                "asset_image_decode",
+                "Bild-Asset konnte nicht dekodiert werden.",
+                error.to_string(),
+            )
+        })?;
+        let rgba = image.to_rgba8();
+        Ok(PreparedImage {
+            width: rgba.width(),
+            height: rgba.height(),
+            rgba: rgba.into_raw(),
+        })
+    }
+
+    /// Laedt ein Bild-Asset als Graustufen fuer Anwendungsfaelle wie Tracing
+    /// und Job-Rasterung.
+    pub(crate) fn load_luma(id: &str) -> Result<(Vec<u8>, u32, u32), AppError> {
+        let bytes = Self::load_bytes(id)?;
+        let image = image::load_from_memory(&bytes).map_err(|error| {
+            AppError::wrap(
+                "asset_image_decode",
+                "Bild-Asset konnte nicht dekodiert werden.",
+                error.to_string(),
+            )
+        })?;
+        let luma = image.to_luma8();
+        let (width, height) = luma.dimensions();
+        Ok((luma.into_raw(), width, height))
+    }
+
+    pub(crate) fn store_received(
+        meta: &studio_core::AssetMeta,
+        bytes: &[u8],
+    ) -> Result<(), AppError> {
+        if studio_core::assets::content_hash(bytes) != meta.id
+            || meta.ext.is_empty()
+            || !meta.ext.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        {
+            return Err(AppError::new(
+                "asset_invalid",
+                "Asset-Hash oder Dateiendung ist ungültig.",
+            ));
+        }
+        let store = Self::store_dir();
+        std::fs::create_dir_all(&store).map_err(Self::asset_write_error)?;
+        let data_path = store.join(format!("{}.{}", meta.id, meta.ext));
+        let meta_path = store.join(format!("{}.meta.json", meta.id));
+        if !data_path.exists() {
+            let temporary = store.join(format!(".{}.data.tmp", meta.id));
+            std::fs::write(&temporary, bytes).map_err(Self::asset_write_error)?;
+            std::fs::rename(temporary, data_path).map_err(Self::asset_write_error)?;
+        }
+        let mut stored = if meta_path.exists() {
+            Self::read_meta(&meta.id)?
+        } else {
+            meta.clone()
+        };
+        for tag in &meta.tags {
+            if !stored.tags.contains(tag) {
+                stored.tags.push(tag.clone());
+            }
+        }
+        studio_core::assets::sanitize_asset_tags(&mut stored);
+        let temporary = store.join(format!(".{}.meta.tmp", meta.id));
+        let json = serde_json::to_vec_pretty(&stored).map_err(|error| {
+            AppError::wrap(
+                "asset_json",
+                "Asset-Metadaten konnten nicht serialisiert werden.",
+                error.to_string(),
+            )
+        })?;
+        std::fs::write(&temporary, json).map_err(Self::asset_write_error)?;
+        std::fs::rename(temporary, meta_path).map_err(Self::asset_write_error)
+    }
+
+    fn store_import(meta: &studio_core::AssetMeta, bytes: &[u8]) -> Result<(), AppError> {
+        let hidden = Self::store_dir().join(format!("{}.hidden", meta.id));
+        match std::fs::remove_file(hidden) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(Self::asset_write_error(error)),
+        }
+        Self::store_received(meta, bytes)
+    }
+
+    pub(crate) fn is_hidden(id: &str) -> bool {
+        Self::store_dir().join(format!("{id}.hidden")).exists()
+    }
+
+    fn read_meta(id: &str) -> Result<studio_core::AssetMeta, AppError> {
+        let path = Self::store_dir().join(format!("{id}.meta.json"));
+        let json = std::fs::read_to_string(path).map_err(|error| {
+            AppError::wrap(
+                "asset_meta_read",
+                "Asset-Metadaten sind unlesbar.",
+                error.to_string(),
+            )
+        })?;
+        serde_json::from_str(&json).map_err(|error| {
+            AppError::wrap(
+                "asset_meta_json",
+                "Asset-Metadaten sind ungültig.",
+                error.to_string(),
+            )
+        })
+    }
+
+    fn write_meta(meta: &studio_core::AssetMeta) -> Result<(), AppError> {
+        let store = Self::store_dir();
+        std::fs::create_dir_all(&store).map_err(Self::asset_write_error)?;
+        let temporary = store.join(format!(".{}.meta.tmp", meta.id));
+        let target = store.join(format!("{}.meta.json", meta.id));
+        let json = serde_json::to_vec_pretty(meta).map_err(|error| {
+            AppError::wrap(
+                "asset_meta_json",
+                "Asset-Metadaten konnten nicht serialisiert werden.",
+                error.to_string(),
+            )
+        })?;
+        std::fs::write(&temporary, json).map_err(Self::asset_write_error)?;
+        std::fs::rename(temporary, target).map_err(Self::asset_write_error)
+    }
+
+    fn hide(id: &str) -> Result<(), AppError> {
+        let store = Self::store_dir();
+        std::fs::create_dir_all(&store).map_err(Self::asset_write_error)?;
+        std::fs::write(store.join(format!("{id}.hidden")), []).map_err(Self::asset_write_error)
+    }
+
+    fn delete(id: &str) -> Result<(), AppError> {
+        let meta = Self::read_meta(id)?;
+        let store = Self::store_dir();
+        for path in [
+            store.join(format!("{id}.{}", meta.ext)),
+            store.join(format!("{id}.meta.json")),
+            store.join(format!("{id}.thumb.png")),
+        ] {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(Self::asset_write_error(error)),
+            }
+        }
+        Self::hide(id)
+    }
+
+    fn asset_write_error(error: std::io::Error) -> AppError {
+        AppError::wrap(
+            "asset_write",
+            "Asset konnte nicht gespeichert werden.",
+            error.to_string(),
+        )
+    }
+
+    pub fn list_visible() -> Result<Vec<studio_core::AssetMeta>, AppError> {
+        let saved_refs = Self::saved_project_asset_refs();
+        Ok(Self::list_all()?
+            .into_iter()
+            .filter(|asset| {
+                !Self::is_hidden(&asset.id)
+                    && (!Self::is_derived(asset) || saved_refs.contains(&asset.id))
             })
+            .collect())
     }
 
     fn saved_project_asset_refs() -> HashSet<String> {
-        let projects = studio_core::projects_dir();
         let mut refs = HashSet::new();
-        for info in studio_core::list_projects(&projects) {
-            let Ok(project) = studio_core::ProjectFile::load_by_name(&projects, &info.name) else {
-                continue;
-            };
+        for project in crate::project::list_project_files().unwrap_or_default() {
             refs.extend(project.asset_refs.iter().cloned());
             for version in &project.versions {
                 if let Ok(snapshot) =
-                    studio_core::ProjectFile::load_version(&projects, &project.name, &version.id)
+                    crate::project::load_project_version(&project.name, &version.id)
                 {
                     refs.extend(snapshot.asset_refs);
                 }
@@ -88,9 +303,8 @@ impl AssetService {
     /// Projektversion vorkommen. Beim Programmstart existiert noch keine
     /// Undo-Historie, daher können temporäre Crop-Dateien sicher weg.
     pub fn cleanup_orphan_derived() -> Result<usize, AppError> {
-        let store = studio_core::assets_dir();
         let saved_refs = Self::saved_project_asset_refs();
-        let assets = studio_core::list_assets(&store).map_err(|error| {
+        let assets = Self::list_all().map_err(|error| {
             AppError::wrap(
                 "asset_cleanup_list",
                 "Asset-Bereinigung konnte nicht gestartet werden.",
@@ -100,7 +314,7 @@ impl AssetService {
         let mut removed = 0;
         for asset in assets {
             if Self::is_derived(&asset) && !saved_refs.contains(&asset.id) {
-                studio_core::delete_asset(&store, &asset.id).map_err(|error| {
+                Self::delete(&asset.id).map_err(|error| {
                     AppError::wrap(
                         "asset_cleanup_delete",
                         "Temporäres Crop-Asset konnte nicht entfernt werden.",
@@ -118,8 +332,7 @@ impl AssetService {
     }
 
     pub fn prepare_catalog(id: &str) -> Result<PreparedAsset, AppError> {
-        let store = studio_core::assets_dir();
-        let meta = studio_core::asset_meta(&store, &id.to_owned()).map_err(|error| {
+        let meta = Self::read_meta(id).map_err(|error| {
             AppError::wrap(
                 "asset_read",
                 "Asset konnte nicht geladen werden.",
@@ -146,23 +359,31 @@ impl AssetService {
             .and_then(|extension| extension.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let store = studio_core::assets_dir();
-        let meta = if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "bmp" | "webp") {
-            studio_core::import_image(&store, &bytes, name)
-        } else {
-            let kind = match ext.as_str() {
-                "svg" => studio_core::AssetKind::SvgSource,
-                "dxf" => studio_core::AssetKind::DxfSource,
-                _ => {
-                    return Err(AppError::new(
-                        "asset_format",
-                        "Dieses Dateiformat wird nicht unterstützt.",
-                    ))
-                }
-            };
-            studio_core::import_source(&store, &bytes, name, &ext, kind)
-        }
-        .map_err(|error| {
+        let (meta, stored_bytes) =
+            if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "bmp" | "webp") {
+                studio_core::assets::prepare_image(&bytes, name)
+            } else {
+                let kind = match ext.as_str() {
+                    "svg" => studio_core::AssetKind::SvgSource,
+                    "dxf" => studio_core::AssetKind::DxfSource,
+                    _ => {
+                        return Err(AppError::new(
+                            "asset_format",
+                            "Dieses Dateiformat wird nicht unterstützt.",
+                        ))
+                    }
+                };
+                studio_core::assets::prepare_source(&bytes, name, &ext, kind)
+                    .map(|meta| (meta, bytes.clone()))
+            }
+            .map_err(|error| {
+                AppError::wrap(
+                    "asset_import",
+                    "Asset konnte nicht importiert werden.",
+                    error.to_string(),
+                )
+            })?;
+        Self::store_import(&meta, &stored_bytes).map_err(|error| {
             AppError::wrap(
                 "asset_import",
                 "Asset konnte nicht importiert werden.",
@@ -195,20 +416,23 @@ impl AssetService {
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("ttf");
-        studio_core::import_source(
-            &studio_core::assets_dir(),
-            &bytes,
-            name,
-            ext,
-            studio_core::AssetKind::Font,
-        )
-        .map_err(|error| {
+        let meta =
+            studio_core::assets::prepare_source(&bytes, name, ext, studio_core::AssetKind::Font)
+                .map_err(|error| {
+                    AppError::wrap(
+                        "font_import",
+                        "Font konnte nicht importiert werden.",
+                        error.to_string(),
+                    )
+                })?;
+        Self::store_import(&meta, &bytes).map_err(|error| {
             AppError::wrap(
                 "font_import",
                 "Font konnte nicht importiert werden.",
                 error.to_string(),
             )
-        })
+        })?;
+        Ok(meta)
     }
 
     pub fn catalog_font(path: &Path, bytes: &[u8]) -> Result<studio_core::AssetMeta, AppError> {
@@ -220,34 +444,48 @@ impl AssetService {
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("ttf");
-        studio_core::import_source(
-            &studio_core::assets_dir(),
-            bytes,
-            name,
-            ext,
-            studio_core::AssetKind::Font,
-        )
-        .map_err(|error| {
+        let meta =
+            studio_core::assets::prepare_source(bytes, name, ext, studio_core::AssetKind::Font)
+                .map_err(|error| {
+                    AppError::wrap(
+                        "font_catalog",
+                        "Font konnte nicht katalogisiert werden.",
+                        error.to_string(),
+                    )
+                })?;
+        Self::store_import(&meta, bytes).map_err(|error| {
             AppError::wrap(
                 "font_catalog",
                 "Font konnte nicht katalogisiert werden.",
                 error.to_string(),
             )
-        })
+        })?;
+        Ok(meta)
     }
 
     pub fn asset_path(id: &str) -> Option<PathBuf> {
-        studio_core::asset_path(&studio_core::assets_dir(), &id.to_owned())
+        Self::path(id)
     }
 
     pub fn thumbnail(id: &str) -> Result<Vec<u8>, AppError> {
-        studio_core::asset_thumbnail(&studio_core::assets_dir(), &id.to_owned()).map_err(|error| {
+        let store = Self::store_dir();
+        let cache = store.join(format!("{id}.thumb.png"));
+        if let Ok(bytes) = std::fs::read(&cache) {
+            return Ok(bytes);
+        }
+        let meta = Self::read_meta(id)?;
+        let bytes = Self::load_bytes(id)?;
+        let png = studio_core::assets::create_thumbnail(&meta, &bytes).map_err(|error| {
             AppError::wrap(
                 "asset_thumbnail",
                 "Asset-Vorschau konnte nicht erzeugt werden.",
                 error.to_string(),
             )
-        })
+        })?;
+        let temporary = store.join(format!(".{id}.thumb.tmp"));
+        std::fs::write(&temporary, &png).map_err(Self::asset_write_error)?;
+        std::fs::rename(temporary, cache).map_err(Self::asset_write_error)?;
+        Ok(png)
     }
 
     /// Erzeugt die nicht-destruktive Editor-Vorschau mit derselben Core-
@@ -256,19 +494,16 @@ impl AssetService {
         id: &str,
         params: &studio_core::ImageParams,
     ) -> Result<PreparedImage, AppError> {
-        let png = studio_core::rendered_png(
-            &studio_core::assets_dir(),
-            &id.to_owned(),
-            params,
-            params.invert_editor,
-        )
-        .map_err(|error| {
-            AppError::wrap(
-                "image_preview",
-                "Bildvorschau konnte nicht erzeugt werden.",
-                error.to_string(),
-            )
-        })?;
+        let bytes = Self::load_bytes(id)?;
+        let png =
+            studio_core::assets::rendered_png_from_bytes(&bytes, params, params.invert_editor)
+                .map_err(|error| {
+                    AppError::wrap(
+                        "image_preview",
+                        "Bildvorschau konnte nicht erzeugt werden.",
+                        error.to_string(),
+                    )
+                })?;
         let image = image::load_from_memory(&png).map_err(|error| {
             AppError::wrap(
                 "image_preview_decode",
@@ -293,16 +528,13 @@ impl AssetService {
         threshold: u8,
         invert: bool,
     ) -> Result<PreparedImage, AppError> {
-        let (pixels, width, height) =
-            studio_core::load_asset_luma(&studio_core::assets_dir(), &id.to_owned()).map_err(
-                |error| {
-                    AppError::wrap(
-                        "trace_preview",
-                        "Trace-Vorschau konnte nicht erzeugt werden.",
-                        error.to_string(),
-                    )
-                },
-            )?;
+        let (pixels, width, height) = Self::load_luma(id).map_err(|error| {
+            AppError::wrap(
+                "trace_preview",
+                "Trace-Vorschau konnte nicht erzeugt werden.",
+                error.to_string(),
+            )
+        })?;
         let lut = studio_core::ImageParams {
             mode: studio_core::ImageMode::Grayscale,
             ..*params
@@ -418,15 +650,22 @@ impl AssetService {
                     error.to_string(),
                 )
             })?;
-        studio_core::import_image(&studio_core::assets_dir(), &png, "Bildausschnitt.png").map_err(
-            |error| {
+        let (meta, bytes) = studio_core::assets::prepare_image(&png, "Bildausschnitt.png")
+            .map_err(|error| {
                 AppError::wrap(
                     "image_crop_store",
                     "Bildausschnitt konnte nicht abgelegt werden.",
                     error.to_string(),
                 )
-            },
-        )
+            })?;
+        Self::store_import(&meta, &bytes).map_err(|error| {
+            AppError::wrap(
+                "image_crop_store",
+                "Bildausschnitt konnte nicht abgelegt werden.",
+                error.to_string(),
+            )
+        })?;
+        Ok(meta)
     }
 
     fn store_crop_alpha(
@@ -442,18 +681,24 @@ impl AssetService {
                     error.to_string(),
                 )
             })?;
-        studio_core::import_image_preserve_alpha(
-            &studio_core::assets_dir(),
-            &png,
-            "Bildausschnitt.png",
-        )
-        .map_err(|error| {
+        let (meta, bytes) =
+            studio_core::assets::prepare_image_preserve_alpha(&png, "Bildausschnitt.png").map_err(
+                |error| {
+                    AppError::wrap(
+                        "image_crop_store",
+                        "Bildausschnitt konnte nicht abgelegt werden.",
+                        error.to_string(),
+                    )
+                },
+            )?;
+        Self::store_import(&meta, &bytes).map_err(|error| {
             AppError::wrap(
                 "image_crop_store",
                 "Bildausschnitt konnte nicht abgelegt werden.",
                 error.to_string(),
             )
-        })
+        })?;
+        Ok(meta)
     }
 
     fn cropped_luma(id: &str, crop: [f32; 4]) -> Result<image::GrayImage, AppError> {
@@ -470,15 +715,13 @@ impl AssetService {
                 "Der Bildausschnitt ist zu klein oder ungültig.",
             ));
         }
-        let bytes = studio_core::load_asset(&studio_core::assets_dir(), &id.to_owned()).map_err(
-            |error| {
-                AppError::wrap(
-                    "image_crop_read",
-                    "Quellbild konnte nicht gelesen werden.",
-                    error.to_string(),
-                )
-            },
-        )?;
+        let bytes = Self::load_bytes(id).map_err(|error| {
+            AppError::wrap(
+                "image_crop_read",
+                "Quellbild konnte nicht gelesen werden.",
+                error.to_string(),
+            )
+        })?;
         let image = image::load_from_memory(&bytes)
             .map_err(|error| {
                 AppError::wrap(
@@ -497,20 +740,18 @@ impl AssetService {
     }
 
     pub fn delete_or_hide(id: &str, referenced_in_session: bool) -> Result<bool, AppError> {
-        let projects = studio_core::projects_dir();
         let referenced = referenced_in_session
-            || studio_core::list_projects(&projects)
+            || crate::project::list_project_infos()
                 .into_iter()
                 .any(|info| {
-                    studio_core::ProjectFile::load_by_name(&projects, &info.name)
+                    crate::project::load_project(&info.name)
                         .map(|project| project.asset_refs.iter().any(|asset| asset == id))
                         .unwrap_or(false)
                 });
-        let store = studio_core::assets_dir();
         let result = if referenced {
-            studio_core::hide_asset(&store, &id.to_owned())
+            Self::hide(id)
         } else {
-            studio_core::delete_asset(&store, &id.to_owned())
+            Self::delete(id)
         };
         result.map_err(|error| {
             AppError::wrap(
@@ -523,23 +764,30 @@ impl AssetService {
     }
 
     pub fn add_tags<'a>(id: &str, tags: impl IntoIterator<Item = &'a str>) -> Result<(), AppError> {
-        studio_core::add_asset_tags(&studio_core::assets_dir(), &id.to_owned(), tags)
-            .map(|_| ())
-            .map_err(|error| {
-                AppError::wrap(
-                    "asset_tags",
-                    "Asset-Tags konnten nicht gespeichert werden.",
-                    error.to_string(),
-                )
-            })
+        let mut meta = Self::read_meta(id).map_err(|error| {
+            AppError::wrap(
+                "asset_tags",
+                "Asset-Tags konnten nicht gespeichert werden.",
+                error.to_string(),
+            )
+        })?;
+        for tag in studio_core::assets::derive_tags(tags) {
+            if !meta.tags.contains(&tag) {
+                meta.tags.push(tag);
+            }
+        }
+        studio_core::assets::sanitize_asset_tags(&mut meta);
+        Self::write_meta(&meta).map_err(|error| {
+            AppError::wrap(
+                "asset_tags",
+                "Asset-Tags konnten nicht gespeichert werden.",
+                error.to_string(),
+            )
+        })
     }
 
     pub fn enrich_tags_from_projects() {
-        let projects = studio_core::projects_dir();
-        for info in studio_core::list_projects(&projects) {
-            let Ok(project) = studio_core::ProjectFile::load_by_name(&projects, &info.name) else {
-                continue;
-            };
+        for project in crate::project::list_project_files().unwrap_or_default() {
             for id in &project.asset_refs {
                 let _ = Self::add_tags(id, [project.name.as_str(), project.description.as_str()]);
             }
@@ -547,10 +795,9 @@ impl AssetService {
     }
 
     fn prepare_meta(meta: studio_core::AssetMeta) -> Result<PreparedAsset, AppError> {
-        let store = studio_core::assets_dir();
         let contours = match meta.kind {
             studio_core::AssetKind::SvgSource | studio_core::AssetKind::DxfSource => {
-                let bytes = studio_core::load_asset(&store, &meta.id).map_err(|error| {
+                let bytes = Self::load_bytes(&meta.id).map_err(|error| {
                     AppError::wrap(
                         "asset_read",
                         "Asset konnte nicht geladen werden.",
@@ -572,14 +819,13 @@ impl AssetService {
             _ => None,
         };
         let image = if meta.kind == studio_core::AssetKind::Image {
-            let (luma, width, height) =
-                studio_core::load_asset_luma(&store, &meta.id).map_err(|error| {
-                    AppError::wrap(
-                        "image_read",
-                        "Bild-Asset konnte nicht geladen werden.",
-                        error.to_string(),
-                    )
-                })?;
+            let (luma, width, height) = Self::load_luma(&meta.id).map_err(|error| {
+                AppError::wrap(
+                    "image_read",
+                    "Bild-Asset konnte nicht geladen werden.",
+                    error.to_string(),
+                )
+            })?;
             let mut rgba = Vec::with_capacity(luma.len() * 4);
             for value in luma {
                 rgba.extend_from_slice(&[value, value, value, 255]);
@@ -605,8 +851,8 @@ impl AssetService {
 type ResolvedRaster = (Cow<'static, [u8]>, Cow<'static, [u8]>, usize, usize);
 
 pub(crate) fn resolve_luma(id: &str) -> Option<ResolvedRaster> {
-    let dir = studio_core::assets_dir();
-    match studio_core::load_asset_luma_alpha(&dir, &id.to_string()) {
+    let bytes = AssetService::load_bytes(id).ok()?;
+    match studio_core::assets::decode_luma_alpha(&bytes) {
         Ok((pixels, alpha, w, h)) => Some((
             Cow::Owned(pixels),
             Cow::Owned(alpha),
@@ -681,7 +927,7 @@ mod tests {
         let mut state = studio_core::AppState::new();
         state.add_image(crop.id.clone(), 0.0, 0.0, 10.0, 10.0);
         let project = studio_core::ProjectFile::from_state(&state, "Crop-Projekt", Vec::new());
-        project.save_to_dir(&studio_core::projects_dir()).unwrap();
+        crate::project::save_project_file(&project).unwrap();
 
         assert!(AssetService::list_visible()
             .unwrap()

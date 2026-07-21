@@ -103,7 +103,7 @@ fn connection_target(profile: &LaserProfile) -> String {
 fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
     match profile.kind {
         DriverKind::Ruida => Box::new(driver_ruida::RuidaDriver::from_profile(profile)),
-        _ => Box::new(driver_grbl::GrblDriver::default()),
+        DriverKind::Grbl | DriverKind::MiniGrbl => Box::new(driver_grbl::GrblDriver::default()),
     }
 }
 
@@ -132,6 +132,19 @@ pub struct LaserLiveRead {
 }
 
 impl LaserService {
+    /// Fähigkeiten eines Profilentwurfs, ohne Verbindung oder laufenden
+    /// Treiber. Die GUI muss dadurch keine konkreten Treibertypen kennen.
+    pub fn profile_capabilities(profile: &LaserProfile) -> DriverCapabilities {
+        driver_for(profile).capabilities()
+    }
+
+    /// Passende Endung fuer den Offline-Export des aktiven Treibers.
+    pub fn export_extension(&self) -> &'static str {
+        self.active_profile()
+            .map(|profile| driver_for(profile).export_extension())
+            .unwrap_or("job")
+    }
+
     /// Baut die maschinenspezifische Bewegungsspur mit denselben Profil- und
     /// Startparametern wie Export/Start.
     pub fn execution_trace(
@@ -224,6 +237,46 @@ impl LaserService {
                 Err(_) => Err(AppError::new(
                     "laser_driver_poisoned",
                     "Der Gerätezugriff ist in einem Fehlerzustand.",
+                )),
+            };
+            let _ = tx.send(result);
+        });
+        Ok(rx)
+    }
+
+    /// Schreibt die Rundachsen-Konfiguration auf dem Geraete-Worker und liest
+    /// anschliessend den bestaetigten Parametersatz. Registerwissen verbleibt
+    /// vollstaendig im konkreten Treiber.
+    pub fn configure_rotary_async(
+        &mut self,
+        rotary: studio_core::Rotary,
+    ) -> Result<std::sync::mpsc::Receiver<Result<Vec<MachineSetting>, AppError>>, AppError> {
+        self.with_driver(true, |_| Ok(()))?;
+        let driver = self.driver.as_ref().unwrap().clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = match driver.lock() {
+                Ok(driver) => driver
+                    .configure_rotary(&rotary)
+                    .map_err(|error| {
+                        AppError::wrap(
+                            "rotary_write",
+                            "Rotary-Konfiguration konnte nicht geschrieben werden.",
+                            error.to_string(),
+                        )
+                    })
+                    .and_then(|()| {
+                        driver.read_machine_settings().map_err(|error| {
+                            AppError::wrap(
+                                "machine_settings_verify",
+                                "Rotary wurde geschrieben, konnte aber nicht zur Kontrolle gelesen werden.",
+                                error.to_string(),
+                            )
+                        })
+                    }),
+                Err(_) => Err(AppError::new(
+                    "laser_driver_poisoned",
+                    "Der Geraetezugriff ist in einem Fehlerzustand.",
                 )),
             };
             let _ = tx.send(result);
@@ -345,7 +398,7 @@ impl LaserService {
 
     pub fn load() -> Self {
         Self {
-            registry: LaserRegistry::load(),
+            registry: crate::persistence::load_laser_registry(),
             driver: None,
             driver_id: None,
             connected_id: None,
@@ -372,7 +425,7 @@ impl LaserService {
             return;
         }
         if self.registry.set_active(id) {
-            let _ = self.registry.save();
+            let _ = crate::persistence::save_laser_registry(&self.registry);
             self.disconnect();
             self.driver = None; // beim nächsten Zugriff neu bauen
             self.driver_id = None;
@@ -403,7 +456,7 @@ impl LaserService {
         } else if !self.registry.update(profile.clone()) {
             self.registry.add(profile.clone());
         }
-        self.registry.save().map_err(|error| {
+        crate::persistence::save_laser_registry(&self.registry).map_err(|error| {
             AppError::new(
                 "laser_registry_write",
                 format!("Laserprofile speichern fehlgeschlagen: {error}"),
@@ -445,7 +498,7 @@ impl LaserService {
 
     pub fn delete_profile(&mut self, id: &str) -> Result<(), AppError> {
         self.registry.remove(id);
-        self.registry.save().map_err(|error| {
+        crate::persistence::save_laser_registry(&self.registry).map_err(|error| {
             AppError::new(
                 "laser_registry_write",
                 format!("Laserprofile speichern fehlgeschlagen: {error}"),
@@ -539,8 +592,7 @@ impl LaserService {
                     .first()
                     .map(|profile| profile.id.clone());
             }
-            self.registry
-                .save()
+            crate::persistence::save_laser_registry(&self.registry)
                 .map_err(|error| AppError::new("laser_registry_write", error))?;
             // Wie beim lokalen Speichern: Ein empfangener Katalogstand trennt
             // die Verbindung nur, wenn er das Profil des gebauten Treibers
@@ -576,7 +628,7 @@ impl LaserService {
             .clone()
             .filter(|id| registry.profiles.iter().any(|profile| &profile.id == id))
             .or_else(|| registry.profiles.first().map(|profile| profile.id.clone()));
-        registry.save().map_err(|error| {
+        crate::persistence::save_laser_registry(&registry).map_err(|error| {
             AppError::new(
                 "laser_registry_write",
                 format!("Laserprofile speichern fehlgeschlagen: {error}"),
@@ -875,7 +927,7 @@ impl LaserService {
     /// Fähigkeiten des aktiven Treibers (für „nicht unterstützt"-Anzeigen).
     pub fn driver_capabilities(&self) -> DriverCapabilities {
         self.active_profile()
-            .map(|profile| driver_for(profile).capabilities())
+            .map(Self::profile_capabilities)
             .unwrap_or_default()
     }
 
@@ -1030,7 +1082,7 @@ impl LaserService {
             .validate_saved_origins()
             .map_err(|message| AppError::new("origin_invalid", message))?;
         self.registry.update(profile.clone());
-        self.registry.save().map_err(|error| {
+        crate::persistence::save_laser_registry(&self.registry).map_err(|error| {
             AppError::new(
                 "laser_registry_write",
                 format!("Laserprofile speichern fehlgeschlagen: {error}"),
