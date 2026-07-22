@@ -123,6 +123,10 @@ impl CanvasState {
                 }
                 match self.tool {
                     Tool::Select => self.begin_select(session, w),
+                    Tool::Offset => {
+                        session.select_at(w[0], w[1], 4.0 / self.cam.scale as f64, false);
+                        self.drag = Drag::None;
+                    }
                     Tool::Node => self.begin_node_edit(session, w),
                     Tool::Trim => {
                         let tolerance = 6.0 / self.cam.scale as f64;

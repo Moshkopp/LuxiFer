@@ -29,6 +29,7 @@ ttf-parser = { workspace = true }
 egui = "0.35"
 egui-wgpu = "0.35"
 egui-winit = "0.35"
+egui_material_icons = "0.7"
 rfd = "0.17"
 
 # Splash-Logo (PNG) dekodieren — reine Präsentation, kein Bild-Workflow.

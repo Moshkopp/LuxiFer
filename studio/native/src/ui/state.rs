@@ -152,7 +152,6 @@ impl Default for TextDialogState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GeoOpKind {
     Boolean,
-    Offset,
     Fillet,
     PatternFill,
 }
@@ -164,8 +163,6 @@ pub struct GeoOpDialogState {
     pub kind: GeoOpKind,
     /// Boolean-Variante (nur bei `Boolean`).
     pub bool_op: studio_core::BoolOp,
-    /// Distanz in mm (Offset).
-    pub distance: f64,
     /// Radius in mm (Fillet).
     pub radius: f64,
     /// Muster-Parameter (nur bei `PatternFill`).
@@ -177,7 +174,6 @@ impl GeoOpDialogState {
         Self {
             kind,
             bool_op: studio_core::BoolOp::Union,
-            distance: 2.0,
             radius: 2.0,
             fill: Default::default(),
         }

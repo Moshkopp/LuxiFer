@@ -146,7 +146,12 @@ impl App {
         match a {
             A::Boolean => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Boolean)),
             A::Fillet => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Fillet)),
-            A::Offset => self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::Offset)),
+            A::Offset => {
+                self.geo_op_dialog = None;
+                self.canvas.bridge = None;
+                self.canvas.tool = crate::tools::Tool::Offset;
+                self.canvas.offset = Some(Default::default());
+            }
             A::PatternFill => {
                 self.geo_op_dialog = Some(GeoOpDialogState::new(GeoOpKind::PatternFill))
             }
@@ -189,7 +194,6 @@ impl App {
         };
         let result = match st.kind {
             GeoOpKind::Boolean => self.session.boolean(st.bool_op),
-            GeoOpKind::Offset => self.session.offset(st.distance),
             GeoOpKind::Fillet => self.session.fillet(st.radius),
             GeoOpKind::PatternFill => self.session.pattern_fill(&st.fill),
         };
@@ -200,6 +204,57 @@ impl App {
                 false
             }
         }
+    }
+
+    pub fn refresh_offset_preview(&mut self) {
+        let Some(draft) = self.canvas.offset.as_mut() else {
+            return;
+        };
+        let result = draft.distance().ok_or_else(|| {
+            studio_application::AppError::new(
+                "offset_number",
+                "Bitte einen gültigen Abstand in Millimetern eingeben.",
+            )
+        });
+        match result.and_then(|distance| self.session.offset_preview(distance)) {
+            Ok(preview) => {
+                draft.preview = preview;
+                draft.error = None;
+            }
+            Err(error) => {
+                draft.preview.clear();
+                draft.error = Some(error.message().to_owned());
+            }
+        }
+    }
+
+    pub fn commit_offset(&mut self) {
+        let Some(distance) = self
+            .canvas
+            .offset
+            .as_ref()
+            .and_then(|draft| draft.distance())
+        else {
+            return;
+        };
+        match self.session.offset(distance) {
+            Ok(()) => {
+                self.canvas.offset = None;
+                self.canvas.tool = crate::tools::Tool::Select;
+                self.refresh_accent();
+                self.toasts.success("Offset erstellt");
+            }
+            Err(error) => {
+                if let Some(draft) = self.canvas.offset.as_mut() {
+                    draft.error = Some(error.message().to_owned());
+                }
+            }
+        }
+    }
+
+    pub fn cancel_offset(&mut self) {
+        self.canvas.offset = None;
+        self.canvas.tool = crate::tools::Tool::Select;
     }
 
     fn report(&mut self, result: Result<(), AppError>) {

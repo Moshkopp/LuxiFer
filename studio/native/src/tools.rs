@@ -18,6 +18,8 @@ pub enum Tool {
     /// Haltesteg: Linie über eine Kontur ziehen, Breite einstellen, bestätigen
     /// → die Kontur wird im Steg-Band aufgetrennt und quer wieder geschlossen.
     Bridge,
+    /// Parallele Kontur mit Live-Vorschau und Inline-Eingabe.
+    Offset,
 }
 
 /// Haupt-Ansicht (Reiterleiste oben), analog zur Tauri-App.
@@ -90,6 +92,7 @@ impl Tool {
             Tool::Node => "Knoten",
             Tool::Trim => "Trimmen",
             Tool::Bridge => "Haltesteg",
+            Tool::Offset => "Offset",
         }
     }
 
@@ -108,6 +111,7 @@ impl Tool {
             Tool::Node => "node",
             Tool::Trim => "trim",
             Tool::Bridge => "bridge",
+            Tool::Offset => "offset",
         }
     }
 }

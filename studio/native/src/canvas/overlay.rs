@@ -30,6 +30,7 @@ pub struct OverlayInput<'a> {
     pub laser_markers: Option<crate::app::LaserMarkers>,
     /// Schwebender Haltesteg-Entwurf (nur beim Bridge-Werkzeug sichtbar).
     pub bridge: Option<super::state::BridgeDraft>,
+    pub offset_preview: &'a [studio_core::Shape],
     pub trim_preview: Option<&'a [(f64, f64)]>,
     pub selection_bbox: Option<studio_core::BBox>,
     pub selection_rotation: Option<([f64; 2], f64)>,
@@ -183,6 +184,45 @@ pub fn overlay_vertices(input: &OverlayInput) -> Vec<Vertex> {
                     &mut v,
                     [edge[0].0 as f32, edge[0].1 as f32],
                     [edge[1].0 as f32, edge[1].1 as f32],
+                    input.cam_scale,
+                );
+            }
+        }
+    }
+
+    if input.tool == Tool::Offset {
+        for shape in input.offset_preview {
+            let (mut points, closed) = shape.geo.outline_points();
+            if shape.rotation != 0.0 {
+                let center = shape.bbox().center();
+                for point in &mut points {
+                    *point = studio_core::geometry::rotate_point(
+                        point.0,
+                        point.1,
+                        center.0,
+                        center.1,
+                        shape.rotation,
+                    );
+                }
+            }
+            for edge in points.windows(2) {
+                dashed_seg(
+                    &mut v,
+                    [edge[0].0 as f32, edge[0].1 as f32],
+                    [edge[1].0 as f32, edge[1].1 as f32],
+                    [0.25, 0.95, 0.48, 1.0],
+                    input.cam_scale,
+                );
+            }
+            if closed && points.len() > 2 {
+                dashed_seg(
+                    &mut v,
+                    [
+                        points.last().unwrap().0 as f32,
+                        points.last().unwrap().1 as f32,
+                    ],
+                    [points[0].0 as f32, points[0].1 as f32],
+                    [0.25, 0.95, 0.48, 1.0],
                     input.cam_scale,
                 );
             }
@@ -615,6 +655,7 @@ mod tests {
             invert_marquee_direction: false,
             laser_markers: None,
             bridge: None,
+            offset_preview: &[],
             trim_preview: None,
             selection_bbox: session.selection_bbox(),
             selection_rotation: None,

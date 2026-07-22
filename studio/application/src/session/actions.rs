@@ -119,8 +119,47 @@ impl EditorSession {
 
     pub fn offset(&mut self, distance: f64) -> Result<(), AppError> {
         self.require_selection("Offset")?;
+        if !distance.is_finite() || distance.abs() < 0.001 {
+            return Err(AppError::new(
+                "offset_distance",
+                "Der Offset-Abstand muss mindestens 0,001 mm betragen.",
+            ));
+        }
+        let before = self.state.shapes.len();
         self.state.offset_selected(distance);
+        if self.state.shapes.len() == before {
+            return Err(AppError::new(
+                "offset_empty",
+                "Für diese Kontur und diesen Abstand konnte kein Offset erzeugt werden.",
+            ));
+        }
         Ok(())
+    }
+
+    /// Berechnet die spaeter einzufuegenden Offset-Konturen ohne Mutation,
+    /// Dirty-State oder Undo. Fuer die Live-Vorschau des Canvas-Werkzeugs.
+    pub fn offset_preview(&self, distance: f64) -> Result<Vec<studio_core::Shape>, AppError> {
+        self.require_selection("Offset")?;
+        if !distance.is_finite() || distance.abs() < 0.001 {
+            return Err(AppError::new(
+                "offset_distance",
+                "Der Offset-Abstand muss mindestens 0,001 mm betragen.",
+            ));
+        }
+        let mut preview = self.state.clone();
+        let before = preview.shapes.len();
+        preview.offset_selected(distance);
+        if preview.shapes.len() == before {
+            return Err(AppError::new(
+                "offset_empty",
+                "Für diese Kontur und diesen Abstand konnte kein Offset erzeugt werden.",
+            ));
+        }
+        Ok(preview
+            .selected
+            .iter()
+            .filter_map(|&index| preview.shapes.get(index).cloned())
+            .collect())
     }
 
     pub fn fillet(&mut self, radius: f64) -> Result<(), AppError> {

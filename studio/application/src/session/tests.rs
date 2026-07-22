@@ -178,6 +178,41 @@ fn einfuegen_ohne_kopie_meldet_stabilen_fehler() {
 }
 
 #[test]
+fn offset_vorschau_mutiert_nicht_und_commit_behaelt_original() {
+    let mut session = session_with_rect();
+    session.mark_saved();
+
+    let preview = session.offset_preview(2.0).unwrap();
+    assert_eq!(preview.len(), 1);
+    assert_eq!(
+        preview[0].bbox(),
+        studio_core::BBox::new(-2.0, -2.0, 14.0, 14.0)
+    );
+    assert_eq!(session.shapes.len(), 1);
+    assert!(!session.is_dirty());
+
+    session.offset(2.0).unwrap();
+    assert_eq!(session.shapes.len(), 2, "Original und Offset");
+    assert_eq!(session.selected, vec![1]);
+    assert!(session.undo());
+    assert_eq!(session.shapes.len(), 1);
+}
+
+#[test]
+fn offset_richtung_und_ungueltige_eingaben_sind_eindeutig() {
+    let session = session_with_rect();
+    let inside = session.offset_preview(-2.0).unwrap();
+    assert_eq!(inside[0].bbox(), studio_core::BBox::new(2.0, 2.0, 6.0, 6.0));
+
+    for distance in [0.0, f64::NAN, f64::INFINITY] {
+        let error = session.offset_preview(distance).unwrap_err();
+        assert_eq!(error.code(), "offset_distance");
+    }
+    let error = session.offset_preview(-6.0).unwrap_err();
+    assert_eq!(error.code(), "offset_empty");
+}
+
+#[test]
 fn numerische_auswahlgroesse_skaliert_und_ist_ein_undo_schritt() {
     let mut session = session_with_rect();
     session.resize_selection(25.0, 15.0).unwrap();

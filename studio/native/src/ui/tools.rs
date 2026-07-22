@@ -197,7 +197,7 @@ pub(super) fn tools_panel(ui: &mut egui::Ui, cur: Tool, selection: usize) -> Vec
                 side,
                 "offset",
                 "Offset / parallele Kontur (Auswahl)",
-                false,
+                cur == Tool::Offset,
                 false,
             ) {
                 actions.push(UiAction::ToolAction(A::Offset));

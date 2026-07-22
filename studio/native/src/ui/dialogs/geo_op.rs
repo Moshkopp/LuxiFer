@@ -15,7 +15,6 @@ pub(in crate::ui) fn geo_op_dialog_window(
     let mut outcome = DialogOutcome::None;
     let title = match st.kind {
         GeoOpKind::Boolean => "Boolesche Operation",
-        GeoOpKind::Offset => "Offset",
         GeoOpKind::Fillet => "Ecken verrunden",
         GeoOpKind::PatternFill => "Muster-Füllung",
     };
@@ -42,16 +41,6 @@ pub(in crate::ui) fn geo_op_dialog_window(
                                 ui.selectable_value(&mut st.bool_op, op, label(op));
                             }
                         });
-                }
-                GeoOpKind::Offset => {
-                    ui.horizontal(|ui| {
-                        ui.label("Distanz (mm)");
-                        ui.add(
-                            egui::DragValue::new(&mut st.distance)
-                                .range(-100.0..=100.0)
-                                .speed(0.1),
-                        );
-                    });
                 }
                 GeoOpKind::Fillet => {
                     ui.horizontal(|ui| {

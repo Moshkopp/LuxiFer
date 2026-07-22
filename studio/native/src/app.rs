@@ -173,6 +173,7 @@ impl App {
         trim_cursor: Option<winit::window::CustomCursor>,
     ) -> Result<Self, AppError> {
         let egui_ctx = egui::Context::default();
+        egui_material_icons::initialize(&egui_ctx);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -513,6 +514,10 @@ impl App {
                 }
             }
             S::Cancel => {
+                if self.canvas.offset.is_some() {
+                    self.cancel_offset();
+                    return;
+                }
                 self.canvas.poly_pts.clear();
                 self.canvas.bezier_nodes.clear();
                 self.cancel_bridge();
@@ -680,10 +685,13 @@ impl App {
         }
     }
 
-    /// Werkzeugwechsel; ein schwebender Haltesteg-Entwurf verfällt dabei.
+    /// Werkzeugwechsel; schwebende Werkzeugentwürfe verfallen dabei.
     fn select_tool(&mut self, tool: crate::tools::Tool) {
         if tool != crate::tools::Tool::Bridge {
             self.cancel_bridge();
+        }
+        if tool != crate::tools::Tool::Offset {
+            self.canvas.offset = None;
         }
         self.canvas.tool = tool;
     }
@@ -835,6 +843,12 @@ impl App {
                 poly_pts: &self.canvas.poly_pts,
                 bezier_nodes: &self.canvas.bezier_nodes,
                 bridge: self.canvas.bridge,
+                offset_preview: self
+                    .canvas
+                    .offset
+                    .as_ref()
+                    .map(|draft| draft.preview.as_slice())
+                    .unwrap_or_default(),
                 trim_preview: self.canvas.trim_preview.as_deref(),
                 selection_bbox: self
                     .canvas

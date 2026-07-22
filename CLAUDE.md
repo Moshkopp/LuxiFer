@@ -76,6 +76,26 @@ cargo run -p studio
 7. **Vor jedem Commit:** `cargo build` + `cargo test` grün, `cargo clippy` ohne
    Warnungen, `cargo fmt`. Neue Core-Fachlogik bekommt Tests.
 
+## Native GUI-Styling (egui 0.35)
+
+8. Neues und geändertes Widget-Styling **MUSS** den dokumentierten APIs von
+   egui 0.35 folgen. Globale Gestaltung gehört in `egui::Style`/`Visuals`,
+   lokale Abweichungen in einen begrenzten `Ui`-Style-Scope. Wiederkehrende
+   Widget-Varianten verwenden `widget_style` und `Classes`, statt ihre Werte an
+   jeder Aufrufstelle neu zusammenzustellen.
+9. Zusammengesetzte Widget-Inhalte **MÜSSEN** nach Möglichkeit die egui-Atom-API
+   (`IntoAtoms`, Tupel, `left_text`, `right_text`, `gap`) verwenden. Gemischte
+   Schriften oder Icons dürfen nicht über manuell aufgebaute `LayoutJob`s
+   ausgerichtet werden, wenn die Atom-API denselben Inhalt abbilden kann.
+10. Größen, Abstände und Ausrichtung werden über `Spacing`, `interact_size`,
+    Layout-Ausrichtung und `override_text_valign` festgelegt. Manuelles
+    Pixel-Painting für normale Bedienelemente ist nur zulässig, wenn egui 0.35
+    dafür keine dokumentierte Widget- oder Style-API anbietet; Canvas- und
+    Overlay-Rendering bleibt davon unberührt.
+11. Icons stammen aus dem eingebundenen, egui-0.35-kompatiblen Icon-Satz oder
+    aus garantiert unterstützten egui-Glyphen. Ungeprüfte Unicode-Zeichen sind
+    als Bedienelement-Icons nicht zulässig.
+
 ## Commits
 
 - Sprache: english. Betreff im Imperativ, knapp; Body erklärt das *Warum*.

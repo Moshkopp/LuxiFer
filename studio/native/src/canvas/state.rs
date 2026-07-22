@@ -16,6 +16,39 @@ pub struct BridgeDraft {
     pub width: f64,
 }
 
+/// Kurzlebiger Entwurf des interaktiven Offset-Werkzeugs.
+pub struct OffsetDraft {
+    /// Locale-toleranter Eingabetext; Komma und Punkt werden akzeptiert.
+    pub input: String,
+    /// `1` = außen, `-1` = innen.
+    pub direction: f64,
+    pub preview: Vec<studio_core::Shape>,
+    pub error: Option<String>,
+}
+
+impl Default for OffsetDraft {
+    fn default() -> Self {
+        Self {
+            input: "2,0".into(),
+            direction: 1.0,
+            preview: Vec::new(),
+            error: None,
+        }
+    }
+}
+
+impl OffsetDraft {
+    pub fn distance(&self) -> Option<f64> {
+        self.input
+            .trim()
+            .replace(',', ".")
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(|value| value.abs() * self.direction)
+    }
+}
+
 pub struct CanvasState {
     pub cam: Camera,
     pub tool: Tool,
@@ -40,6 +73,9 @@ pub struct CanvasState {
     pub poly_pts: Vec<(f64, f64)>,
     /// Schwebender Haltesteg-Entwurf (nur beim Bridge-Werkzeug).
     pub bridge: Option<BridgeDraft>,
+    /// Aktiver Offset-Entwurf; besteht auch ohne Auswahl, damit Werkzeug zuerst
+    /// und Kontur danach gewählt werden kann.
+    pub offset: Option<OffsetDraft>,
     /// Zuletzt genutzte Steg-Breite (mm) — Vorbelegung des nächsten Entwurfs.
     pub bridge_width: f64,
     /// Native Bézier-Feder: Anker samt beim Ziehen erzeugten Tangenten.
@@ -70,6 +106,7 @@ impl CanvasState {
             invert_marquee_direction: false,
             poly_pts: Vec::new(),
             bridge: None,
+            offset: None,
             bridge_width: 2.0,
             bezier_nodes: Vec::new(),
             trim_preview: None,
@@ -193,5 +230,25 @@ impl CanvasState {
             } => Some((pivot, delta_deg)),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod offset_tests {
+    use super::OffsetDraft;
+
+    #[test]
+    fn offset_eingabe_akzeptiert_komma_und_punkt() {
+        let mut draft = OffsetDraft {
+            input: "2,75".into(),
+            ..OffsetDraft::default()
+        };
+        assert_eq!(draft.distance(), Some(2.75));
+        draft.input = "3.5".into();
+        assert_eq!(draft.distance(), Some(3.5));
+        draft.direction = -1.0;
+        assert_eq!(draft.distance(), Some(-3.5));
+        draft.input = "kein wert".into();
+        assert_eq!(draft.distance(), None);
     }
 }
