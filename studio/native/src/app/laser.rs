@@ -449,6 +449,7 @@ impl App {
                     }
                     match read.status {
                         Ok(status) => {
+                            self.laser_backend.report_communication_success();
                             self.laser_live.head = Some((status.pos_x_mm, status.pos_y_mm));
                             self.laser_live.pos_z = status.pos_z_mm;
                             self.laser_live.pos_u = status.pos_u_mm;
@@ -464,6 +465,12 @@ impl App {
                             self.laser_live.rotary_on_y = false;
                             self.laser_live.head_note = Some(error.message().to_owned());
                             self.laser_live.error_backoff = true;
+                            if self.laser_backend.report_communication_failure() {
+                                self.hub_runtime.release_lease();
+                                self.hub_runtime
+                                    .set_lease_usage(studio_application::LeaseUsage::Idle);
+                                self.toasts.error("Verbindung zum Laser verloren.");
+                            }
                         }
                     }
                     if let Some(origin) = read.user_origin {

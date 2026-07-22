@@ -125,6 +125,7 @@ pub struct LaserService {
     driver: Option<std::sync::Arc<std::sync::Mutex<Box<dyn MachineDriver + Send>>>>,
     driver_id: Option<String>,
     connected_id: Option<String>,
+    consecutive_communication_failures: u8,
 }
 
 /// Ergebnis einer Achskalibrierung: die neue Schrittlänge in der Einheit des
@@ -414,6 +415,7 @@ impl LaserService {
             driver: None,
             driver_id: None,
             connected_id: None,
+            consecutive_communication_failures: 0,
         }
     }
 
@@ -425,6 +427,7 @@ impl LaserService {
             driver: None,
             driver_id: None,
             connected_id: None,
+            consecutive_communication_failures: 0,
         }
     }
 
@@ -702,6 +705,7 @@ impl LaserService {
             })
         })?;
         self.connected_id = Some(profile.id);
+        self.consecutive_communication_failures = 0;
         Ok(())
     }
 
@@ -717,6 +721,29 @@ impl LaserService {
         }
         self.driver_id = None;
         self.connected_id = None;
+        self.consecutive_communication_failures = 0;
+    }
+
+    /// Bestätigt einen erfolgreichen Geräte-Roundtrip. Die Application hält
+    /// die Verbindungsbewertung, nicht GUI oder konkreter Treiber.
+    pub fn report_communication_success(&mut self) {
+        self.consecutive_communication_failures = 0;
+    }
+
+    /// Meldet einen fehlgeschlagenen Geräte-Roundtrip. Erst zwei Fehler in
+    /// Folge gelten als Verbindungsverlust, damit ein einzelnes verlorenes
+    /// UDP-Paket den Ruida nicht unnötig trennt.
+    pub fn report_communication_failure(&mut self) -> bool {
+        if !self.is_connected() {
+            return false;
+        }
+        self.consecutive_communication_failures =
+            self.consecutive_communication_failures.saturating_add(1);
+        if self.consecutive_communication_failures < 2 {
+            return false;
+        }
+        self.disconnect();
+        true
     }
 
     /// Verfügbare Job-Aktionen des aktiven Treibertyps (fürs Panel-Grid).

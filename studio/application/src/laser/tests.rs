@@ -393,6 +393,31 @@ fn mark_connected(svc: &mut LaserService) {
 }
 
 #[test]
+fn zwei_kommunikationsfehler_trennen_eine_bestaetigte_verbindung() {
+    let mut svc = service_with_ruida();
+    mark_connected(&mut svc);
+
+    assert!(!svc.report_communication_failure());
+    assert!(svc.is_connected(), "ein einzelner Aussetzer wird toleriert");
+    assert!(svc.report_communication_failure());
+    assert!(
+        !svc.is_connected(),
+        "der zweite Fehler bestätigt den Abbruch"
+    );
+}
+
+#[test]
+fn erfolgreiche_kommunikation_setzt_die_fehlerfolge_zurueck() {
+    let mut svc = service_with_ruida();
+    mark_connected(&mut svc);
+
+    assert!(!svc.report_communication_failure());
+    svc.report_communication_success();
+    assert!(!svc.report_communication_failure());
+    assert!(svc.is_connected());
+}
+
+#[test]
 fn profil_speichern_ohne_verbindungsaenderung_haelt_die_verbindung() {
     // Nutzerbefund: Profil speichern (z. B. neuer Nullpunkt oder Name)
     // beendete grundlos die Laser-Verbindung.
