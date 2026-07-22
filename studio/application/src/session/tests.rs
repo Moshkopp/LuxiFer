@@ -107,6 +107,77 @@ fn select_all_waehlt_jedes_objekt_genau_einmal() {
 }
 
 #[test]
+fn kopieren_mutiert_nicht_und_einfuegen_ist_ein_undo_schritt() {
+    let mut session = session_with_rect();
+    session.mark_saved();
+    assert_eq!(session.copy_selected().unwrap(), 1);
+    assert_eq!(session.shapes.len(), 1);
+    assert!(!session.is_dirty());
+
+    let inserted = session.paste().unwrap();
+    assert_eq!(inserted, vec![1]);
+    assert_eq!(session.selected, vec![1]);
+    assert_eq!(session.shapes[1].bbox().x, 5.0);
+    assert_eq!(session.shapes[1].bbox().y, 5.0);
+    assert!(session.undo());
+    assert_eq!(session.shapes.len(), 1);
+    assert!(session.undo());
+    assert!(
+        session.shapes.is_empty(),
+        "Nach einem Paste-Undo muss der nächste Schritt bereits das ursprüngliche Zeichnen sein"
+    );
+}
+
+#[test]
+fn wiederholtes_einfuegen_versetzt_weiter_und_vergibt_neue_gruppen() {
+    let mut state = AppState::new();
+    state.add_shape(Geo::Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    state.add_shape(Geo::Rect {
+        x: 20.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    for shape in &mut state.shapes {
+        shape.group_id = Some(7);
+        shape.fill_group_id = Some(9);
+    }
+    state.selected = vec![0, 1];
+    let mut session = EditorSession::new(state);
+    session.copy_selected().unwrap();
+
+    let first = session.paste().unwrap();
+    let first_group = session.shapes[first[0]].group_id.unwrap();
+    let first_fill = session.shapes[first[0]].fill_group_id.unwrap();
+    assert_ne!(first_group, 7);
+    assert_ne!(first_fill, 9);
+    assert!(first
+        .iter()
+        .all(|&index| session.shapes[index].group_id == Some(first_group)));
+    assert!(first
+        .iter()
+        .all(|&index| session.shapes[index].fill_group_id == Some(first_fill)));
+
+    let second = session.paste().unwrap();
+    assert_eq!(session.shapes[second[0]].bbox().x, 10.0);
+    assert_ne!(session.shapes[second[0]].group_id, Some(first_group));
+    assert_ne!(session.shapes[second[0]].fill_group_id, Some(first_fill));
+}
+
+#[test]
+fn einfuegen_ohne_kopie_meldet_stabilen_fehler() {
+    let mut session = EditorSession::default();
+    let error = session.paste().unwrap_err();
+    assert_eq!(error.code(), "clipboard_empty");
+    assert!(!session.is_dirty());
+}
+
+#[test]
 fn numerische_auswahlgroesse_skaliert_und_ist_ein_undo_schritt() {
     let mut session = session_with_rect();
     session.resize_selection(25.0, 15.0).unwrap();

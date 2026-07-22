@@ -1,7 +1,100 @@
 use super::EditorSession;
 use crate::AppError;
+use std::collections::HashMap;
 
 impl EditorSession {
+    /// Kopiert die aktuelle, bereits auf Gruppen erweiterte Auswahl in die
+    /// sitzungsinterne Objekt-Zwischenablage. Der Editorzustand bleibt dabei
+    /// unveraendert und erhaelt deshalb keinen Undo-Schritt.
+    pub fn copy_selected(&mut self) -> Result<usize, AppError> {
+        self.require_selection("Kopieren")?;
+        self.clipboard = self
+            .state
+            .selected
+            .iter()
+            .filter_map(|&index| {
+                let shape = self.state.shapes.get(index)?.clone();
+                let layer = self.state.layers.get(shape.layer_id)?.clone();
+                Some((shape, layer))
+            })
+            .collect();
+        self.paste_generation = 0;
+        if self.clipboard.is_empty() {
+            return Err(AppError::new(
+                "clipboard_empty",
+                "Die Auswahl enthält keine kopierbaren Objekte.",
+            ));
+        }
+        Ok(self.clipboard.len())
+    }
+
+    /// Fuegt den zuletzt kopierten Objektbestand mit sichtbarem, bei jedem
+    /// Einfuegen wachsendem Versatz ein. Layerbezug und interne Gruppen bleiben
+    /// erhalten, erhalten aber neue IDs. Der gesamte Vorgang ist ein Undo-Schritt.
+    pub fn paste(&mut self) -> Result<Vec<usize>, AppError> {
+        if self.clipboard.is_empty() {
+            return Err(AppError::new(
+                "clipboard_empty",
+                "Es wurden noch keine Objekte kopiert.",
+            ));
+        }
+        self.state.push_undo();
+        self.paste_generation = self.paste_generation.saturating_add(1);
+        let offset = 5.0 * f64::from(self.paste_generation);
+        let mut groups = HashMap::<u32, u32>::new();
+        let mut fill_groups = HashMap::<u32, u32>::new();
+        let mut next_group = self
+            .state
+            .shapes
+            .iter()
+            .filter_map(|shape| shape.group_id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let mut next_fill_group = self
+            .state
+            .shapes
+            .iter()
+            .filter_map(|shape| shape.fill_group_id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let mut inserted = Vec::with_capacity(self.clipboard.len());
+        for (source, source_layer) in &self.clipboard {
+            let layer_id = self
+                .state
+                .layers
+                .iter()
+                .position(|layer| layer == source_layer)
+                .unwrap_or_else(|| {
+                    self.state.layers.push(source_layer.clone());
+                    self.state.layers.len() - 1
+                });
+            let mut shape = source.clone();
+            shape.layer_id = layer_id;
+            shape.group_id = shape.group_id.map(|old| {
+                *groups.entry(old).or_insert_with(|| {
+                    let assigned = next_group;
+                    next_group = next_group.saturating_add(1);
+                    assigned
+                })
+            });
+            shape.fill_group_id = shape.fill_group_id.map(|old| {
+                *fill_groups.entry(old).or_insert_with(|| {
+                    let assigned = next_fill_group;
+                    next_fill_group = next_fill_group.saturating_add(1);
+                    assigned
+                })
+            });
+            shape.translate(offset, offset);
+            inserted.push(self.state.shapes.len());
+            self.state.shapes.push(shape);
+        }
+        self.state.selected = inserted.clone();
+        self.state.dirty = true;
+        Ok(inserted)
+    }
+
     pub fn set_selection(&mut self, indices: Vec<usize>) {
         self.state.selected = indices
             .into_iter()

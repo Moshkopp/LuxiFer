@@ -135,6 +135,8 @@ pub enum Shortcut {
     FinishPolygon,
     Undo,
     Redo,
+    Copy,
+    Paste,
     /// Alle Objekte auf dem Canvas auswählen (Strg+A).
     SelectAll,
     /// Kamera einpassen: auf die Auswahl, sonst auf alle Objekte (F).
@@ -235,6 +237,8 @@ fn shortcut_for_action(action: studio_core::ShortcutAction) -> Shortcut {
         A::SaveVersion => Shortcut::SaveVersion,
         A::Undo => Shortcut::Undo,
         A::Redo => Shortcut::Redo,
+        A::Copy => Shortcut::Copy,
+        A::Paste => Shortcut::Paste,
         A::SelectAll => Shortcut::SelectAll,
         A::Delete => Shortcut::Delete,
         A::Group => Shortcut::Group,
@@ -419,6 +423,14 @@ mod shortcut_tests {
         // Loslassen löst keinen dieser Befehle aus.
         assert_eq!(resolve_shortcut(Key::V, NONE, false, false), None);
         assert_eq!(resolve_shortcut(Key::Delete, NONE, false, false), None);
+        assert_eq!(
+            resolve_shortcut(Key::C, CTRL, true, false),
+            Some(Shortcut::Copy)
+        );
+        assert_eq!(
+            resolve_shortcut(Key::V, CTRL, true, false),
+            Some(Shortcut::Paste)
+        );
     }
 
     #[test]

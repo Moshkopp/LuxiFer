@@ -43,6 +43,8 @@ pub enum LayerToggle {
 pub struct EditorSession {
     state: AppState,
     edit_start: Option<AppState>,
+    clipboard: Vec<(studio_core::Shape, studio_core::Layer)>,
+    paste_generation: u32,
 }
 
 impl EditorSession {
@@ -50,6 +52,8 @@ impl EditorSession {
         Self {
             state,
             edit_start: None,
+            clipboard: Vec::new(),
+            paste_generation: 0,
         }
     }
 

@@ -12,6 +12,8 @@ pub enum ShortcutAction {
     SaveVersion,
     Undo,
     Redo,
+    Copy,
+    Paste,
     SelectAll,
     Delete,
     Group,
@@ -38,11 +40,13 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 29] = [
         Self::Save,
         Self::SaveVersion,
         Self::Undo,
         Self::Redo,
+        Self::Copy,
+        Self::Paste,
         Self::SelectAll,
         Self::Delete,
         Self::Group,
@@ -74,6 +78,8 @@ impl ShortcutAction {
             Self::SaveVersion => "Neue Version speichern",
             Self::Undo => "Rückgängig",
             Self::Redo => "Wiederholen",
+            Self::Copy => "Kopieren",
+            Self::Paste => "Einfügen",
             Self::SelectAll => "Alles auswählen",
             Self::Delete => "Löschen",
             Self::Group => "Gruppieren",
@@ -105,6 +111,8 @@ impl ShortcutAction {
             Self::Save | Self::SaveVersion => "Allgemein",
             Self::Undo
             | Self::Redo
+            | Self::Copy
+            | Self::Paste
             | Self::SelectAll
             | Self::Delete
             | Self::Group
@@ -398,6 +406,8 @@ impl Default for ShortcutBindings {
                     T::Key(ShortcutChord::ctrl(K::Y)),
                 ],
             ),
+            (A::Copy, vec![T::Key(ShortcutChord::ctrl(K::C))]),
+            (A::Paste, vec![T::Key(ShortcutChord::ctrl(K::V))]),
             (A::SelectAll, vec![T::Key(ShortcutChord::ctrl(K::A))]),
             (A::Delete, vec![T::Key(ShortcutChord::key(K::Delete))]),
             (A::Group, vec![T::Key(ShortcutChord::key(K::G))]),
@@ -535,6 +545,14 @@ mod tests {
             Some(ShortcutAction::OpenAssets)
         );
         assert_eq!(b.triggers(ShortcutAction::Redo).len(), 2);
+        assert_eq!(
+            b.resolve(ShortcutTrigger::Key(ShortcutChord::ctrl(ShortcutKey::C))),
+            Some(ShortcutAction::Copy)
+        );
+        assert_eq!(
+            b.resolve(ShortcutTrigger::Key(ShortcutChord::ctrl(ShortcutKey::V))),
+            Some(ShortcutAction::Paste)
+        );
         b.validate().unwrap();
     }
 

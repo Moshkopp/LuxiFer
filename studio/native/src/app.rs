@@ -539,6 +539,18 @@ impl App {
             }
             S::Undo => self.undo(),
             S::Redo => self.redo(),
+            S::Copy => {
+                if let Err(error) = self.session.copy_selected() {
+                    self.app_error = Some(error);
+                }
+            }
+            S::Paste => match self.session.paste() {
+                Ok(_) => {
+                    self.refresh_accent();
+                    self.canvas.tool = crate::tools::Tool::Select;
+                }
+                Err(error) => self.app_error = Some(error),
+            },
             S::SelectAll => self.session.select_all(),
             S::FitView => self.fit_view(),
             S::Group => self.group(),

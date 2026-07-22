@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const UI_SETTINGS_FILE: &str = "gui-settings.json";
 
 /// Aktuelle Formatversion der GUI-Settings.
-pub const UI_FORMAT_VERSION: u32 = 5;
+pub const UI_FORMAT_VERSION: u32 = 6;
 
 /// Eine Theme-Farbe: Farbton (RGB) plus geklemmte Intensität (ADR §3).
 ///
@@ -276,6 +276,14 @@ impl UiSettings {
     pub fn from_json(json: &str) -> Result<Self, String> {
         let mut s: Self = serde_json::from_str(json).map_err(|e| e.to_string())?;
         if s.version < UI_FORMAT_VERSION {
+            // Version 6 ergaenzt Copy/Paste. Nur bei alten Dateien werden die
+            // fehlenden Aktionen mit ihren Standards belegt; ein Nutzer darf
+            // sie danach weiterhin bewusst leer konfigurieren.
+            for action in [crate::ShortcutAction::Copy, crate::ShortcutAction::Paste] {
+                if !s.shortcut_bindings.0.contains_key(&action) {
+                    s.shortcut_bindings.reset_action(action);
+                }
+            }
             // Nur den früheren unveränderten Standard migrieren; bewusst
             // gewählte Benutzerfarben bleiben erhalten.
             if s.theme.accent.hue == [0x3b, 0x82, 0xf6] && s.theme.button.hue == [0x60, 0x66, 0x70]
@@ -356,6 +364,55 @@ mod tests {
         assert_eq!(
             migrated.shortcut_bindings,
             crate::ShortcutBindings::default()
+        );
+    }
+
+    #[test]
+    fn version_fuenf_ergaenzt_copy_paste_ohne_benutzerbelegung_zu_verlieren() {
+        let mut settings = UiSettings {
+            version: 5,
+            ..UiSettings::default()
+        };
+        settings.shortcut_bindings.remove(
+            crate::ShortcutAction::Copy,
+            crate::ShortcutTrigger::Key(crate::ShortcutChord::ctrl(crate::ShortcutKey::C)),
+        );
+        settings
+            .shortcut_bindings
+            .0
+            .remove(&crate::ShortcutAction::Copy);
+        settings
+            .shortcut_bindings
+            .0
+            .remove(&crate::ShortcutAction::Paste);
+        let custom = crate::ShortcutTrigger::Key(crate::ShortcutChord::ctrl(crate::ShortcutKey::D));
+        settings
+            .shortcut_bindings
+            .reassign(crate::ShortcutAction::Group, custom)
+            .unwrap();
+
+        let migrated = UiSettings::from_json(&settings.to_json().unwrap()).unwrap();
+
+        assert_eq!(migrated.version, UI_FORMAT_VERSION);
+        assert_eq!(
+            migrated
+                .shortcut_bindings
+                .resolve(crate::ShortcutTrigger::Key(crate::ShortcutChord::ctrl(
+                    crate::ShortcutKey::C
+                ))),
+            Some(crate::ShortcutAction::Copy)
+        );
+        assert_eq!(
+            migrated
+                .shortcut_bindings
+                .resolve(crate::ShortcutTrigger::Key(crate::ShortcutChord::ctrl(
+                    crate::ShortcutKey::V
+                ))),
+            Some(crate::ShortcutAction::Paste)
+        );
+        assert_eq!(
+            migrated.shortcut_bindings.resolve(custom),
+            Some(crate::ShortcutAction::Group)
         );
     }
 
