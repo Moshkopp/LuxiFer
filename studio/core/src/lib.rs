@@ -56,8 +56,8 @@ pub use interact::{keep_aspect, resize_to_cursor, Handle};
 pub use job::{
     Anchor, AxisDir, DriverCapabilities, DriverConsoleBuffer, DriverConsoleDirection,
     DriverConsoleLine, DriverError, JobLayer, JobParams, JobPlan, JogMotion, LayerWork,
-    MachineAxis, MachineDriver, MachineSetting, MachineSettingUnit, MachineStatus, Path, StartMode,
-    StartReference,
+    MachineAxis, MachineDriver, MachineRealtimeControl, MachineSetting, MachineSettingUnit,
+    MachineState, MachineStatus, Path, StartMode, StartReference,
 };
 pub use laser::{
     AxisConfig, BedOrigin, Connection, DriverKind, JobAction, LaserProfile, LaserRegistry,

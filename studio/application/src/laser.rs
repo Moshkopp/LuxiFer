@@ -191,7 +191,8 @@ fn validated_console_command(command: &str) -> Result<&str, AppError> {
 fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
     match profile.kind {
         DriverKind::Ruida => Box::new(driver_ruida::RuidaDriver::from_profile(profile)),
-        DriverKind::Grbl | DriverKind::MiniGrbl => Box::new(driver_grbl::GrblDriver::default()),
+        DriverKind::Grbl => Box::new(driver_grbl::GrblDriver::grblhal()),
+        DriverKind::MiniGrbl => Box::new(driver_grbl::GrblDriver::default()),
     }
 }
 
@@ -200,6 +201,7 @@ pub struct LaserService {
     pub registry: LaserRegistry,
     driver: Option<std::sync::Arc<std::sync::Mutex<Box<dyn MachineDriver + Send>>>>,
     console_buffer: Option<studio_core::DriverConsoleBuffer>,
+    realtime_control: Option<std::sync::Arc<dyn studio_core::MachineRealtimeControl>>,
     driver_id: Option<String>,
     connected_id: Option<String>,
     consecutive_communication_failures: u8,
@@ -491,6 +493,7 @@ impl LaserService {
             registry: crate::persistence::load_laser_registry(),
             driver: None,
             console_buffer: None,
+            realtime_control: None,
             driver_id: None,
             connected_id: None,
             consecutive_communication_failures: 0,
@@ -504,6 +507,7 @@ impl LaserService {
             registry,
             driver: None,
             console_buffer: None,
+            realtime_control: None,
             driver_id: None,
             connected_id: None,
             consecutive_communication_failures: 0,
@@ -791,12 +795,17 @@ impl LaserService {
             .driver
             .as_ref()
             .and_then(|driver| driver.try_lock().ok()?.console_buffer());
+        self.realtime_control = self
+            .driver
+            .as_ref()
+            .and_then(|driver| driver.try_lock().ok()?.realtime_control());
         self.connected_id = Some(profile.id);
         self.consecutive_communication_failures = 0;
         Ok(())
     }
 
     pub fn disconnect(&mut self) {
+        self.realtime_control = None;
         if let Some(driver) = self.driver.take() {
             // Eine laufende Hintergrundabfrage darf auch das Trennen nicht im
             // UI-Thread blockieren. Ist der Treiber frei, sauber trennen;
@@ -862,6 +871,7 @@ impl LaserService {
         if self.driver_id.as_deref() != Some(profile.id.as_str()) || self.driver.is_none() {
             let driver = driver_for(&profile);
             self.console_buffer = driver.console_buffer();
+            self.realtime_control = driver.realtime_control();
             self.driver = Some(std::sync::Arc::new(std::sync::Mutex::new(driver)));
             self.driver_id = Some(profile.id.clone());
         }
@@ -1134,6 +1144,29 @@ impl LaserService {
             .unwrap_or_default()
     }
 
+    /// Priorisierter Stopp ohne Zugriff auf den vom Job belegten Treiber-Mutex.
+    pub fn stop_realtime(&self) -> Result<(), AppError> {
+        if !self.is_connected() {
+            return Err(AppError::new(
+                "laser_not_connected",
+                "Laser ist nicht verbunden. Bitte zuerst ausdrücklich verbinden.",
+            ));
+        }
+        let control = self.realtime_control.as_ref().ok_or_else(|| {
+            AppError::new(
+                "laser_stop_unsupported",
+                "Der aktive Lasertreiber unterstützt keinen priorisierten Stopp.",
+            )
+        })?;
+        control.stop().map_err(|error| {
+            AppError::wrap(
+                "laser_stop",
+                "Laser-Stopp fehlgeschlagen.",
+                error.to_string(),
+            )
+        })
+    }
+
     /// Sendet einen einzelnen Konsolenbefehl auf dem Geräte-Worker. Dadurch
     /// blockieren Timeout oder Controllerantwort niemals den Renderthread.
     pub fn send_console_command_async(
@@ -1209,26 +1242,47 @@ impl LaserService {
         // Baut den Treiber bei Bedarf und prüft die Capability, ohne I/O.
         self.with_driver(true, |_| Ok(()))?;
         let driver = self.driver.as_ref().unwrap().clone();
+        let realtime_control = self.realtime_control.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let read = match driver.lock() {
-                Ok(driver) => {
-                    let capabilities = driver.capabilities();
-                    let status = if capabilities.position_read {
-                        driver.status().map_err(|error| {
-                            AppError::wrap(
-                                "laser_status",
-                                "Maschinenstatus lesen fehlgeschlagen.",
-                                error.to_string(),
-                            )
-                        })
-                    } else {
+            let read = if let Some(control) = realtime_control {
+                LaserLiveRead {
+                    status: control.status().map_err(|error| {
+                        AppError::wrap(
+                            "laser_status",
+                            "Maschinenstatus lesen fehlgeschlagen.",
+                            error.to_string(),
+                        )
+                    }),
+                    // Treiber mit einem unabhängigen Echtzeitkanal liefern den
+                    // Benutzerursprung weiterhin nur über den normalen
+                    // Gerätekanal. GRBL bietet diese Capability derzeit nicht.
+                    user_origin: include_user_origin.then(|| {
                         Err(AppError::new(
-                            "position_unsupported",
-                            "Der aktive Lasertreiber unterstützt kein Positionslesen.",
+                            "origin_unsupported",
+                            "Der Echtzeitkanal unterstützt kein Lesen des Benutzerursprungs.",
                         ))
-                    };
-                    let user_origin = include_user_origin.then(|| {
+                    }),
+                }
+            } else {
+                match driver.lock() {
+                    Ok(driver) => {
+                        let capabilities = driver.capabilities();
+                        let status = if capabilities.position_read {
+                            driver.status().map_err(|error| {
+                                AppError::wrap(
+                                    "laser_status",
+                                    "Maschinenstatus lesen fehlgeschlagen.",
+                                    error.to_string(),
+                                )
+                            })
+                        } else {
+                            Err(AppError::new(
+                                "position_unsupported",
+                                "Der aktive Lasertreiber unterstützt kein Positionslesen.",
+                            ))
+                        };
+                        let user_origin = include_user_origin.then(|| {
                         if capabilities.user_origin_read {
                             driver.read_origin().map_err(|error| {
                                 AppError::wrap(
@@ -1244,18 +1298,19 @@ impl LaserService {
                             ))
                         }
                     });
-                    LaserLiveRead {
-                        status,
-                        user_origin,
+                        LaserLiveRead {
+                            status,
+                            user_origin,
+                        }
                     }
+                    Err(_) => LaserLiveRead {
+                        status: Err(AppError::new(
+                            "laser_driver_lock",
+                            "Laser-Treiber ist nicht mehr verfügbar.",
+                        )),
+                        user_origin: None,
+                    },
                 }
-                Err(_) => LaserLiveRead {
-                    status: Err(AppError::new(
-                        "laser_driver_lock",
-                        "Laser-Treiber ist nicht mehr verfügbar.",
-                    )),
-                    user_origin: None,
-                },
             };
             let _ = tx.send(read);
         });

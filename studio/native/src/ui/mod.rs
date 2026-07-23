@@ -1354,6 +1354,7 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         slots,
         can_export,
         connected,
+        machine_state: app.laser_live.machine_state,
         can_unlock: capabilities.unlock,
         lease_pending: app.laser_lease_pending,
         saved_origins,

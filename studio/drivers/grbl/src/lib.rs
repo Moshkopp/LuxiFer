@@ -28,10 +28,35 @@ impl Default for GrblConfig {
 }
 
 /// Der GRBL-Treiber.
-#[derive(Default)]
 pub struct GrblDriver {
     pub config: GrblConfig,
     transport: Option<transport::SerialTransport>,
+    stop_command: u8,
+}
+
+impl Default for GrblDriver {
+    fn default() -> Self {
+        Self {
+            config: GrblConfig::default(),
+            transport: None,
+            stop_command: 0x18,
+        }
+    }
+}
+
+struct GrblRealtimeControl {
+    transport: transport::SerialTransport,
+    stop_command: u8,
+}
+
+impl studio_core::MachineRealtimeControl for GrblRealtimeControl {
+    fn stop(&self) -> Result<(), DriverError> {
+        self.transport.stop(self.stop_command)
+    }
+
+    fn status(&self) -> Result<studio_core::MachineStatus, DriverError> {
+        GrblDriver::machine_status(self.transport.status()?)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -126,10 +151,80 @@ fn grbl_motion_program(plan: &JobPlan) -> Vec<(usize, f64, f64, Vec<GrblMotion>)
 }
 
 impl GrblDriver {
+    pub fn grblhal() -> Self {
+        Self {
+            config: GrblConfig::default(),
+            transport: None,
+            stop_command: 0x19,
+        }
+    }
+    fn machine_state(state: &str) -> studio_core::MachineState {
+        use studio_core::MachineState;
+        if state == "Idle" {
+            MachineState::Idle
+        } else if state == "Run" || state == "Jog" {
+            MachineState::Running
+        } else if state == "Home" {
+            MachineState::Homing
+        } else if state.starts_with("Hold") {
+            MachineState::Paused
+        } else if state.starts_with("Door") {
+            MachineState::DoorOpen
+        } else if state.starts_with("Alarm") {
+            MachineState::Alarm
+        } else {
+            MachineState::Unknown
+        }
+    }
+
+    fn ensure_job_start_allowed(transport: &transport::SerialTransport) -> Result<(), DriverError> {
+        let status = transport.status()?;
+        Self::validate_job_start(&status.state)
+    }
+
+    fn validate_job_start(state: &str) -> Result<(), DriverError> {
+        match Self::machine_state(state) {
+            studio_core::MachineState::Idle => Ok(()),
+            studio_core::MachineState::Alarm => Err(DriverError::Transport(
+                "Jobstart abgelehnt: Der Controller befindet sich im Alarmzustand.".into(),
+            )),
+            studio_core::MachineState::DoorOpen => Err(DriverError::Transport(
+                "Jobstart abgelehnt: Die Sicherheitstür ist geöffnet.".into(),
+            )),
+            studio_core::MachineState::Paused => Err(DriverError::Transport(
+                "Jobstart abgelehnt: Der Controller befindet sich im Haltezustand.".into(),
+            )),
+            _ => Err(DriverError::Transport(format!(
+                "Jobstart abgelehnt: Maschinenzustand „{}“ ist nicht bereit.",
+                state
+            ))),
+        }
+    }
+
+    fn machine_status(
+        status: protocol::GrblStatus,
+    ) -> Result<studio_core::MachineStatus, DriverError> {
+        let position = status
+            .machine_position
+            .or(status.work_position)
+            .unwrap_or_default();
+        Ok(studio_core::MachineStatus {
+            state: Self::machine_state(&status.state),
+            is_running: matches!(status.state.as_str(), "Run" | "Jog" | "Home"),
+            is_paused: status.state.starts_with("Hold") || status.state.starts_with("Door"),
+            pos_x_mm: position[0],
+            pos_y_mm: position[1],
+            pos_z_mm: Some(position[2]),
+            pos_u_mm: None,
+            rotary_on_y: false,
+        })
+    }
+
     pub fn new(config: GrblConfig) -> Self {
         Self {
             config,
             transport: None,
+            stop_command: 0x18,
         }
     }
 
@@ -285,6 +380,15 @@ impl MachineDriver for GrblDriver {
             .map(transport::SerialTransport::console_buffer)
     }
 
+    fn realtime_control(&self) -> Option<std::sync::Arc<dyn studio_core::MachineRealtimeControl>> {
+        self.transport.as_ref().map(|transport| {
+            std::sync::Arc::new(GrblRealtimeControl {
+                transport: transport.clone(),
+                stop_command: self.stop_command,
+            }) as std::sync::Arc<dyn studio_core::MachineRealtimeControl>
+        })
+    }
+
     fn send_console_command(&self, command: &str) -> Result<(), DriverError> {
         self.transport
             .as_ref()
@@ -294,26 +398,21 @@ impl MachineDriver for GrblDriver {
 
     fn status(&self) -> Result<studio_core::MachineStatus, DriverError> {
         let transport = self.transport.as_ref().ok_or(DriverError::NotConnected)?;
-        let status = transport.status()?;
-        let position = status
-            .machine_position
-            .or(status.work_position)
-            .unwrap_or_default();
-        Ok(studio_core::MachineStatus {
-            is_running: matches!(status.state.as_str(), "Run" | "Jog" | "Home"),
-            is_paused: status.state.starts_with("Hold") || status.state.starts_with("Door"),
-            pos_x_mm: position[0],
-            pos_y_mm: position[1],
-            pos_z_mm: Some(position[2]),
-            pos_u_mm: None,
-            rotary_on_y: false,
-        })
+        Self::machine_status(transport.status()?)
     }
 
     fn send_job(&self, bytes: &[u8]) -> Result<(), DriverError> {
         let transport = self.transport.as_ref().ok_or(DriverError::NotConnected)?;
+        Self::ensure_job_start_allowed(transport)?;
         transport.send_program(bytes)?;
         Ok(())
+    }
+
+    fn stop(&self) -> Result<(), DriverError> {
+        self.transport
+            .as_ref()
+            .ok_or(DriverError::NotConnected)?
+            .stop(self.stop_command)
     }
 
     fn unlock(&self) -> Result<(), DriverError> {
@@ -346,7 +445,11 @@ impl MachineDriver for GrblDriver {
 
     fn actions(&self) -> Vec<JobAction> {
         // Streamen braucht noch den seriellen Transport; Export geht schon.
-        vec![JobAction::ExportFile, JobAction::StreamGcode]
+        vec![
+            JobAction::ExportFile,
+            JobAction::StreamGcode,
+            JobAction::Stop,
+        ]
     }
 
     fn run_action(
@@ -368,8 +471,9 @@ impl MachineDriver for GrblDriver {
                     .compile_with(plan, layers, params)
                     .map_err(DriverError::Transport)?;
                 let transport = self.transport.as_ref().ok_or(DriverError::NotConnected)?;
+                Self::ensure_job_start_allowed(transport)?;
                 let lines = transport.send_program(&bytes)?;
-                Ok(format!("G-Code gesendet ({lines} Befehle)."))
+                Ok(format!("G-Code vollständig bestätigt ({lines} Befehle)."))
             }
             _ => Err(DriverError::NotSupported),
         }
@@ -414,6 +518,37 @@ mod tests {
             driver.read_machine_settings().unwrap_err(),
             DriverError::NotSupported
         );
+    }
+
+    #[test]
+    fn stopstrategie_ist_explizit_statt_erraten() {
+        assert_eq!(GrblDriver::grblhal().stop_command, 0x19);
+        assert_eq!(GrblDriver::default().stop_command, 0x18);
+    }
+
+    #[test]
+    fn grbl_zustaende_werden_geraeteneutral_abgebildet() {
+        use studio_core::MachineState;
+        assert_eq!(GrblDriver::machine_state("Idle"), MachineState::Idle);
+        assert_eq!(GrblDriver::machine_state("Run"), MachineState::Running);
+        assert_eq!(GrblDriver::machine_state("Jog"), MachineState::Running);
+        assert_eq!(GrblDriver::machine_state("Home"), MachineState::Homing);
+        assert_eq!(GrblDriver::machine_state("Hold:0"), MachineState::Paused);
+        assert_eq!(GrblDriver::machine_state("Door:1"), MachineState::DoorOpen);
+        assert_eq!(GrblDriver::machine_state("Alarm"), MachineState::Alarm);
+        assert_eq!(GrblDriver::machine_state("Sleep"), MachineState::Unknown);
+    }
+
+    #[test]
+    fn jobstart_ist_nur_in_idle_erlaubt() {
+        assert!(GrblDriver::validate_job_start("Idle").is_ok());
+        for state in ["Alarm", "Door:0", "Hold:0", "Run", "Home", "Sleep"] {
+            let error = GrblDriver::validate_job_start(state).unwrap_err();
+            assert!(
+                error.to_string().contains("Jobstart abgelehnt"),
+                "{state}: {error}"
+            );
+        }
     }
 
     /// Expliziter, standardmäßig übersprungener Hardware-Smoke-Test. Sendet
@@ -466,6 +601,39 @@ mod tests {
         let status = driver.status().expect("Status nach Testprogramm");
         assert!(!status.is_running);
         driver.disconnect();
+    }
+
+    /// Sicherer grblHAL-Abnahmetest für den Echtzeit-Stopp. Die virtuelle
+    /// Bewegung ist auf 2 mm begrenzt und fordert ausschließlich S0 an.
+    #[test]
+    #[ignore = "benötigt einen nackten, ausdrücklich freigegebenen grblHAL-Testcontroller"]
+    fn hardware_grblhal_stop_0x19() {
+        let port = std::env::var("GRBL_PORT").expect("GRBL_PORT fehlt");
+        let baud = std::env::var("GRBL_BAUD")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(115_200);
+        let mut driver = GrblDriver::grblhal();
+        driver
+            .connect(&studio_core::Connection::Seriell {
+                port,
+                baud,
+                device: None,
+            })
+            .expect("Handshake");
+        driver.unlock().expect("Testcontroller entsperren");
+        let driver = std::sync::Arc::new(driver);
+        let sender = driver.clone();
+        let job = std::thread::spawn(move || {
+            sender.send_job(b"G21\nG90\nM5\nM4 S0\nF1\nG1 X2 Y0 S0\nM5\n")
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        driver.stop().expect("0x19 Stop");
+        let error = job
+            .join()
+            .expect("Job-Thread")
+            .expect_err("Job muss abgebrochen werden");
+        assert!(error.to_string().contains("abgebrochen"), "{error}");
     }
 
     #[test]

@@ -57,7 +57,7 @@ Bewegungs- oder Laserbefehle gesendet.
 
 | Aufgabe | Status | Hauptschicht | Abnahme |
 |---|---:|---|---|
-| Alarmzustand verständlich darstellen | [~] | Treiber → Application | Bekannte Alarmcodes werden erklärt; unbekannte bleiben mit Rohcode sichtbar |
+| Alarmzustand verständlich darstellen | [x] | Treiber → Application | Bekannte Alarmcodes werden erklärt; unbekannte bleiben mit Rohcode sichtbar |
 | Controller entsperren | [x] | Treiber | Geräteunabhängige Absicht erzeugt ausschließlich im GRBL-Treiber `$X` |
 | Homing | [~] | Treiber | `home()` erzeugt `$H`, Statusfolge wird erkannt, Fehler werden gemeldet |
 | Schritt-Jog | [ ] | Treiber | `jog_axis(... Step)` erzeugt korrektes `$J=...` für X/Y/Z/U |
@@ -81,10 +81,10 @@ Bewegungs- oder Laserbefehle gesendet.
 
 | Aufgabe | Status | Hauptschicht | Abnahme |
 |---|---:|---|---|
-| Transport-Worker mit Steuerkanal | [ ] | GRBL-Treiber | Stream, Status und Echtzeitbefehle sind ohne konkurrierende Portleser geordnet |
-| Kontrollierter Startzustand | [ ] | Treiber | Start wird in Alarm, Door und unzulässigem Hold abgelehnt |
+| Transport-Worker mit Steuerkanal | [~] | GRBL-Treiber | Worker besitzt den Port exklusiv; Status und Stop sind priorisiert, Pause fehlt noch |
+| Kontrollierter Startzustand | [x] | Treiber | Start wird in Alarm, Door und unzulässigem Hold abgelehnt |
 | Fortschritt | [ ] | Treiber → Application | Bestätigte Befehle und Gesamtzahl werden geräteunabhängig gemeldet |
-| Sofortiger Abbruch | [ ] | Treiber | Abbruch ist während jeder Streamphase erreichbar |
+| Sofortiger Abbruch | [~] | Treiber | grblHAL nutzt priorisiert `0x19`, Mini-GRBL `0x18`; Hardwareabnahme für `0x19` fehlt |
 | Sicheres Laser-Aus | [ ] | Treiber | Erfolg, Fehler und Abbruch enden garantiert mit ausgeschalteter Laserleistung |
 | Pufferverwaltung | [~] | Treiber | Controllerpuffer wird schneller als Stop-and-wait genutzt, ohne Überlauf |
 | Übertragungsende erkennen | [ ] | Treiber | „Alle Zeilen bestätigt“ ist von „Maschine Idle“ getrennt sichtbar |
@@ -164,7 +164,6 @@ Eine Aufgabe wird erst `[x]`, wenn alle zutreffenden Punkte erfüllt sind:
 
 ## Nächster Arbeitsblock
 
-1. Alarmzustand dauerhaft im geräteneutralen Live-Status sichtbar machen.
+1. Das Zeichenfenster in einen priorisierten Transport-Worker für Pause und Stop überführen.
 2. Homing erst mit angeschlossenen Endschaltern sicher hardwareprüfen und die Statusfolge erfassen.
 3. Schritt-Jog und sicheren Jog-Abbruch implementieren.
-4. Das Zeichenfenster in einen priorisierten Transport-Worker für Pause und Stop überführen.

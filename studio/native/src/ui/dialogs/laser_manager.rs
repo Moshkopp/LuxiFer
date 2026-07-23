@@ -210,7 +210,7 @@ fn basic_data(ui: &mut egui::Ui, state: &mut LaserManagerState, outcome: &mut La
                 .selected_text(format!("{:?}", profile.kind))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut profile.kind, DriverKind::Ruida, "Ruida");
-                    ui.selectable_value(&mut profile.kind, DriverKind::Grbl, "GRBL");
+                    ui.selectable_value(&mut profile.kind, DriverKind::Grbl, "grblHAL");
                     ui.selectable_value(&mut profile.kind, DriverKind::MiniGrbl, "Mini-GRBL");
                 });
             if profile.kind != old_kind {

@@ -528,9 +528,18 @@ impl MachineDriver for RuidaDriver {
             .ok()
             .flatten()
             .is_some_and(|v| v & 0x01 != 0);
+        let is_running = st & 0x01 != 0;
+        let is_paused = st & 0x02 != 0;
         Ok(MachineStatus {
-            is_running: st & 0x01 != 0,
-            is_paused: st & 0x02 != 0,
+            state: if is_paused {
+                studio_core::MachineState::Paused
+            } else if is_running {
+                studio_core::MachineState::Running
+            } else {
+                studio_core::MachineState::Idle
+            },
+            is_running,
+            is_paused,
             pos_x_mm: x as f64 / 1000.0,
             pos_y_mm: y as f64 / 1000.0,
             pos_z_mm: z.map(|v| v as f64 / 1000.0),

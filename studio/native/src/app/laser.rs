@@ -14,6 +14,8 @@ pub struct HoldJog {
 /// Kennzeichnung.
 #[derive(Default)]
 pub struct LaserLiveState {
+    /// Zuletzt gelesener geräteneutraler Betriebszustand.
+    pub machine_state: studio_core::MachineState,
     /// Kopfposition in absoluten Maschinen-mm (zuletzt erfolgreich gelesen).
     pub head: Option<(f64, f64)>,
     /// Z-/U-Achsenposition (mm), sofern der Treiber sie liefert.
@@ -171,6 +173,20 @@ impl App {
             self.laser_goto_reference();
             return;
         }
+        if action == studio_core::JobAction::Stop {
+            match self.laser_backend.stop_realtime() {
+                Ok(()) => {
+                    self.laser_live.machine_state = studio_core::MachineState::Unknown;
+                    self.laser_live.is_running = false;
+                    self.hub_runtime
+                        .set_lease_usage(studio_application::LeaseUsage::Idle);
+                    self.toasts.success("Sofort-Stopp gesendet.");
+                    self.request_laser_status_refresh();
+                }
+                Err(error) => self.app_error = Some(error),
+            }
+            return;
+        }
         if self.laser_action_rx.is_some() {
             self.toasts
                 .error("Eine Laser-Aktion wird bereits ausgeführt.");
@@ -187,6 +203,19 @@ impl App {
             Ok(rx) => {
                 self.laser_action_rx = Some(rx);
                 self.laser_action_pending = Some(action);
+                if matches!(
+                    action,
+                    studio_core::JobAction::SendJob | studio_core::JobAction::StreamGcode
+                ) {
+                    // Der Live-Poll kann den exklusiv genutzten Transport bis
+                    // zum Ende der Aktion nicht lesen. Die gestartete
+                    // Jobabsicht ist trotzdem ein verlässlicher Running-Zustand
+                    // für die Anzeige; der nächste echte Status ersetzt ihn.
+                    self.laser_live.machine_state = studio_core::MachineState::Running;
+                    self.laser_live.is_running = true;
+                    self.hub_runtime
+                        .set_lease_usage(studio_application::LeaseUsage::Running);
+                }
                 self.toasts.success("Laser-Aktion gestartet.");
             }
             Err(error) => self.app_error = Some(error),
@@ -213,7 +242,7 @@ impl App {
             Ok(message) => {
                 let usage = match action {
                     Some(studio_core::JobAction::SendJob | studio_core::JobAction::StreamGcode) => {
-                        Some(studio_application::LeaseUsage::Running)
+                        None
                     }
                     Some(studio_core::JobAction::Pause) => {
                         Some(studio_application::LeaseUsage::Paused)
@@ -461,6 +490,7 @@ impl App {
                             self.laser_live.pos_z = status.pos_z_mm;
                             self.laser_live.pos_u = status.pos_u_mm;
                             self.laser_live.rotary_on_y = status.rotary_on_y;
+                            self.laser_live.machine_state = status.state;
                             self.laser_live.head_note = None;
                             self.laser_live.is_running = status.is_running;
                             self.laser_live.error_backoff = false;

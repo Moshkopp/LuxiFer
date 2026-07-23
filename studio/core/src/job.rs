@@ -656,9 +656,24 @@ pub enum JogMotion {
     HoldStop,
 }
 
+/// Geräteunabhängiger Betriebszustand. Protokollspezifische Unterzustände
+/// werden vom jeweiligen Treiber zusammengefasst.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MachineState {
+    #[default]
+    Unknown,
+    Idle,
+    Running,
+    Paused,
+    DoorOpen,
+    Alarm,
+    Homing,
+}
+
 /// Momentaufnahme des Maschinenzustands (geräteneutral, mm).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MachineStatus {
+    pub state: MachineState,
     pub is_running: bool,
     pub is_paused: bool,
     pub pos_x_mm: f64,
@@ -801,6 +816,12 @@ pub trait MachineDriver {
 
     /// Geteilter Konsolenpuffer, sofern der Treiber Live-Diagnose anbietet.
     fn console_buffer(&self) -> Option<DriverConsoleBuffer> {
+        None
+    }
+
+    /// Vom lang laufenden Jobaufruf unabhängiger Echtzeitkanal. Der konkrete
+    /// Treiber entscheidet, wie die geräteneutrale Stop-Absicht umgesetzt wird.
+    fn realtime_control(&self) -> Option<std::sync::Arc<dyn MachineRealtimeControl>> {
         None
     }
 
@@ -971,6 +992,14 @@ pub trait MachineDriver {
         _layers: &[Layer],
         _params: &JobParams,
     ) -> Result<String, DriverError> {
+        Err(DriverError::NotSupported)
+    }
+}
+
+pub trait MachineRealtimeControl: Send + Sync {
+    fn stop(&self) -> Result<(), DriverError>;
+
+    fn status(&self) -> Result<MachineStatus, DriverError> {
         Err(DriverError::NotSupported)
     }
 }

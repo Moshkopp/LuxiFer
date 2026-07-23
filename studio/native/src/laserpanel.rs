@@ -5,7 +5,7 @@
 //! den `LaserService` aus (echte Treiber-Aktionen, hardwarelos getestet).
 
 use egui::{Color32, RichText, Sense, Vec2};
-use studio_core::{AxisDir, JobAction, MachineAxis, StartReference};
+use studio_core::{AxisDir, JobAction, MachineAxis, MachineState, StartReference};
 
 use crate::app::HoldJog;
 use crate::tools::LaserUi;
@@ -37,6 +37,8 @@ pub struct LaserView {
     pub can_export: bool,
     /// Bewusst aufgebauter Verbindungszustand des aktiven Profils.
     pub connected: bool,
+    /// Zuletzt geräteneutral gelesener Betriebszustand.
+    pub machine_state: MachineState,
     /// Aktiver Treiber unterstützt das ausdrückliche Entriegeln.
     pub can_unlock: bool,
     pub lease_pending: bool,
@@ -183,6 +185,9 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
                 (ui.visuals().weak_text_color(), "⏺ Getrennt")
             };
             ui.colored_label(color, label);
+            if view.connected {
+                ui.weak(format!("· {}", machine_state_label(view.machine_state)));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let clicked = if view.connected {
                     ui.button("Trennen").clicked()
@@ -401,6 +406,18 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     }
 
     actions
+}
+
+fn machine_state_label(state: MachineState) -> &'static str {
+    match state {
+        MachineState::Unknown => "Status unbekannt",
+        MachineState::Idle => "Bereit",
+        MachineState::Running => "Läuft",
+        MachineState::Paused => "Angehalten",
+        MachineState::DoorOpen => "Tür offen",
+        MachineState::Alarm => "Alarm",
+        MachineState::Homing => "Referenzfahrt",
+    }
 }
 
 /// Live-Positionsanzeige aller vier Achsen (rein informativ). Sitzt im linken
@@ -754,6 +771,7 @@ mod tests {
             slots: [None; 6],
             can_export: false,
             connected: false,
+            machine_state: MachineState::Unknown,
             can_unlock: false,
             lease_pending: false,
             saved_origins: vec![SavedOriginRow {
@@ -770,6 +788,17 @@ mod tests {
             rotary_active: false,
             hold_active: false,
         }
+    }
+
+    #[test]
+    fn maschinenzustaende_haben_geraeteneutrale_anzeigenamen() {
+        assert_eq!(machine_state_label(MachineState::Idle), "Bereit");
+        assert_eq!(machine_state_label(MachineState::Alarm), "Alarm");
+        assert_eq!(machine_state_label(MachineState::DoorOpen), "Tür offen");
+        assert_eq!(
+            machine_state_label(MachineState::Unknown),
+            "Status unbekannt"
+        );
     }
 
     /// Alle Textinhalte eines Frames (rekursiv über verschachtelte Shapes).
