@@ -47,11 +47,16 @@ werden können.
 - [x] Controller-Unlock (`$X`) ist geräteneutral angebunden und am nackten ESP32-S3 geprüft
 - [~] Homing (`$H`) ist geräteneutral angebunden; Zustandsfolge und Hardwareabnahme fehlen
 - [~] G-Code mit konservativem RX-Zeichenfenster senden und Quittungen zuordnen
+- [x] Serieller Transport-Worker mit exklusivem Portbesitz
+- [x] Live-Status während eines laufenden Streams priorisiert abfragen
+- [x] grblHAL-Stop `0x19` während eines `S0`-Jobs hardwaregeprüft
+- [x] Mini-/klassisches GRBL verwendet ausdrücklich den kompatiblen
+  Soft-Reset-Fallback `0x18`
 - [ ] GRBL-Treiber für den Betrieb einer angeschlossenen Maschine freigegeben
 
-Bereits hardwaregeprüft wurde ausschließlich der sichere Leseweg am nackten
-ESP32: Öffnen, Handshake, Identifikation und Status. Es wurden dabei keine
-Bewegungs- oder Laserbefehle gesendet.
+Hardwaregeprüft wurden am nackten ESP32 Öffnen, Handshake, Identifikation,
+Status, Unlock, gepuffertes Streaming ausschließlich mit `S0` sowie der
+kontrollierte grblHAL-Stop `0x19`. Es wurde keine Laserleistung angefordert.
 
 ## Phase 1 – Sichere Maschinensteuerung
 
@@ -65,8 +70,8 @@ Bewegungs- oder Laserbefehle gesendet.
 | Jog-Abbruch | [ ] | Treiber | Echtzeit-Abbruch bleibt auch während einer Bewegung erreichbar |
 | Feed Hold | [ ] | Treiber | Pause verwendet den GRBL-Echtzeitbefehl und bestätigt den Hold-Status |
 | Fortsetzen | [ ] | Core-Vertrag + Treiber | Geräteunabhängige Resume-Absicht ist definiert und GRBL-spezifisch umgesetzt |
-| Soft-Reset | [ ] | Treiber | Reset ist erreichbar, Zustand danach wird neu eingelesen |
-| Sofort-Stopp | [ ] | Treiber/Transport | Stop ist auch während Streaming jederzeit erreichbar und schaltet sicher ab |
+| Soft-Reset | [~] | Treiber | Mini-/klassisches GRBL verwendet `0x18`; Zustandsabnahme fehlt |
+| Sofort-Stopp | [x] | Treiber/Transport | grblHAL-Stop `0x19` erreicht den laufenden `S0`-Stream ohne Alarm |
 
 ### Sicherheitsabnahme Phase 1
 
@@ -84,7 +89,7 @@ Bewegungs- oder Laserbefehle gesendet.
 | Transport-Worker mit Steuerkanal | [~] | GRBL-Treiber | Worker besitzt den Port exklusiv; Status und Stop sind priorisiert, Pause fehlt noch |
 | Kontrollierter Startzustand | [x] | Treiber | Start wird in Alarm, Door und unzulässigem Hold abgelehnt |
 | Fortschritt | [ ] | Treiber → Application | Bestätigte Befehle und Gesamtzahl werden geräteunabhängig gemeldet |
-| Sofortiger Abbruch | [~] | Treiber | grblHAL nutzt priorisiert `0x19`, Mini-GRBL `0x18`; Hardwareabnahme für `0x19` fehlt |
+| Sofortiger Abbruch | [x] | Treiber | grblHAL nutzt hardwaregeprüft `0x19`; Mini-GRBL fällt ausdrücklich auf `0x18` zurück |
 | Sicheres Laser-Aus | [ ] | Treiber | Erfolg, Fehler und Abbruch enden garantiert mit ausgeschalteter Laserleistung |
 | Pufferverwaltung | [~] | Treiber | Controllerpuffer wird schneller als Stop-and-wait genutzt, ohne Überlauf |
 | Übertragungsende erkennen | [ ] | Treiber | „Alle Zeilen bestätigt“ ist von „Maschine Idle“ getrennt sichtbar |
@@ -138,6 +143,19 @@ separate Parser-, Wertebereichs- und Roundtrip-Tests.
 | Verbindungsverlust | [ ] | Application | Dieselbe Lifecycle-Semantik wie bei Serial |
 | Funktionsparität | [ ] | Treiber | Jog, Stop, Status und Job verhalten sich über beide Transporte gleich |
 
+## GRBL-Treiberfamilie
+
+| Strategie | Status | Abgrenzung |
+|---|---:|---|
+| grblHAL | [~] | Gemeinsamer Parser/Streamer, Stop über `0x19`, Serial produktiv in Arbeit |
+| Mini-/klassisches GRBL | [~] | Gemeinsamer Parser/Streamer, Stop-Fallback über `0x18` |
+| FluidNC | [ ] | Geplante Familienstrategie; Fähigkeiten und Transport erst nach Hardware-/Protokollaufnahme |
+
+Die Strategien teilen G-Code, Quittungszuordnung, Statusparser und
+geräteunabhängige Absichten. Dialektspezifische Echtzeitbefehle,
+Konfigurationen und Transportfähigkeiten bleiben innerhalb `driver-grbl`.
+Ruida verwendet weiterhin seinen vollständig eigenen Treiber und Transport.
+
 ## Definition of Done pro Aufgabe
 
 Eine Aufgabe wird erst `[x]`, wenn alle zutreffenden Punkte erfüllt sind:
@@ -161,9 +179,14 @@ Eine Aufgabe wird erst `[x]`, wenn alle zutreffenden Punkte erfüllt sind:
   konservativen 116-Byte-Zeichenfenster hardwaregeprüft. Das Testprogramm
   verwendete ausschließlich `S0`, eine virtuelle Bewegung von maximal 2 mm und
   endete bestätigt im Zustand `Idle`. Es wurde keine Laserleistung angefordert.
+- 2026-07-23, derselbe nackte ESP32-S3 mit grblHAL: einen laufenden,
+  gepufferten Job ausschließlich mit `S0` über den priorisierten
+  Echtzeitbefehl `0x19` gestoppt. Der Stream wurde beendet, der Controller
+  wechselte nicht in den Alarmzustand und benötigte keinen Soft-Reset.
 
 ## Nächster Arbeitsblock
 
-1. Das Zeichenfenster in einen priorisierten Transport-Worker für Pause und Stop überführen.
-2. Homing erst mit angeschlossenen Endschaltern sicher hardwareprüfen und die Statusfolge erfassen.
-3. Schritt-Jog und sicheren Jog-Abbruch implementieren.
+1. Feed Hold `!` und Fortsetzen `~` über den priorisierten Transport-Worker implementieren.
+2. Fortschritt sowie „alle Zeilen bestätigt“ getrennt von „Maschine Idle“ melden.
+3. Homing erst mit angeschlossenen Endschaltern sicher hardwareprüfen und die Statusfolge erfassen.
+4. Schritt-Jog und sicheren Jog-Abbruch implementieren.
