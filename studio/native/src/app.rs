@@ -133,6 +133,13 @@ pub struct App {
     /// Live gelesener Maschinen-Anzeigestand (Kopf/Benutzerursprung, ADR 0020).
     pub laser_live: laser::LaserLiveState,
     pub laser_console_open: bool,
+    /// Automatische Live-Statusabfragen; in der Konsole pausierbar.
+    pub laser_auto_poll: bool,
+    /// Bearbeitbarer Einzelbefehl der Geräte-Konsole.
+    pub laser_console_command: String,
+    /// Laufender Konsolenbefehl; Ergebnis wird ohne Blockieren gepollt.
+    pub laser_console_command_rx:
+        Option<std::sync::mpsc::Receiver<Result<(), studio_application::AppError>>>,
     /// Laufende Geräteaktion; der UI-Thread pollt nur ihr Ergebnis.
     laser_action_rx:
         Option<std::sync::mpsc::Receiver<Result<String, studio_application::AppError>>>,
@@ -300,6 +307,9 @@ impl App {
             laser_hold_seen: None,
             laser_live: Default::default(),
             laser_console_open: false,
+            laser_auto_poll: true,
+            laser_console_command: String::new(),
+            laser_console_command_rx: None,
             laser_action_rx: None,
             laser_action_pending: None,
             saved_origin_dialog: None,
@@ -691,6 +701,7 @@ impl App {
             A::LaserJogAxis(axis, dir) => self.laser_jog_axis_step(axis, dir),
             A::LaserHoldFrame(hold) => self.laser_hold_frame(hold),
             A::LaserHome => self.laser_home(),
+            A::LaserUnlock => self.laser_unlock(),
             A::OpenLaserManager { create_new } => self.open_laser_manager(create_new),
             A::OpenRotaryDialog => self.open_rotary_dialog(),
             A::LaserSelectStartReference(reference) => self.laser_set_start_reference(reference),
@@ -783,7 +794,7 @@ impl App {
         // Gedrosseltes Live-Lesen der Maschinenposition im Laser-Tab (ADR
         // 0020). Läuft VOR dem UI-Aufbau, damit Panel und Marker denselben
         // Anzeigestand dieses Frames sehen.
-        if self.view == crate::tools::View::Laser {
+        if self.view == crate::tools::View::Laser && self.laser_auto_poll {
             self.poll_laser_status();
         }
         // egui-Frame bauen (Panels): die Closure braucht `&mut App`, daher hier

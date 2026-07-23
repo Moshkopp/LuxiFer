@@ -3,8 +3,77 @@
 
 use studio_core::geometry::Geo;
 use studio_core::{
-    Connection, DriverKind, JobAction, LaserProfile, LaserRegistry, SavedOrigin, StartReference,
+    Connection, DriverKind, JobAction, LaserProfile, LaserRegistry, SavedOrigin,
+    SerialDeviceIdentity, StartReference,
 };
+
+fn serial_port(name: &str, vid: u16, pid: u16, serial: Option<&str>) -> super::SerialPortInfo {
+    super::SerialPortInfo {
+        name: name.into(),
+        kind: format!("USB {vid:04x}:{pid:04x}"),
+        product: None,
+        manufacturer: None,
+        serial_number: serial.map(str::to_owned),
+        vendor_id: Some(vid),
+        product_id: Some(pid),
+    }
+}
+
+#[test]
+fn usb_identitaet_folgt_dem_geraet_auf_einen_neuen_port() {
+    let identity = SerialDeviceIdentity {
+        vendor_id: 0x303a,
+        product_id: 0x4001,
+        serial_number: Some("esp-1".into()),
+    };
+    let ports = vec![serial_port("/dev/ttyACM1", 0x303a, 0x4001, Some("esp-1"))];
+    let selected = super::select_serial_port(&ports, "/dev/ttyACM0", &identity).unwrap();
+    assert_eq!(selected.name, "/dev/ttyACM1");
+}
+
+#[test]
+fn gleiche_usb_geraete_ohne_seriennummer_sind_nicht_still_austauschbar() {
+    let identity = SerialDeviceIdentity {
+        vendor_id: 0x303a,
+        product_id: 0x4001,
+        serial_number: None,
+    };
+    let ports = vec![
+        serial_port("/dev/ttyACM1", 0x303a, 0x4001, None),
+        serial_port("/dev/ttyACM2", 0x303a, 0x4001, None),
+    ];
+    let error = super::select_serial_port(&ports, "/dev/ttyACM0", &identity).unwrap_err();
+    assert_eq!(error.code(), "serial_device_ambiguous");
+}
+
+#[test]
+fn konsolenbefehl_wird_getrimmt_und_mehrzeilig_abgewiesen() {
+    assert_eq!(
+        super::validated_console_command("  $14=73  ").unwrap(),
+        "$14=73"
+    );
+    assert_eq!(
+        super::validated_console_command("$X\n$H")
+            .unwrap_err()
+            .code(),
+        "console_command_invalid"
+    );
+    assert_eq!(
+        super::validated_console_command("  ").unwrap_err().code(),
+        "console_command_empty"
+    );
+}
+
+#[test]
+fn laufender_geraeteworker_blockiert_den_aufrufer_nicht() {
+    let mut service = service_with_ruida();
+    service.with_driver(false, |_| Ok(())).unwrap();
+    let driver = service.driver.as_ref().unwrap().clone();
+    let _worker_guard = driver.lock().unwrap();
+
+    let error = service.with_driver(false, |_| Ok(())).unwrap_err();
+    assert_eq!(error.code(), "laser_driver_busy");
+}
 
 use super::LaserService;
 

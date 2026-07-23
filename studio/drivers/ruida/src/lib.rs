@@ -389,6 +389,8 @@ impl MachineDriver for RuidaDriver {
             // Die vier *_step_length-Register (0x0021/31/41/51) sind lesbar und
             // über write_machine_settings schreibbar.
             axis_step_calibration: true,
+            unlock: false,
+            console_commands: false,
         }
     }
 

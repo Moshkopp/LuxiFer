@@ -219,6 +219,7 @@ fn basic_data(ui: &mut egui::Ui, state: &mut LaserManagerState, outcome: &mut La
                     DriverKind::Grbl | DriverKind::MiniGrbl => Connection::Seriell {
                         port: "/dev/ttyUSB0".into(),
                         baud: 115_200,
+                        device: None,
                     },
                 };
             }
@@ -239,7 +240,7 @@ fn basic_data(ui: &mut egui::Ui, state: &mut LaserManagerState, outcome: &mut La
                     }
                     ui.end_row();
                 }
-                Connection::Seriell { port, baud } => {
+                Connection::Seriell { port, baud, device } => {
                     ui.label("Schnittstelle");
                     ui.horizontal(|ui| {
                         let selected = state
@@ -257,11 +258,25 @@ fn basic_data(ui: &mut egui::Ui, state: &mut LaserManagerState, outcome: &mut La
                             .width(300.0)
                             .show_ui(ui, |ui| {
                                 for candidate in &state.serial_ports {
-                                    ui.selectable_value(
-                                        port,
-                                        candidate.name.clone(),
-                                        candidate.label(),
-                                    );
+                                    if ui
+                                        .selectable_label(
+                                            candidate.name == *port,
+                                            candidate.label(),
+                                        )
+                                        .clicked()
+                                    {
+                                        *port = candidate.name.clone();
+                                        *device = candidate
+                                            .vendor_id
+                                            .zip(candidate.product_id)
+                                            .map(|(vendor_id, product_id)| {
+                                                studio_core::SerialDeviceIdentity {
+                                                    vendor_id,
+                                                    product_id,
+                                                    serial_number: candidate.serial_number.clone(),
+                                                }
+                                            });
+                                    }
                                 }
                             });
                         if ui

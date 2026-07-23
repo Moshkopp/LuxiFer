@@ -37,6 +37,8 @@ pub struct LaserView {
     pub can_export: bool,
     /// Bewusst aufgebauter Verbindungszustand des aktiven Profils.
     pub connected: bool,
+    /// Aktiver Treiber unterstützt das ausdrückliche Entriegeln.
+    pub can_unlock: bool,
     pub lease_pending: bool,
     /// Gespeicherte Nullpunkte des aktiven Lasers (fürs „Starten von"-Dropdown;
     /// verwaltet werden sie in der Laser-Verwaltung).
@@ -385,6 +387,15 @@ pub fn show(ui: &mut egui::Ui, view: &LaserView, ui_state: &mut LaserUi) -> Vec<
     );
 
     ui.add_space(8.0);
+    if ui
+        .add_enabled(
+            view.connected && view.can_unlock,
+            egui::Button::new("Controller entsperren"),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::LaserUnlock);
+    }
     if ui.button("Konsole öffnen").clicked() {
         actions.push(UiAction::OpenLaserConsole);
     }
@@ -743,6 +754,7 @@ mod tests {
             slots: [None; 6],
             can_export: false,
             connected: false,
+            can_unlock: false,
             lease_pending: false,
             saved_origins: vec![SavedOriginRow {
                 id: "origin-1".into(),

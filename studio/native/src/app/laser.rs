@@ -416,6 +416,13 @@ impl App {
         self.request_laser_status_refresh();
     }
 
+    pub fn laser_unlock(&mut self) {
+        if let Err(error) = self.laser_backend.unlock() {
+            self.app_error = Some(error);
+        }
+        self.request_laser_status_refresh();
+    }
+
     // --- Positionsanzeige, Startreferenz und Werkstück-Nullpunkte (ADR 0020) --
 
     /// Erzwingt beim nächsten Frame eine frische Statuslesung (nach Verbinden,

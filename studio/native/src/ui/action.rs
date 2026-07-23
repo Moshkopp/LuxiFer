@@ -140,6 +140,8 @@ pub enum UiAction {
     LaserHoldFrame(Option<crate::app::HoldJog>),
     /// Laserkopf homen.
     LaserHome,
+    /// Verriegelten Controller ausdrücklich freigeben.
+    LaserUnlock,
     /// Eigenständige Laserprofil-Verwaltung öffnen.
     OpenLaserManager {
         create_new: bool,

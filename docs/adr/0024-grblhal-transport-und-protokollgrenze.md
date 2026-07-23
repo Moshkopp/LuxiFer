@@ -1,5 +1,9 @@
 # ADR 0024: grblHAL-Transport und Protokollgrenze
 
+Die veränderliche Umsetzungs- und Abnahmeliste liegt in der
+[GRBLHAL-Roadmap](../roadmap/grblhal.md). Dieses ADR hält ausschließlich die
+dauerhaften Architekturentscheidungen fest.
+
 ## Status
 
 In Umsetzung — 2026-07-22.

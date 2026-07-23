@@ -681,6 +681,68 @@ pub struct DriverConsoleLine {
     pub text: String,
 }
 
+/// Vom Treiber-Mutex unabhängiger, begrenzter Konsolenpuffer. Ein laufender
+/// Geräte-Worker kann schreiben, während die Oberfläche Snapshots liest.
+#[derive(Clone, Default)]
+pub struct DriverConsoleBuffer {
+    lines: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<DriverConsoleLine>>>,
+}
+
+impl DriverConsoleBuffer {
+    pub fn snapshot(&self) -> Vec<DriverConsoleLine> {
+        self.lines
+            .lock()
+            .map(|lines| lines.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn push(&self, direction: DriverConsoleDirection, text: impl Into<String>) {
+        let text = text.into();
+        if let Ok(mut lines) = self.lines.lock() {
+            if direction == DriverConsoleDirection::Received && text == "ok" {
+                if let Some(last) = lines.back_mut() {
+                    if last.direction == DriverConsoleDirection::Received {
+                        if last.text == "ok" {
+                            last.text = "ok × 2".into();
+                            return;
+                        }
+                        if let Some(count) = last
+                            .text
+                            .strip_prefix("ok × ")
+                            .and_then(|count| count.parse::<usize>().ok())
+                        {
+                            last.text = format!("ok × {}", count + 1);
+                            return;
+                        }
+                    }
+                }
+            }
+            if lines.len() == 500 {
+                lines.pop_front();
+            }
+            lines.push_back(DriverConsoleLine { direction, text });
+        }
+    }
+}
+
+#[cfg(test)]
+mod console_buffer_tests {
+    use super::{DriverConsoleBuffer, DriverConsoleDirection};
+
+    #[test]
+    fn quittungen_werden_kompakt_aber_zaehlbar_gespeichert() {
+        let console = DriverConsoleBuffer::default();
+        console.push(DriverConsoleDirection::Received, "ok");
+        console.push(DriverConsoleDirection::Received, "ok");
+        console.push(DriverConsoleDirection::Received, "ok");
+        assert_eq!(console.snapshot()[0].text, "ok × 3");
+
+        console.push(DriverConsoleDirection::Sent, "G1 X1");
+        console.push(DriverConsoleDirection::Received, "ok");
+        assert_eq!(console.snapshot().len(), 3);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriverConsoleDirection {
     Sent,
@@ -735,6 +797,18 @@ pub trait MachineDriver {
     /// Begrenzter Diagnose-Snapshot; leer bei Treibern ohne Konsolenquelle.
     fn console_snapshot(&self) -> Vec<DriverConsoleLine> {
         Vec::new()
+    }
+
+    /// Geteilter Konsolenpuffer, sofern der Treiber Live-Diagnose anbietet.
+    fn console_buffer(&self) -> Option<DriverConsoleBuffer> {
+        None
+    }
+
+    /// Sendet genau einen vom Benutzer ausdrücklich eingegebenen
+    /// Diagnose-/Konfigurationsbefehl. Interpretation und Protokoll bleiben
+    /// vollständig im konkreten Treiber.
+    fn send_console_command(&self, _command: &str) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
     }
 
     /// Maschinenparameter lesen, sofern der Treiber diese Capability anbietet.
@@ -817,6 +891,12 @@ pub trait MachineDriver {
 
     /// Referenzfahrt (absolut zum Nullpunkt).
     fn home(&self, _speed_mm_s: f64) -> Result<(), DriverError> {
+        Err(DriverError::NotSupported)
+    }
+
+    /// Einen verriegelten Controller für nachfolgende Bewegungen freigeben.
+    /// Die Absicht ist geräteneutral; das konkrete Kommando bleibt im Treiber.
+    fn unlock(&self) -> Result<(), DriverError> {
         Err(DriverError::NotSupported)
     }
 
@@ -910,6 +990,10 @@ pub struct DriverCapabilities {
     /// Schreibzugriff melden `false`; die UI blendet die Kalibrierung dann aus,
     /// statt sie ins Leere laufen zu lassen.
     pub axis_step_calibration: bool,
+    /// Controller kann nach einem Alarm ausdrücklich entriegelt werden.
+    pub unlock: bool,
+    /// Treiber akzeptiert bewusst eingegebene Einzelbefehle in der Konsole.
+    pub console_commands: bool,
 }
 
 /// Einheit eines editierbaren Maschinenparameters.

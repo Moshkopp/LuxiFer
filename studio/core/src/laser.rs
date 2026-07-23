@@ -86,7 +86,24 @@ pub enum Connection {
     /// Netzwerk (Ruida: UDP). `port` optional — der Treiber kennt seinen Standard.
     Netz { ip: String, port: Option<u16> },
     /// Serielle Schnittstelle (GRBL/Marlin).
-    Seriell { port: String, baud: u32 },
+    Seriell {
+        /// Zuletzt gewählter Gerätepfad; dient auch als Fallback für Ports
+        /// ohne stabile USB-Identität.
+        port: String,
+        baud: u32,
+        /// Stabile USB-Identität, damit ein Gerät nach dem Wiedereinstecken
+        /// unter einem anderen `/dev/ttyACM*`-Pfad wiedergefunden wird.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device: Option<SerialDeviceIdentity>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SerialDeviceIdentity {
+    pub vendor_id: u16,
+    pub product_id: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial_number: Option<String>,
 }
 
 impl Default for Connection {

@@ -8,6 +8,8 @@ pub struct SerialPortInfo {
     pub product: Option<String>,
     pub manufacturer: Option<String>,
     pub serial_number: Option<String>,
+    pub vendor_id: Option<u16>,
+    pub product_id: Option<u16>,
 }
 
 impl SerialPortInfo {
@@ -26,16 +28,24 @@ pub fn available_ports() -> Result<Vec<SerialPortInfo>, String> {
         .map_err(|error| format!("Serielle Anschlüsse konnten nicht gelesen werden: {error}"))?
         .into_iter()
         .map(|port| {
-            let (kind, product, manufacturer, serial_number) = match port.port_type {
+            let (kind, product, manufacturer, serial_number, vendor_id, product_id) = match port
+                .port_type
+            {
                 serialport::SerialPortType::UsbPort(usb) => (
                     format!("USB {:04x}:{:04x}", usb.vid, usb.pid),
                     usb.product,
                     usb.manufacturer,
                     usb.serial_number,
+                    Some(usb.vid),
+                    Some(usb.pid),
                 ),
-                serialport::SerialPortType::BluetoothPort => ("Bluetooth".into(), None, None, None),
-                serialport::SerialPortType::PciPort => ("PCI".into(), None, None, None),
-                serialport::SerialPortType::Unknown => ("Seriell".into(), None, None, None),
+                serialport::SerialPortType::BluetoothPort => {
+                    ("Bluetooth".into(), None, None, None, None, None)
+                }
+                serialport::SerialPortType::PciPort => ("PCI".into(), None, None, None, None, None),
+                serialport::SerialPortType::Unknown => {
+                    ("Seriell".into(), None, None, None, None, None)
+                }
             };
             SerialPortInfo {
                 name: port.port_name,
@@ -43,6 +53,8 @@ pub fn available_ports() -> Result<Vec<SerialPortInfo>, String> {
                 product,
                 manufacturer,
                 serial_number,
+                vendor_id,
+                product_id,
             }
         })
         .collect::<Vec<_>>();

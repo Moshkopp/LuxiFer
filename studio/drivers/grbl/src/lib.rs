@@ -150,6 +150,13 @@ impl GrblDriver {
         g.push_str("G21\n"); // mm
         g.push_str("G90\n"); // absolut
         g.push_str("M5\n"); // Laser aus (sicher)
+        if self.config.dynamic_power {
+            // M4 einmal bei leerem Planer aktivieren. Im GRBL-Lasermodus
+            // unterdrückt G0 die Leistung automatisch; S wird direkt mit der
+            // jeweiligen Arbeitsbewegung geplant. So erzwingen M4/M5 keine
+            // Synchronisationspause nach jeder Leerfahrt.
+            g.push_str("M4 S0\n");
+        }
         g.push_str("G0 X0 Y0\n");
 
         for (layer_id, speed, power, motions) in grbl_motion_program(plan) {
@@ -165,11 +172,18 @@ impl GrblDriver {
             let mut laser_active = false;
             for motion in motions {
                 if motion.kind == studio_core::ExecutionKind::Travel {
-                    if laser_active {
+                    if laser_active && !self.config.dynamic_power {
                         g.push_str("M5\n");
                         laser_active = false;
                     }
                     g.push_str(&format!("G0 X{} Y{}\n", num(motion.to.0), num(motion.to.1)));
+                } else if self.config.dynamic_power {
+                    g.push_str(&format!(
+                        "G1 X{} Y{} S{}\n",
+                        num(motion.to.0),
+                        num(motion.to.1),
+                        num(s)
+                    ));
                 } else {
                     if !laser_active {
                         g.push_str(&format!("{laser_on} S{}\n", num(s)));
@@ -178,7 +192,7 @@ impl GrblDriver {
                     g.push_str(&format!("G1 X{} Y{}\n", num(motion.to.0), num(motion.to.1)));
                 }
             }
-            if laser_active {
+            if laser_active && !self.config.dynamic_power {
                 g.push_str("M5\n");
             }
         }
@@ -202,6 +216,8 @@ impl MachineDriver for GrblDriver {
     fn capabilities(&self) -> studio_core::DriverCapabilities {
         studio_core::DriverCapabilities {
             position_read: true,
+            unlock: true,
+            console_commands: true,
             ..Default::default()
         }
     }
@@ -235,7 +251,7 @@ impl MachineDriver for GrblDriver {
     }
 
     fn connect(&mut self, connection: &studio_core::Connection) -> Result<(), DriverError> {
-        let studio_core::Connection::Seriell { port, baud } = connection else {
+        let studio_core::Connection::Seriell { port, baud, .. } = connection else {
             return Err(DriverError::Transport(
                 "GRBL benötigt eine serielle Verbindung.".into(),
             ));
@@ -263,6 +279,19 @@ impl MachineDriver for GrblDriver {
             .unwrap_or_default()
     }
 
+    fn console_buffer(&self) -> Option<studio_core::DriverConsoleBuffer> {
+        self.transport
+            .as_ref()
+            .map(transport::SerialTransport::console_buffer)
+    }
+
+    fn send_console_command(&self, command: &str) -> Result<(), DriverError> {
+        self.transport
+            .as_ref()
+            .ok_or(DriverError::NotConnected)?
+            .command(command)
+    }
+
     fn status(&self) -> Result<studio_core::MachineStatus, DriverError> {
         let transport = self.transport.as_ref().ok_or(DriverError::NotConnected)?;
         let status = transport.status()?;
@@ -285,6 +314,20 @@ impl MachineDriver for GrblDriver {
         let transport = self.transport.as_ref().ok_or(DriverError::NotConnected)?;
         transport.send_program(bytes)?;
         Ok(())
+    }
+
+    fn unlock(&self) -> Result<(), DriverError> {
+        self.transport
+            .as_ref()
+            .ok_or(DriverError::NotConnected)?
+            .command("$X")
+    }
+
+    fn home(&self, _speed_mm_s: f64) -> Result<(), DriverError> {
+        self.transport
+            .as_ref()
+            .ok_or(DriverError::NotConnected)?
+            .command("$H")
     }
 
     fn compile_with(
@@ -385,11 +428,43 @@ mod tests {
             .unwrap_or(115_200);
         let mut driver = GrblDriver::default();
         driver
-            .connect(&studio_core::Connection::Seriell { port, baud })
+            .connect(&studio_core::Connection::Seriell {
+                port,
+                baud,
+                device: None,
+            })
             .expect("Handshake");
         let status = driver.status().expect("Status");
         assert!(status.pos_x_mm.is_finite());
         assert!(status.pos_y_mm.is_finite());
+        driver.disconnect();
+    }
+
+    /// Expliziter Hardware-Smoke-Test für das gepufferte Zeichenfenster.
+    /// Bewegt nur die interne Testcontroller-Position und verwendet
+    /// ausschließlich `S0`, sodass keine Laserleistung angefordert wird.
+    #[test]
+    #[ignore = "benötigt einen nackten, ausdrücklich freigegebenen GRBL-Testcontroller"]
+    fn hardware_gepuffertes_streaming_mit_nullleistung() {
+        let port = std::env::var("GRBL_PORT").expect("GRBL_PORT fehlt");
+        let baud = std::env::var("GRBL_BAUD")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(115_200);
+        let mut driver = GrblDriver::default();
+        driver
+            .connect(&studio_core::Connection::Seriell {
+                port,
+                baud,
+                device: None,
+            })
+            .expect("Handshake");
+        driver.unlock().expect("Testcontroller entsperren");
+        driver
+            .send_job(b"G21\nG90\nM5\nM4 S0\nG0 X1 Y1\nF12000\nG1 X2 Y1 S0\nG0 X0 Y0\nM5\n")
+            .expect("Gepuffertes S0-Testprogramm");
+        let status = driver.status().expect("Status nach Testprogramm");
+        assert!(!status.is_running);
         driver.disconnect();
     }
 
@@ -410,8 +485,10 @@ mod tests {
         let g = GrblDriver::default().to_gcode(&plan, &layers);
         assert!(g.contains("G0 X10 Y10")); // Startpunkt anfahren
         assert!(g.contains("G1 X30 Y10")); // erste Kante
-        assert!(g.contains("M4 S400")); // Laser an (dynamisch)
-                                        // Geschlossenes Rechteck kehrt zum Start zurück.
+        assert!(g.contains("M4 S0")); // Dynamischen Lasermodus einmal aktivieren.
+        assert!(g.contains("G1 X30 Y10 S400")); // Leistung mit der Bewegung planen.
+        assert_eq!(g.matches("M4").count(), 1);
+        // Geschlossenes Rechteck kehrt zum Start zurück.
         let last_g1 = g.matches("G1 X10 Y10").count();
         assert!(last_g1 >= 1);
     }

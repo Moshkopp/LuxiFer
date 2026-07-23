@@ -181,7 +181,7 @@ impl ApplicationHandler for Runner {
         if app.poll_laser_action() {
             app.window.request_redraw();
         }
-        if app.view == crate::tools::View::Laser && app.poll_laser_status() {
+        if app.view == crate::tools::View::Laser && app.laser_auto_poll && app.poll_laser_status() {
             app.window.request_redraw();
         }
         // Ohne View-Bedingung: die Kalibrierung läuft im Verwaltungsdialog,

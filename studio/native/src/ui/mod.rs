@@ -892,38 +892,72 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
     }
 
     if app.laser_console_open {
+        if let Some(receiver) = app.laser_console_command_rx.as_ref() {
+            match receiver.try_recv() {
+                Ok(Ok(())) => {
+                    app.laser_console_command_rx = None;
+                }
+                Ok(Err(error)) => {
+                    app.laser_console_command_rx = None;
+                    app.app_error = Some(error);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    app.laser_console_command_rx = None;
+                    app.app_error = Some(studio_application::AppError::new(
+                        "console_command_worker",
+                        "Der Konsolenbefehl wurde unerwartet abgebrochen.",
+                    ));
+                }
+            }
+        }
         let lines = app.laser_backend.console_snapshot();
         let connected = app.laser_backend.is_connected();
+        let can_send = app.laser_backend.driver_capabilities().console_commands;
+        let command_pending = app.laser_console_command_rx.is_some();
         let mut open = true;
+        let mut send_requested = false;
+        let screen = ui.ctx().content_rect();
+        let console_size = egui::vec2(
+            (screen.width() * 0.6).max(380.0),
+            (screen.height() * 0.6).max(240.0),
+        );
         egui::Window::new("Geräte-Konsole")
             .id(egui::Id::new("laser_device_console"))
             .open(&mut open)
-            .resizable(true)
+            .resizable(false)
             .movable(true)
-            .default_size(egui::vec2(720.0, 420.0))
-            .min_size(egui::vec2(420.0, 220.0))
+            .constrain(true)
+            .fixed_size(console_size)
             .show(ui.ctx(), |ui| {
                 ui.horizontal(|ui| {
                     let state = if connected { "Verbunden" } else { "Getrennt" };
                     ui.strong(state);
                     ui.separator();
-                    ui.weak(format!("{} Zeilen · nur lesend", lines.len()));
+                    ui.weak(format!("{} Zeilen", lines.len()));
+                    ui.separator();
+                    ui.checkbox(&mut app.laser_auto_poll, "Status automatisch lesen");
                 });
                 ui.separator();
+                // Kopf und Eingabe bleiben immer sichtbar; nur das wachsende
+                // Protokoll erhält die restliche Fensterhöhe.
+                let log_height = (ui.available_height() - 82.0).max(100.0);
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(0x10, 0x13, 0x18))
                     .corner_radius(4.0)
                     .inner_margin(10.0)
                     .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        if lines.is_empty() {
+                            ui.weak("Noch keine Gerätedaten.");
+                        }
+                        let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
                         egui::ScrollArea::vertical()
                             .stick_to_bottom(true)
                             .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.set_min_width(ui.available_width());
-                                if lines.is_empty() {
-                                    ui.weak("Noch keine Gerätedaten.");
-                                }
-                                for line in &lines {
+                            .max_height(log_height)
+                            .show_rows(ui, row_height, lines.len(), |ui, range| {
+                                for line in &lines[range] {
                                     let (prefix, color) = match line.direction {
                                         studio_core::DriverConsoleDirection::Sent => {
                                             (">", egui::Color32::from_rgb(0x79, 0xc0, 0xff))
@@ -943,8 +977,46 @@ pub fn build(ui: &mut egui::Ui, app: &mut App) {
                                 }
                             });
                     });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let enabled = connected && can_send && !command_pending;
+                    let edit = ui.add_enabled(
+                        enabled,
+                        egui::TextEdit::singleline(&mut app.laser_console_command)
+                            .hint_text("GRBL-Befehl, z. B. $14=73")
+                            .desired_width(f32::INFINITY),
+                    );
+                    let enter = edit.lost_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    let clicked = ui
+                        .add_enabled(enabled, egui::Button::new("Senden"))
+                        .clicked();
+                    send_requested = enter || clicked;
+                    if command_pending {
+                        ui.spinner();
+                    }
+                });
+                if !can_send {
+                    ui.weak("Der aktive Treiber unterstützt keine Konsolenbefehle.");
+                } else {
+                    ui.weak(
+                        "Befehle werden unverändert gesendet und können die Maschinenkonfiguration dauerhaft ändern.",
+                    );
+                }
             });
         app.laser_console_open = open;
+        if send_requested {
+            match app
+                .laser_backend
+                .send_console_command_async(&app.laser_console_command)
+            {
+                Ok(receiver) => {
+                    app.laser_console_command_rx = Some(receiver);
+                    app.laser_console_command.clear();
+                }
+                Err(error) => app.app_error = Some(error),
+            }
+        }
         if connected && open {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(500));
@@ -1282,6 +1354,7 @@ fn laser_view(app: &mut App) -> laserpanel::LaserView {
         slots,
         can_export,
         connected,
+        can_unlock: capabilities.unlock,
         lease_pending: app.laser_lease_pending,
         saved_origins,
         reference_missing,

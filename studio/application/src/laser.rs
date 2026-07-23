@@ -111,6 +111,82 @@ fn connection_target(profile: &LaserProfile) -> String {
     }
 }
 
+/// Löst eine gespeicherte USB-Identität auf den aktuellen Gerätepfad auf.
+/// Alte Profile und echte serielle Ports ohne USB-Metadaten verwenden weiter
+/// ihren gespeicherten Pfad.
+fn resolved_connection(connection: &Connection) -> Result<Connection, AppError> {
+    let Connection::Seriell { port, baud, device } = connection else {
+        return Ok(connection.clone());
+    };
+    let Some(identity) = device else {
+        return Ok(connection.clone());
+    };
+    let ports = available_serial_ports()?;
+    let selected = select_serial_port(&ports, port, identity)?;
+    Ok(Connection::Seriell {
+        port: selected.name,
+        baud: *baud,
+        device: Some(identity.clone()),
+    })
+}
+
+fn select_serial_port(
+    ports: &[SerialPortInfo],
+    previous_port: &str,
+    identity: &studio_core::SerialDeviceIdentity,
+) -> Result<SerialPortInfo, AppError> {
+    let matches = ports
+        .iter()
+        .filter(|candidate| {
+            candidate.vendor_id == Some(identity.vendor_id)
+                && candidate.product_id == Some(identity.product_id)
+                && identity
+                    .serial_number
+                    .as_ref()
+                    .is_none_or(|serial| candidate.serial_number.as_ref() == Some(serial))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if matches.is_empty() {
+        return Err(AppError::new(
+            "serial_device_missing",
+            format!(
+                "Das USB-Gerät {:04x}:{:04x} ist nicht angeschlossen.",
+                identity.vendor_id, identity.product_id
+            ),
+        ));
+    }
+    let selected = matches
+        .iter()
+        .find(|candidate| candidate.name == previous_port)
+        .cloned()
+        .or_else(|| (matches.len() == 1).then(|| matches[0].clone()))
+        .ok_or_else(|| {
+        AppError::new(
+            "serial_device_ambiguous",
+            "Mehrere gleichartige USB-Geräte sind angeschlossen. Bitte die Schnittstelle im Laserprofil neu auswählen.",
+        )
+    })?;
+    Ok(selected)
+}
+
+fn validated_console_command(command: &str) -> Result<&str, AppError> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err(AppError::new(
+            "console_command_empty",
+            "Bitte einen Befehl eingeben.",
+        ));
+    }
+    if command.len() > 256 || command.chars().any(char::is_control) {
+        return Err(AppError::new(
+            "console_command_invalid",
+            "Der Konsolenbefehl enthält unzulässige Zeichen oder ist zu lang.",
+        ));
+    }
+    Ok(command)
+}
+
 /// Baut den passenden Treiber aus einem Profil.
 fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
     match profile.kind {
@@ -123,6 +199,7 @@ fn driver_for(profile: &LaserProfile) -> Box<dyn MachineDriver + Send> {
 pub struct LaserService {
     pub registry: LaserRegistry,
     driver: Option<std::sync::Arc<std::sync::Mutex<Box<dyn MachineDriver + Send>>>>,
+    console_buffer: Option<studio_core::DriverConsoleBuffer>,
     driver_id: Option<String>,
     connected_id: Option<String>,
     consecutive_communication_failures: u8,
@@ -413,6 +490,7 @@ impl LaserService {
         Self {
             registry: crate::persistence::load_laser_registry(),
             driver: None,
+            console_buffer: None,
             driver_id: None,
             connected_id: None,
             consecutive_communication_failures: 0,
@@ -425,6 +503,7 @@ impl LaserService {
         Self {
             registry,
             driver: None,
+            console_buffer: None,
             driver_id: None,
             connected_id: None,
             consecutive_communication_failures: 0,
@@ -694,9 +773,13 @@ impl LaserService {
             .active_profile()
             .cloned()
             .ok_or_else(|| AppError::new("no_active_laser", "Kein Laser aktiv."))?;
+        let connection = resolved_connection(&profile.connection)?;
         self.with_driver(false, |driver| {
-            let target = connection_target(&profile);
-            driver.connect(&profile.connection).map_err(|error| {
+            let target = match &connection {
+                Connection::Netz { ip, .. } => ip.clone(),
+                Connection::Seriell { port, .. } => port.clone(),
+            };
+            driver.connect(&connection).map_err(|error| {
                 AppError::wrap(
                     "laser_connect",
                     format!("Keine Verbindung zum Laser ({target})."),
@@ -704,6 +787,10 @@ impl LaserService {
                 )
             })
         })?;
+        self.console_buffer = self
+            .driver
+            .as_ref()
+            .and_then(|driver| driver.try_lock().ok()?.console_buffer());
         self.connected_id = Some(profile.id);
         self.consecutive_communication_failures = 0;
         Ok(())
@@ -773,9 +860,9 @@ impl LaserService {
             })?
             .clone();
         if self.driver_id.as_deref() != Some(profile.id.as_str()) || self.driver.is_none() {
-            self.driver = Some(std::sync::Arc::new(std::sync::Mutex::new(driver_for(
-                &profile,
-            ))));
+            let driver = driver_for(&profile);
+            self.console_buffer = driver.console_buffer();
+            self.driver = Some(std::sync::Arc::new(std::sync::Mutex::new(driver)));
             self.driver_id = Some(profile.id.clone());
         }
         if requires_connection && self.connected_id.as_deref() != Some(profile.id.as_str()) {
@@ -784,12 +871,21 @@ impl LaserService {
                 "Laser ist nicht verbunden. Bitte zuerst ausdrücklich verbinden.",
             ));
         }
-        let mut driver = self.driver.as_ref().unwrap().lock().map_err(|_| {
-            AppError::new(
-                "laser_driver_lock",
-                "Laser-Treiber ist nicht mehr verfügbar.",
-            )
-        })?;
+        let mut driver = self
+            .driver
+            .as_ref()
+            .unwrap()
+            .try_lock()
+            .map_err(|error| match error {
+                std::sync::TryLockError::WouldBlock => AppError::new(
+                    "laser_driver_busy",
+                    "Das Gerät führt bereits eine Aktion aus.",
+                ),
+                std::sync::TryLockError::Poisoned(_) => AppError::new(
+                    "laser_driver_lock",
+                    "Laser-Treiber ist nicht mehr verfügbar.",
+                ),
+            })?;
         f(&mut driver)
     }
 
@@ -960,6 +1056,18 @@ impl LaserService {
         })
     }
 
+    pub fn unlock(&mut self) -> Result<(), AppError> {
+        self.with_driver(true, |d| {
+            d.unlock().map_err(|e| {
+                AppError::wrap(
+                    "laser_unlock",
+                    "Controller entsperren fehlgeschlagen.",
+                    e.to_string(),
+                )
+            })
+        })
+    }
+
     /// Einachsiges Jog (Z/U bzw. Dauerlauf jeder Achse). `motion` = Tippen oder
     /// Halten (ADR 0021). Ein HoldStop ohne Verbindung ist ein No-op: dann ist
     /// ohnehin nichts mehr sendbar (Verbindungsabriss). Das ist ausdrücklich
@@ -1014,6 +1122,9 @@ impl LaserService {
     /// Nicht blockierender Diagnosesnapshot für die Oberfläche. Ist der
     /// Geräte-Worker beschäftigt, bleibt die letzte Anzeige einfach stehen.
     pub fn console_snapshot(&self) -> Vec<studio_core::DriverConsoleLine> {
+        if let Some(console) = &self.console_buffer {
+            return console.snapshot();
+        }
         let Some(driver) = self.driver.as_ref() else {
             return Vec::new();
         };
@@ -1021,6 +1132,44 @@ impl LaserService {
             .try_lock()
             .map(|driver| driver.console_snapshot())
             .unwrap_or_default()
+    }
+
+    /// Sendet einen einzelnen Konsolenbefehl auf dem Geräte-Worker. Dadurch
+    /// blockieren Timeout oder Controllerantwort niemals den Renderthread.
+    pub fn send_console_command_async(
+        &mut self,
+        command: &str,
+    ) -> Result<std::sync::mpsc::Receiver<Result<(), AppError>>, AppError> {
+        let command = validated_console_command(command)?;
+        self.with_driver(true, |driver| {
+            if !driver.capabilities().console_commands {
+                return Err(AppError::new(
+                    "console_command_unsupported",
+                    "Der aktive Lasertreiber unterstützt keine Konsolenbefehle.",
+                ));
+            }
+            Ok(())
+        })?;
+        let driver = self.driver.as_ref().unwrap().clone();
+        let command = command.to_owned();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = match driver.lock() {
+                Ok(driver) => driver.send_console_command(&command).map_err(|error| {
+                    AppError::wrap(
+                        "console_command",
+                        format!("Befehl „{command}“ fehlgeschlagen."),
+                        error.to_string(),
+                    )
+                }),
+                Err(_) => Err(AppError::new(
+                    "laser_driver_lock",
+                    "Der Gerätetreiber ist nicht verfügbar.",
+                )),
+            };
+            let _ = tx.send(result);
+        });
+        Ok(rx)
     }
 
     /// Liest den aktuellen Maschinenstatus (Kopfposition) frisch vom Treiber.
