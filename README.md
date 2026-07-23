@@ -1,64 +1,63 @@
 # MkStudio
 
 > [!WARNING]
-> **MkStudio befindet sich in einem frühen, unreifen Entwicklungsstand.**
-> Die Software ist nicht für den produktiven Maschinenbetrieb freigegeben.
-> Fehler können unerwartete Bewegungen, unkontrollierte Laserleistung,
-> Sachschäden und schwere gesundheitliche Schäden verursachen.
+> **MkStudio is at an early and immature stage of development.**
+> It is not yet approved for production use with connected machinery.
+> Unexpected machine movement or laser activation may occur.
 >
-> **Jede Nutzung der Software sowie jeder Anschluss und Betrieb von Hardware
-> erfolgt ausschließlich auf eigene Verantwortung und eigenes Risiko.**
-> MkStudio ersetzt weder geeignete Schutztechnik noch Not-Aus, Einhausung,
-> Absaugung, Schutzbrille, Aufsicht oder die Sicherheitsvorgaben des
-> Maschinen- und Laserherstellers.
+> **Use of this software and any connected hardware is entirely at your own
+> responsibility and risk.** MkStudio does not replace suitable machine
+> safeguards, an emergency stop, enclosure, extraction, eye protection,
+> supervision, or the safety instructions provided by the machine and laser
+> manufacturers.
 
-MkStudio ist eine freie, native Anwendung für Entwurf, Jobvorbereitung und
-Steuerung von Laser- und CNC-nahen Controllern. Das Projekt wird aktiv
-entwickelt und legt besonderen Wert auf eine klare Trennung zwischen
-Oberfläche, Anwendungslogik, geräteunabhängigem Kern und konkreten
-Maschinentreibern.
+MkStudio is a free, native application for laser design, job preparation, and
+machine control. Its optional local Hub coordinates project revisions, assets,
+settings backups, and shared access between workstations. The project is under
+active development and emphasizes a clear separation between the user
+interface, application logic, device-independent core, and machine-specific
+drivers.
 
-## Entwicklungsstand
+## Development status
 
-MkStudio ist derzeit experimentell. Es gibt noch keine allgemeine Freigabe für
-den Betrieb einer angeschlossenen Maschine oder Laserquelle.
+MkStudio is currently experimental. There is no general release for operating
+a connected machine or laser source yet.
 
-| Bereich | Stand |
+| Area | Status |
 |---|---|
-| Native Editoroberfläche | aktiv in Entwicklung |
-| Ruida | eigener Treiber und eigener Transport, aktiv in Entwicklung |
-| grblHAL | Serial, Konsole, gepuffertes Streaming, Live-Status und Stop in Entwicklung |
-| Mini-/klassisches GRBL | gemeinsame GRBL-Familie mit kompatibler Stop-Strategie |
-| FluidNC | als weitere GRBL-Familienstrategie geplant |
-| Ethernet für GRBL-Familie | geplant |
+| Native editor | Under active development |
+| Ruida | Separate driver and transport, under active development |
+| grblHAL | Serial, console, buffered streaming, live status, and stop under development |
+| Mini/classic GRBL | Shared GRBL family with a compatible stop strategy |
+| FluidNC | Planned as another GRBL-family strategy |
+| Ethernet for the GRBL family | Planned |
+| MkStudio Hub | Optional local coordination and synchronization service, under active development |
 
-Hardwaretests erfolgen stufenweise und zunächst ohne angeschlossene
-Laserquelle. Der aktuelle technische Stand und die dokumentierten
-Hardwareprüfungen stehen in der
-[GRBLHAL-Roadmap](docs/roadmap/grblhal.md).
+Hardware testing is introduced gradually and initially performed without a
+connected laser source. The current technical status and documented hardware
+tests are tracked in the [grblHAL roadmap](docs/roadmap/grblhal.md).
 
-## Sicherheit
+## Safety
 
-Vor jedem Hardwaretest müssen mindestens folgende Punkte erfüllt sein:
+Before any hardware test, at least the following precautions should be taken:
 
-- Laserquelle abklemmen oder sicher auf `S0` beziehungsweise null Leistung
-  begrenzen, solange der jeweilige Test keine Laserleistung erfordert.
-- Physischer Not-Aus und geeignete Trennmöglichkeit müssen erreichbar sein.
-- Maschine niemals unbeaufsichtigt betreiben.
-- Arbeitsbereich freihalten und unerwartete Achsbewegungen einkalkulieren.
-- Einhausung, Absaugung sowie geeigneten Augen- und Brandschutz verwenden.
-- Konfiguration, Koordinatensystem, Endschalter und Leistungsgrenzen vor dem
-  Start unabhängig kontrollieren.
+- Disconnect the laser source or reliably limit it to `S0`/zero power unless
+  laser output is explicitly required by the test.
+- Keep a physical emergency stop or suitable power disconnect within reach.
+- Never operate the machine unattended.
+- Keep the work area clear and allow for unexpected axis movement.
+- Use a suitable enclosure, extraction, eye protection, and fire precautions.
+- Independently verify configuration, coordinate systems, limit switches, and
+  power limits before starting a job.
 
-Ein erfolgreicher Test an einem Controller ist keine Freigabe für andere
-Firmwarestände, Elektronik, Maschinen oder Laserquellen.
+A successful test on one controller does not constitute approval for other
+firmware versions, electronics, machines, or laser sources.
 
-## Bauen und starten
+## Build and run
 
-Voraussetzung ist eine aktuelle stabile
-[Rust-Toolchain](https://www.rust-lang.org/tools/install).
-Die Entwicklung und die bisherigen Hardwaretests erfolgen unter Linux. Andere
-Plattformen sind noch nicht als unterstützte Zielsysteme dokumentiert.
+An up-to-date stable [Rust toolchain](https://www.rust-lang.org/tools/install)
+is required. Development and hardware testing currently take place on Linux.
+Other platforms are not yet documented as supported targets.
 
 ```bash
 cargo build --workspace
@@ -66,47 +65,59 @@ cargo test --workspace
 cargo run --release -p studio
 ```
 
-Ein Release-Build der Anwendung entsteht mit:
+To create a release build of the application:
 
 ```bash
 cargo build --release -p studio
 ```
 
-Je nach Betriebssystem können zusätzliche native Pakete für Fenster,
-Grafikbeschleunigung und serielle Geräte erforderlich sein.
+The optional local Hub can be started separately:
 
-## Architektur
-
-```text
-studio/native       GUI und Darstellung
-        ↓
-studio/application  Anwendungsfälle und Gerätelebenszyklus
-        ↓
-studio/core         geräteunabhängige Modelle und Absichten
-        ↓
-studio/drivers      Ruida- und GRBL-Treiberfamilie
+```bash
+cargo run --release -p hub
 ```
 
-Die GUI erzeugt keine GRBL-, Ruida- oder seriellen Protokollbefehle. Ruida
-bleibt ein vollständig eigener Treiber. grblHAL, Mini-/klassisches GRBL und
-später FluidNC teilen nur die gemeinsamen Teile ihrer Protokollfamilie und
-erhalten getrennte Strategien für tatsächliche Unterschiede.
+Additional native packages for windowing, graphics acceleration, and serial
+devices may be required depending on the operating system.
 
-Die dauerhaften Architekturentscheidungen liegen unter [docs/adr](docs/adr).
+## Architecture
 
-## Mitwirken
+```text
+studio/native       User interface and presentation
+        ↓
+studio/application  Use cases and device lifecycle
+        ↓
+studio/core         Device-independent models and intents
+        ↓
+studio/drivers      Ruida driver and GRBL driver family
 
-Fehlerberichte, nachvollziehbare Hardwarebeobachtungen, Dokumentation und
-Beiträge sind willkommen. Bei maschinenwirksamen Änderungen bitte immer
-Controller, Firmwarestand, Anschlussart und sichere Testbedingungen angeben.
-Keine Tests mit realer Laserleistung voraussetzen oder ohne deutliche Warnung
-vorschlagen.
+hub                 Optional local coordination and synchronization service
+```
 
-## Lizenz
+The UI does not generate GRBL, Ruida, or serial protocol commands. Ruida
+remains a fully independent driver. grblHAL, Mini/classic GRBL, and eventually
+FluidNC share only the common parts of their protocol family and use separate
+strategies for actual differences.
 
-MkStudio ist unter der
-[GNU General Public License Version 3](LICENSE), ausschließlich Version 3
-(`GPL-3.0-only`), veröffentlicht.
+The Hub distributes project revisions and assets, stores workstation backups,
+and coordinates shared Ethernet-device leases. It is never required for local
+editing or saving, and it does not send jobs or machine commands.
 
-Abhängigkeiten und eingebundene Fremdkomponenten behalten ihre jeweiligen
-Lizenzen.
+Long-term architectural decisions are documented in [docs/adr](docs/adr).
+
+## Contributing
+
+Bug reports, reproducible hardware observations, documentation, and
+contributions are welcome. For changes that affect machinery, please include
+the controller, firmware version, connection type, and safe test conditions.
+Do not assume tests with real laser output or suggest them without a clear
+warning.
+
+## License
+
+MkStudio is released under the
+[GNU General Public License Version 3](LICENSE), version 3 only
+(`GPL-3.0-only`).
+
+Dependencies and bundled third-party components retain their respective
+licenses.
